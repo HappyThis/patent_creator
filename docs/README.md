@@ -2,7 +2,7 @@
 
 ## 当前文档
 
-当前 `docs` 目录包含 8 份核心设计文档：
+当前 `docs` 目录包含 11 份核心设计文档：
 
 1. [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
 2. [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
@@ -12,6 +12,9 @@
 6. [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
 7. [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
 8. [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
+9. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
+10. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
+11. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
 
 ## 是否需要合并
 
@@ -27,6 +30,9 @@
 6. `Session 事件日志 Schema v1` 负责收敛会话过程记录格式
 7. `工作区初始化规范 v1` 负责定义内部项目工作区的初始化方式
 8. `API 设计规范 v1` 负责定义 React 与 FastAPI 之间的接口协议
+9. `render_ast Schema v1` 负责定义后端生成、前端消费的统一展示模型
+10. `前端交互规范 v1` 负责定义三栏页面的具体交互方式
+11. `一轮内部时序 v1` 负责定义一次用户请求在系统内部如何运行和收束
 
 它们虽然相关，但关注点仍然不同。全部继续合并成一份总文档后，后续修改会变得笨重。
 
@@ -42,8 +48,11 @@
 - 保留 `Session 事件日志 Schema v1` 独立
 - 保留 `工作区初始化规范 v1` 独立
 - 保留 `API 设计规范 v1` 独立
+- 保留 `render_ast Schema v1` 独立
+- 保留 `前端交互规范 v1` 独立
+- 保留 `一轮内部时序 v1` 独立
 
-当前阶段保持 8 份核心文档更利于迭代。
+当前阶段保持 11 份核心文档更利于迭代。
 
 ## 文档依赖关系
 
@@ -57,6 +66,9 @@
 6. [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
 7. [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
 8. [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
+9. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
+10. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
+11. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
 
 依赖关系可以理解为：
 
@@ -76,6 +88,12 @@
   - 依赖交底书结构、agent 基本原则、tools 设计和 session 日志规范
 - `API 设计规范 v1`
   - 依赖交底书结构、agent 基本原则、tools 设计、session 日志规范和工作区初始化规范
+- `render_ast Schema v1`
+  - 依赖交底书结构和 API 设计规范
+- `前端交互规范 v1`
+  - 依赖 API 设计规范和 render_ast Schema
+- `一轮内部时序 v1`
+  - 依赖 agent 基本原则、tools 设计、session 日志规范、API 设计规范和前端交互规范
 
 ## 当前产品形态
 

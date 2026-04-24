@@ -174,6 +174,7 @@
 - 主 agent 不负责上下文管理
 - 主 agent 不直接承担持久化职责
 - 主 agent 可以决定是否读取正文、是否调用子 agent
+- 主 agent 本身支持多轮 tool use 的 agent loop
 
 ### 2. 用户当前输入
 
@@ -242,6 +243,8 @@
 - 不负责什么任务
 - 输出格式是什么
 - 不能越权做什么
+- 自己支持多轮 tool use
+- 但不能继续调用其他 agent
 
 ### 2. 主 agent 下发的具体任务
 
@@ -269,6 +272,12 @@
 - 整篇交底书全文
 - 全量 session 历史
 - 无关章节正文
+
+补充说明：
+
+- 子 agent 虽然上下文更窄，但仍然支持 agent loop
+- 当上下文不足时，子 agent 可以继续调用工具补充信息
+- 但子 agent 不允许继续调用其他子 agent
 
 ### 4. 必要的工具读取结果
 
@@ -389,6 +398,29 @@ v1 中，启动子 agent 统一使用一个工具：
 因此，v1 的核心原则是：
 
 **主 agent 只负责做意图级决策，不负责显式搬运上下文。**
+
+### 三种 `call_type` 的装配规则
+
+#### 1. `forked_context`
+
+- `100%` 继承当前调用方上下文
+- 包括系统提示词
+
+#### 2. `rich_context_specialist`
+
+- 继承当前调用方的非系统提示词部分
+- 使用自己的 system prompt
+
+#### 3. `task_only_specialist`
+
+- 只继承 `goal`
+- 不继承其他上下文
+
+说明：
+
+- `forked_context` 更像复制一个当前调用方的完整现场
+- `rich_context_specialist` 更像带着当前现场，切换到一个专门子 agent 的脑子
+- `task_only_specialist` 更像只给任务，不给背景
 
 ## 十、子 agent 的最小输出协议
 

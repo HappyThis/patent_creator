@@ -50,12 +50,23 @@ v1 阶段先收敛为 4 个业务子 agent：
 5. 上下文管理器按本次调用类型装配上下文
 6. 主 agent 只在必要且信息足够时调用子 agent
 
+当前类型定义如下：
+
+- `forked_context`
+  - 100% 继承当前调用方上下文，包括系统提示词
+- `rich_context_specialist`
+  - 继承当前调用方的非系统提示词部分，并使用自己的 system prompt
+- `task_only_specialist`
+  - 只继承 `goal`
+
 补充说明：
 
 - 子 agent 不是常驻参与者
 - 子 agent 的目标是承担局部深加工任务
 - 主 agent 应尽量避免在轻量对话阶段频繁调用子 agent
 - 如果资料和上下文还不足以支撑有效产出，应优先继续收集信息
+- 子 agent 支持多轮工具调用的 agent loop
+- 但子 agent 不允许继续调用其他 agent
 
 ## 二、子 agent 清单
 

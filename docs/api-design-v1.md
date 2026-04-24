@@ -285,11 +285,32 @@ event: agent_output
 data: {"text":"我先补全技术方案章节中的处理流程。"}
 ```
 
-#### `tool_status`
+#### `tool_call_started`
 
 ```text
-event: tool_status
-data: {"phase":"writing","message":"正在生成章节内容"}
+event: tool_call_started
+data: {
+  "call_id": "call_001",
+  "scope": "main",
+  "tool": "execute_subagent",
+  "summary": "已启动 section_writer"
+}
+```
+
+#### `tool_call_finished`
+
+```text
+event: tool_call_finished
+data: {
+  "call_id": "call_001",
+  "scope": "main",
+  "tool": "execute_subagent",
+  "summary": "section_writer 已完成",
+  "result": {
+    "status": "success",
+    "output": "我已完成技术方案章节的补写。"
+  }
+}
 ```
 
 #### `document_changed`
@@ -318,6 +339,8 @@ data: {
 
 前端处理建议：
 
+- 收到 `tool_call_started` 后，在 Chat 区展示进行中的执行节点
+- 收到 `tool_call_finished` 后，将执行节点切换为已完成，并默认折叠结果详情
 - 收到 `document_changed` 后，刷新目录区与渲染区
 - 收到 `round_finished` 后，更新 chat 区回合状态
 
