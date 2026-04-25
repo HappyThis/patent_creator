@@ -15,6 +15,7 @@
 - [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
 - [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
 - [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
+- [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
 
 ## 目标
 
@@ -40,10 +41,14 @@
 - 当前交底书文档
 - session 事件日志
 - 资源文件
-- 参考资料
 - 导出结果
 - 运行时临时文件
 - git 版本历史
+
+实现约束：
+
+- v1 使用本地文件系统，不引入数据库
+- Python 依赖通过 `uv` 管理
 
 ## 二、初始化时机
 
@@ -64,7 +69,6 @@ workspace/
   disclosure.json
   sessions/
   assets/
-  refs/
   exports/
   runtime/
 ```
@@ -125,22 +129,7 @@ sessions/
 - 渲染中间产物
 - 内部图片资源
 
-### 5. refs/
-
-用于保存用户提供的参考资料副本或索引。
-
-例如：
-
-- 用户给出的本地文件副本
-- 抓取后的网页内容
-- 系统缓存的外部参考资料
-
-说明：
-
-- `refs/` 表示外部输入资料
-- `assets/` 表示系统内部生成或处理后的资源
-
-### 6. exports/
+### 5. exports/
 
 用于保存导出的结果文件。
 
@@ -148,7 +137,7 @@ sessions/
 
 - Markdown 导出结果
 
-### 7. runtime/
+### 6. runtime/
 
 用于保存运行时临时文件。
 
@@ -169,14 +158,13 @@ sessions/
 1. 创建工作区根目录
 2. 创建 `sessions/`
 3. 创建 `assets/`
-4. 创建 `refs/`
-5. 创建 `exports/`
-6. 创建 `runtime/`
-7. 写入 `project.json`
-8. 写入标准骨架 `disclosure.json`
-9. 初始化 git 仓库
-10. 写入 `.gitignore`
-11. 执行首次 commit
+4. 创建 `exports/`
+5. 创建 `runtime/`
+6. 写入 `project.json`
+7. 写入标准骨架 `disclosure.json`
+8. 初始化 git 仓库
+9. 写入 `.gitignore`
+10. 执行首次 commit
 
 ## 五、初始 disclosure.json
 
@@ -189,7 +177,10 @@ sessions/
   "meta": {
     "document_type": "patent_disclosure",
     "schema_version": "v1",
-    "title": "未命名交底书"
+    "title": "未命名交底书",
+    "id_counters": {
+      "block": 0
+    }
   },
   "sections": [
     {
@@ -211,14 +202,56 @@ sessions/
       "children": []
     },
     {
+      "id": "existing_solution",
+      "title": "现有技术方案",
+      "blocks": [],
+      "children": []
+    },
+    {
+      "id": "existing_solution_defects",
+      "title": "现有技术缺陷",
+      "blocks": [],
+      "children": []
+    },
+    {
+      "id": "technical_problem",
+      "title": "要解决的技术问题",
+      "blocks": [],
+      "children": []
+    },
+    {
       "id": "technical_solution",
       "title": "技术方案",
       "blocks": [],
       "children": []
     },
     {
+      "id": "key_innovations",
+      "title": "关键创新点",
+      "blocks": [],
+      "children": []
+    },
+    {
       "id": "embodiments",
       "title": "具体实施方式",
+      "blocks": [],
+      "children": []
+    },
+    {
+      "id": "technical_effects",
+      "title": "技术效果",
+      "blocks": [],
+      "children": []
+    },
+    {
+      "id": "drawings",
+      "title": "附图说明",
+      "blocks": [],
+      "children": []
+    },
+    {
+      "id": "claim_suggestions",
+      "title": "权利要求建议",
       "blocks": [],
       "children": []
     }
@@ -231,6 +264,7 @@ sessions/
 - 前端目录区域可以立即渲染
 - 渲染区可以立即展示一份空骨架交底书
 - agent 一开始就能围绕标准章节工作
+- 标准章节 id 与工具、渲染和日志保持一致
 
 ## 六、git 初始化规则
 
@@ -284,7 +318,6 @@ workspace/
   disclosure.json
   sessions/
   assets/
-  refs/
   exports/
   runtime/
   .git/

@@ -10,132 +10,160 @@
 - [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
 - [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
 
-本文档当前只定义：
+本文档定义：
 
 - 工具清单
 - 工具职责
-- 当前阶段的取舍结论
-- 工具输入输出协议方案
+- 文档读写工具协议
+- 子 agent 调度工具协议
+- 通用命令工具协议
 
-本文档暂不定义：
-
-- 每个工具的底层实现细节
+本文档不定义每个工具的底层实现细节。
 
 ## 一、总体原则
 
 v1 工具设计遵循以下原则：
 
-1. 工具尽量少而清晰
-2. 交底书中间结果使用专用工具
-3. 其余通用能力尽量统一收敛
-4. 底层实现可以通过命令行完成
-5. 主 agent 与子 agent 都可以调用工具
+1. 工具数量保持收敛。
+2. 交底书正文读写只能通过专用文档工具完成。
+3. 文档定位统一使用 `section_id` 和 `block_id`。
+4. 文档工具负责 id 索引、schema 校验、权限控制和变更追踪。
+5. 主 agent 与子 agent 的工具权限不同。
+6. 子 agent 通过 `execute_subagent` 调度工具启动。
+7. 通用命令工具不用于直接修改 `disclosure.json`。
 
-## 二、当前建议工具清单
+## 二、工具清单
 
-### 1. JSON 文档工具
+v1 保留以下核心工具：
 
-- `get_json_tree`
-- `read_json_path`
-- `write_json_path`
+1. `document_read`
+2. `document_edit`
+3. `execute_subagent`
+4. `exec_command`
 
-说明：
+### 1. document_read
 
-- 这些工具围绕交底书 JSON 文档工作
-- 路径语义基于 JSON Pointer
-- `write_json_path` 在 v1 中先按整值替换理解
+`document_read` 是交底书文档的只读入口。
 
-### 2. 子 agent 调用工具
+它负责：
 
-- `execute_subagent`
+- 读取文档元信息
+- 读取目录
+- 按 `section_id` 读取章节
+- 按 `block_id` 读取块级内容
+- 搜索块级文本
 
-说明：
+`document_read` 不产生副作用。
 
-- 子 agent 在概念层仍然是 agent
-- 但在调用层统一通过工具方式触发
+### 2. document_edit
 
-### 3. 通用命令工具
+`document_edit` 是交底书文档的唯一写入入口。
 
-- `exec_command`
+它负责：
 
-说明：
+- 校验写入操作
+- 自动生成新增 block id
+- 原子写入 `disclosure.json`
+- 返回变更的 section id 和 block id
 
-- `exec_command` 用于执行通用命令行操作
-- 本地文件读取、目录浏览、git 操作等通用能力统一收敛到这个工具
-- 不再拆成 `list_files`、`read_file`、`git_log` 等细粒度独立工具
-- 交底书 JSON 中间结果读写仍然保留专用工具，不并入该工具
+`document_edit` 只能由主 agent 调用。
 
-## 三、关于自动提交
+### 3. execute_subagent
 
-当前结论：
+`execute_subagent` 是子 agent 调度工具。
 
-- `exec_command` 可以承载 git 相关操作
-- 自动提交策略已初步确定
+它负责：
 
-当前策略：
+- 启动指定子 agent
+- 按 `call_type` 装配上下文
+- 返回子 agent 的统一结果结构
 
-1. 以“一轮会话”为提交粒度
-2. 一轮会话指：`用户一次输入 -> 主 agent 完成一次对用户响应`
-3. 如果这一轮会话中发生了中间文件变更，则在主 agent 完成响应后执行一次 `git commit`
-4. 如果这一轮会话中没有发生文件变更，则不执行 `git commit`
-5. `git commit` 的消息不做自由摘要生成，而是直接基于这一轮写入过的 pointer 路径生成
+`execute_subagent` 只能由主 agent 调用。
 
-说明：
+### 4. exec_command
 
-- 这里的“中间文件变更”主要指交底书文档或相关项目文件被实际写入
-- 不要求每次单个工具写入后立刻提交
-- 提交点在一轮会话结束时统一触发一次
+`exec_command` 用于执行通用命令行操作。
 
-提交消息格式：
+适合：
 
-```text
-update disclosure
+- 文件浏览
+- 调试命令
+- git 操作
+- 非交底书真相源的辅助处理
 
-Time: YYYY-MM-DD HH:mm
+不适合：
 
-Change pointers:
-- /pointer1
-- /pointer2
-- /pointer3
-```
+- 直接修改 `disclosure.json`
+- 绕过 `document_edit` 执行文档写入
 
-说明：
+## 三、工具权限
 
-- 第一行固定为 `update disclosure`
-- 时间使用人类可读时间
-- `Change pointers` 直接列出这一轮内所有实际写入过的 JSON Pointer 路径
-- pointer 列表在写入 commit message 前必须先去重
-- pointer 列表按修改量排序，修改量可按对应写入内容的字符长度近似衡量
-- commit message 中最多保留 10 条 pointer
-- 如果发生截断，需要在 commit message 中说明截断原因以及剩余未展示数量
-- 不额外依赖自然语言摘要生成
-
-截断示例：
+v1 工具权限如下：
 
 ```text
-update disclosure
+main_agent:
+  - document_read
+  - document_edit
+  - execute_subagent
+  - exec_command
 
-Time: 2026-04-23 18:10
-
-Change pointers:
-- /sections/6
-- /sections/7/children/1
-- /meta/title
-
-Truncated: only top 10 pointers are shown, 4 more pointers omitted due to message length policy.
+subagents:
+  - document_read
+  - exec_command
 ```
 
-## 四、后续待讨论项
+约束：
 
-1. `execute_subagent` 的返回结果是否还需要进一步收敛
-2. `exec_command` 的执行边界
-3. commit message 中截断说明的最终固定文案是否需要进一步统一
+1. 子 agent 不允许调用 `document_edit`。
+2. 子 agent 不允许调用 `execute_subagent`。
+3. 执行器必须在工具层检查权限。
+4. 权限失败返回 `permission_denied`。
 
-## 五、工具输入输出协议方案
+## 四、文档 id 体系
 
-### 通用规则
+交底书文档使用 id-first 定位。
 
-所有 tool 的输入统一为 JSON object。
+### 1. section id
+
+`section.id` 使用语义化 `snake_case`，全文唯一。
+
+标准章节示例：
+
+```text
+title
+technical_field
+background_technology
+existing_solution
+existing_solution_defects
+technical_problem
+technical_solution
+key_innovations
+embodiments
+technical_effects
+drawings
+claim_suggestions
+```
+
+### 2. block id
+
+`block.id` 使用递增生成 id，全文唯一。
+
+格式：
+
+```text
+blk_000001
+blk_000002
+blk_000003
+```
+
+规则：
+
+1. 新增 block 时由 `document_edit` 自动生成。
+2. 替换 block 时保留原 `block_id`。
+3. agent 不为新增 block 手写 id。
+4. `list` item 与 `table` cell 在 v1 中不单独建立 id。
+
+## 五、工具统一返回结构
 
 所有 tool 的输出统一采用外层结构：
 
@@ -148,147 +176,512 @@ Truncated: only top 10 pointers are shown, 4 more pointers omitted due to messag
 
 说明：
 
-- `status` 表示工具调用层是否成功
-- `output` 表示工具返回结果
-- 对工具来说，`output` 可以是结构化对象
-- 对子 agent 来说，最终工作结论仍然是自然语言字符串
+- `status` 表示工具调用层是否成功。
+- `output` 表示工具返回结果。
+- 命令本身、子 agent 任务本身可能有自己的内层状态。
 
-当前工作区与当前交底书文档默认都是隐式对象，不需要在每次调用时额外传入。
+## 六、document_read 协议
 
-### 1. get_json_tree
-
-#### 输入
+### 通用输入
 
 ```json
-{}
+{
+  "action": "get_section"
+}
 ```
 
-#### 成功输出
+`action` 支持：
+
+```text
+get_meta
+get_outline
+get_section
+get_block
+search_blocks
+```
+
+### 1. get_meta
+
+输入：
+
+```json
+{
+  "action": "get_meta"
+}
+```
+
+成功输出：
 
 ```json
 {
   "status": "success",
   "output": {
-    "tree": {
-      "path": "/",
-      "type": "object",
-      "children": [
-        {
-          "key": "meta",
-          "path": "/meta",
-          "type": "object"
-        },
-        {
-          "key": "sections",
-          "path": "/sections",
-          "type": "array"
-        }
-      ]
+    "meta": {
+      "document_type": "patent_disclosure",
+      "schema_version": "v1",
+      "title": "一种图像检测方法"
     }
   }
 }
 ```
 
-#### 失败输出
+### 2. get_outline
+
+输入：
+
+```json
+{
+  "action": "get_outline"
+}
+```
+
+成功输出：
+
+```json
+{
+  "status": "success",
+  "output": {
+    "sections": [
+      {
+        "id": "technical_solution",
+        "title": "技术方案",
+        "children": [
+          {
+            "id": "processing_flow",
+            "title": "处理流程"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 3. get_section
+
+输入：
+
+```json
+{
+  "action": "get_section",
+  "section_id": "technical_solution",
+  "include_children": true
+}
+```
+
+成功输出：
+
+```json
+{
+  "status": "success",
+  "output": {
+    "section": {
+      "id": "technical_solution",
+      "title": "技术方案",
+      "blocks": [],
+      "children": []
+    }
+  }
+}
+```
+
+失败输出：
 
 ```json
 {
   "status": "failed",
   "output": {
-    "message": "当前交底书文档不存在或无法解析为 JSON。"
+    "code": "section_not_found",
+    "message": "section_id 不存在：technical_solution"
   }
 }
 ```
 
-### 2. read_json_path
+### 4. get_block
 
-#### 输入
+输入：
 
 ```json
 {
-  "path": "/sections/0/title"
+  "action": "get_block",
+  "block_id": "blk_000001"
+}
+```
+
+成功输出：
+
+```json
+{
+  "status": "success",
+  "output": {
+    "section_id": "technical_solution",
+    "block": {
+      "id": "blk_000001",
+      "type": "paragraph",
+      "text": "本发明提供一种图像检测方法。"
+    }
+  }
+}
+```
+
+### 5. search_blocks
+
+输入：
+
+```json
+{
+  "action": "search_blocks",
+  "query": "低算力",
+  "section_id": "technical_solution"
 }
 ```
 
 说明：
 
-- `path` 使用 JSON Pointer
+- `query` 为文本查询。
+- `section_id` 可选。
+- v1 可采用简单文本包含匹配。
 
-#### 成功输出
-
-```json
-{
-  "status": "success",
-  "output": {
-    "path": "/sections/0/title",
-    "value": "技术方案"
-  }
-}
-```
-
-#### 失败输出
-
-```json
-{
-  "status": "failed",
-  "output": {
-    "path": "/sections/0/title",
-    "message": "指定路径不存在。"
-  }
-}
-```
-
-### 3. write_json_path
-
-#### 输入
-
-```json
-{
-  "path": "/sections/0/title",
-  "value": "改进后的技术方案"
-}
-```
-
-v1 规则：
-
-- 只做整值替换
-- 不做 merge
-- 不做 append
-- 路径必须已存在
-
-#### 成功输出
+成功输出：
 
 ```json
 {
   "status": "success",
   "output": {
-    "path": "/sections/0/title",
-    "written": true
+    "matches": [
+      {
+        "section_id": "technical_solution",
+        "block_id": "blk_000001",
+        "text": "本发明提供一种适用于低算力设备的图像检测方法。"
+      }
+    ]
   }
 }
 ```
 
-#### 失败输出
+## 七、document_edit 协议
+
+`document_edit` 接收一组 `operations`，按顺序原子执行。
+
+通用输入：
+
+```json
+{
+  "operations": []
+}
+```
+
+通用成功输出：
+
+```json
+{
+  "status": "success",
+  "output": {
+    "changed_section_ids": ["technical_solution"],
+    "changed_block_ids": ["blk_000014"],
+    "operations_applied": 1,
+    "primary_section_id": "technical_solution",
+    "primary_block_id": "blk_000014",
+    "change_scope": "block_appended"
+  }
+}
+```
+
+通用失败输出：
 
 ```json
 {
   "status": "failed",
   "output": {
-    "path": "/sections/0/title",
-    "message": "指定路径不存在，无法写入。"
+    "code": "schema_validation_failed",
+    "message": "paragraph block 缺少 text 字段。"
   }
 }
 ```
 
-### 4. execute_subagent
+### 原子写入规则
 
-#### 输入
+`document_edit` 的执行流程为：
+
+```text
+读取 disclosure.json
+-> 构建 id 索引
+-> 校验全部 operations
+-> 在内存副本上应用全部 operations
+-> 校验修改后的整份文档
+-> 写入临时文件
+-> rename 覆盖 disclosure.json
+-> 返回 changed ids 与主定位字段
+```
+
+约束：
+
+1. 全部 operation 校验通过后才能写入。
+2. 任一 operation 失败时不修改文件。
+3. 同一 project 同时只能有一个 `document_edit` 写入。
+4. 写入工具不直接执行 SSE 推送或 git commit。
+
+返回字段说明：
+
+- `changed_section_ids`：本次变更影响到的 section id 集合
+- `changed_block_ids`：本次新增或替换的 block id 集合
+- `operations_applied`：实际成功应用的 operation 数量
+- `primary_section_id`：本次变更的主要 section
+- `primary_block_id`：本次变更的主要 block，没有则为 `null`
+- `change_scope`：本次变更的主要语义范围
+
+`change_scope` 支持：
+
+```text
+meta_updated
+block_appended
+block_replaced
+section_blocks_replaced
+child_section_appended
+section_replaced
+```
+
+### 支持的 edit op
+
+v1 支持：
+
+```text
+update_meta
+replace_section_blocks
+append_block
+replace_block
+append_child_section
+replace_section
+```
+
+v1 不支持：
+
+```text
+delete_block
+move_block
+delete_section
+move_section
+insert_block_at
+json_patch
+merge_json_path
+```
+
+### 1. update_meta
+
+输入：
 
 ```json
 {
-  "agent_id": "solution_refiner",
-  "goal": "将当前讨论内容整理成一个更完整的技术方案，并指出仍需用户确认的关键决策。",
-  "call_type": "rich_context_specialist"
+  "operations": [
+    {
+      "op": "update_meta",
+      "fields": {
+        "title": "一种图像检测方法"
+      }
+    }
+  ]
+}
+```
+
+说明：
+
+- 只能更新允许的 meta 字段。
+- `id_counters` 由系统维护，不由 agent 直接修改。
+- `primary_section_id` 为 `null`。
+- `primary_block_id` 为 `null`。
+- `change_scope` 为 `meta_updated`。
+
+### 2. replace_section_blocks
+
+输入：
+
+```json
+{
+  "operations": [
+    {
+      "op": "replace_section_blocks",
+      "section_id": "technical_solution",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "本发明提供一种图像检测方法。"
+        }
+      ]
+    }
+  ]
+}
+```
+
+说明：
+
+- 新 blocks 不携带 `id`。
+- 工具为每个新 block 生成 id。
+- 返回的 `changed_section_ids` 包含目标 section。
+- 返回的 `changed_block_ids` 包含全部新生成的 block id。
+- `primary_section_id` 等于目标 `section_id`。
+- `primary_block_id` 等于第一个新生成的 block id，没有 block 时为 `null`。
+- `change_scope` 为 `section_blocks_replaced`。
+
+### 3. append_block
+
+输入：
+
+```json
+{
+  "operations": [
+    {
+      "op": "append_block",
+      "section_id": "technical_solution",
+      "block": {
+        "type": "paragraph",
+        "text": "本发明的处理流程包括图像获取、特征提取和结果输出。"
+      }
+    }
+  ]
+}
+```
+
+说明：
+
+- 新 block 不携带 `id`。
+- 工具生成 `block_id`。
+- `primary_section_id` 等于目标 `section_id`。
+- `primary_block_id` 等于新生成的 `block_id`。
+- `change_scope` 为 `block_appended`。
+
+### 4. replace_block
+
+输入：
+
+```json
+{
+  "operations": [
+    {
+      "op": "replace_block",
+      "block_id": "blk_000001",
+      "block": {
+        "type": "paragraph",
+        "text": "本发明提供一种适用于低算力设备的图像检测方法。"
+      }
+    }
+  ]
+}
+```
+
+说明：
+
+- 替换后的 block 继续使用原 `block_id`。
+- 输入 block 不携带 `id`。
+- `primary_section_id` 等于该 block 所属 section id。
+- `primary_block_id` 等于原 `block_id`。
+- `change_scope` 为 `block_replaced`。
+
+### 5. append_child_section
+
+输入：
+
+```json
+{
+  "operations": [
+    {
+      "op": "append_child_section",
+      "parent_section_id": "technical_solution",
+      "section": {
+        "id": "processing_flow",
+        "title": "处理流程",
+        "blocks": [],
+        "children": []
+      }
+    }
+  ]
+}
+```
+
+说明：
+
+- 新 section 的 `id` 必须全文唯一。
+- v1 只支持两级章节。
+- 如果 section id 冲突，返回 `duplicate_section_id`。
+- `changed_section_ids` 包含父 section 和新 section。
+- `primary_section_id` 等于新 section id。
+- `primary_block_id` 等于新 section 内第一个新生成的 block id，没有 block 时为 `null`。
+- `change_scope` 为 `child_section_appended`。
+
+### 6. replace_section
+
+输入：
+
+```json
+{
+  "operations": [
+    {
+      "op": "replace_section",
+      "section_id": "technical_solution",
+      "section": {
+        "id": "technical_solution",
+        "title": "技术方案",
+        "blocks": [],
+        "children": []
+      }
+    }
+  ]
+}
+```
+
+说明：
+
+- 替换后的 section 必须保留同一个 `section_id`。
+- section 内新增 block 由工具补齐 id。
+- `changed_section_ids` 包含目标 `section_id`。
+- `changed_block_ids` 包含替换后 section 树中的全部 block id。
+- `primary_section_id` 等于目标 `section_id`。
+- `primary_block_id` 等于替换后第一个 block id，没有 block 时为 `null`。
+- `change_scope` 为 `section_replaced`。
+
+## 八、document_edit 校验规则
+
+写入前至少校验：
+
+1. 顶层只包含 `meta` 和 `sections`。
+2. `section.id` 全文唯一。
+3. `block.id` 全文唯一。
+4. section 必须包含 `id`、`title`、`blocks`、`children`。
+5. block 必须包含 `id` 和 `type`。
+6. block `type` 只能是 `paragraph`、`list`、`image`、`table`。
+7. `paragraph` 必须包含 `text`。
+8. `list` 必须包含 `ordered` 和 `items`。
+9. `image` 必须包含 `src`，可选 `caption` 和 `alt`。
+10. `table` 必须包含 `columns` 和 `rows`。
+11. v1 不允许超过两级章节。
+
+## 九、document_edit 错误码
+
+v1 固定错误码：
+
+```text
+invalid_action
+invalid_operation
+section_not_found
+block_not_found
+duplicate_section_id
+duplicate_block_id
+schema_validation_failed
+permission_denied
+write_conflict
+io_error
+```
+
+## 十、execute_subagent 协议
+
+### 输入
+
+```json
+{
+  "agent_id": "section_writer",
+  "goal": "为 technical_solution 生成候选正文 blocks。",
+  "call_type": "rich_context_specialist",
+  "target_section_id": "technical_solution",
+  "target_block_id": null
 }
 ```
 
@@ -297,52 +690,135 @@ v1 规则：
 - `agent_id`：调用哪个子 agent
 - `goal`：对子 agent 的自然语言任务描述
 - `call_type`：本次调用采用哪种上下文装配策略
+- `target_section_id`：可选，目标章节
+- `target_block_id`：可选，目标 block
 
-#### 成功输出（子 agent 成功）
+### 成功输出：子 agent 成功
 
 ```json
 {
   "status": "success",
   "output": {
-    "agent_id": "solution_refiner",
+    "agent_id": "section_writer",
+    "call_type": "rich_context_specialist",
+    "target_section_id": "technical_solution",
+    "target_block_id": null,
     "result": {
       "status": "success",
-      "output": "我已将当前讨论内容整理为一个可写作的技术方案，当前仍需确认是否强调轻量化网络结构。"
+      "summary": "已生成技术方案章节候选正文。",
+      "proposal": {
+        "type": "document_edit_proposal",
+        "target_section_id": "technical_solution",
+        "intent": "replace_section_blocks",
+        "confidence": 0.84,
+        "rationale": "当前章节适合整体写入候选 blocks。",
+        "operations": [
+          {
+            "op": "replace_section_blocks",
+            "section_id": "technical_solution",
+            "blocks": [
+              {
+                "type": "paragraph",
+                "text": "本发明提供一种图像检测方法。"
+              }
+            ]
+          }
+        ]
+      },
+      "questions": [],
+      "warnings": []
     }
   }
 }
 ```
 
-#### 成功输出（子 agent 失败）
+### 成功输出：子 agent 任务失败
 
 ```json
 {
   "status": "success",
   "output": {
-    "agent_id": "solution_refiner",
+    "agent_id": "section_writer",
+    "call_type": "rich_context_specialist",
+    "target_section_id": "technical_solution",
+    "target_block_id": null,
     "result": {
       "status": "failed",
-      "output": "当前信息不足，无法稳定收敛技术方案。缺少现有技术缺陷描述。"
+      "summary": "当前信息不足，无法生成稳定候选正文。",
+      "proposal": null,
+      "questions": [
+        "该方案主要强调检测精度，还是低算力实时性？"
+      ],
+      "warnings": []
     }
   }
 }
 ```
 
-#### 失败输出（工具层失败）
+说明：
+
+- 外层 `status=success` 表示调度工具成功启动并拿到子 agent 结构化结果。
+- 内层 `result.status=failed` 表示子 agent 判断本次任务无法完成。
+
+### 失败输出：调度工具失败
 
 ```json
 {
   "status": "failed",
   "output": {
-    "agent_id": "solution_refiner",
-    "message": "子 agent 调用失败或未能启动。"
+    "code": "subagent_not_found",
+    "message": "不存在的子 agent：foo_writer",
+    "agent_id": "foo_writer"
   }
 }
 ```
 
-### 5. exec_command
+工具层失败错误码：
 
-#### 输入
+```text
+subagent_not_found
+invalid_call_type
+permission_denied
+subagent_timeout
+subagent_runtime_error
+invalid_subagent_result
+```
+
+## 十一、子 agent 统一返回结构
+
+所有子 agent 返回统一外层结构：
+
+```json
+{
+  "status": "success | failed",
+  "summary": "string",
+  "proposal": {},
+  "questions": [],
+  "warnings": []
+}
+```
+
+字段说明：
+
+- `status`：子 agent 对本次任务的完成状态
+- `summary`：给主 agent 的简短结论
+- `proposal`：结构化结果
+- `questions`：需要补充确认的问题
+- `warnings`：风险、假设、不确定性
+
+`proposal.type` 支持：
+
+```text
+document_edit_proposal
+analysis_result
+review_report
+```
+
+只有 `document_edit_proposal.operations` 可以作为 `document_edit.operations` 的候选输入，且必须由主 agent 决定是否采纳。
+
+## 十二、exec_command 协议
+
+输入：
 
 ```json
 {
@@ -350,11 +826,7 @@ v1 规则：
 }
 ```
 
-说明：
-
-- `command` 是要执行的命令字符串
-
-#### 成功输出（命令成功）
+成功输出：命令成功
 
 ```json
 {
@@ -362,13 +834,13 @@ v1 规则：
   "output": {
     "command": "git log --oneline -5",
     "exit_code": 0,
-    "stdout": "abc123 feat: update disclosure\n...",
+    "stdout": "abc123 update disclosure\n",
     "stderr": ""
   }
 }
 ```
 
-#### 成功输出（命令失败）
+成功输出：命令失败
 
 ```json
 {
@@ -382,50 +854,96 @@ v1 规则：
 }
 ```
 
-#### 失败输出（工具层失败）
+失败输出：工具层失败
 
 ```json
 {
   "status": "failed",
   "output": {
+    "code": "invalid_operation",
     "message": "command 字段缺失。"
   }
 }
 ```
 
-#### 语义约定
+语义约定：
 
-`exec_command.status` 表示的是：
+- `exec_command.status` 表示工具调用层是否成功返回结果。
+- `output.exit_code` 表示命令本身是否执行成功。
+- `exec_command` 不用于直接修改 `disclosure.json`。
 
-- 工具调用层是否成功返回结果
+执行约定：
 
-它不直接表示命令本身是否执行成功。
+- 默认工作目录为当前 project 工作区根目录。
+- `exec_command` 可以读取任意文件，只要运行时权限允许。
+- `exec_command` 可以执行网络命令，只要运行时权限允许。
+- `exec_command` 可以读写工作区内的普通辅助文件。
+- 交底书正文真相源的修改仍然只能通过 `document_edit` 完成。
+- 超时时间由 agent 在调用时按任务给出。
+- `stdout` 和 `stderr` 的截断策略由 agent 按本轮任务需要决定。
 
-命令本身是否执行成功，应通过以下字段判断：
+## 十三、自动提交
 
-- `output.exit_code`
+正文历史版本通过 git 管理。
 
-也就是说：
+提交策略：
 
-- `status=success` 代表命令已经被执行，并且工具成功返回了执行结果
-- `exit_code=0` 代表命令执行成功
-- `exit_code!=0` 代表命令执行失败
-- `status=failed` 只用于工具层失败，例如参数错误、执行器异常、拒绝执行等场景
+1. 以一轮会话为提交粒度。
+2. 一轮会话指：`用户一次输入 -> 主 agent 完成一次对用户响应`。
+3. 如果这一轮会话中发生了文档变更，则在主 agent 完成响应后执行一次 `git commit`。
+4. 如果这一轮会话中没有文档变更，则不执行 `git commit`。
+5. commit message 基于本轮变更的 section id 和 block id 生成。
 
-## 六、当前结论
+提交消息格式：
 
-v1 当前建议保留以下核心工具：
+```text
+update disclosure
 
-- `get_json_tree`
-- `read_json_path`
-- `write_json_path`
-- `execute_subagent`
-- `exec_command`
+Time: YYYY-MM-DD HH:mm
 
-其中：
+Changed sections:
+- technical_solution
 
-- 交底书 JSON 中间结果由专用工具负责
-- 文件、目录、git 等通用能力统一走 `exec_command`
-- `write_json_path` 在当前阶段只做整值替换
-- `exec_command` 当前阶段不再细化
-- 如果一轮会话中发生了文件变更，则在主 agent 完成响应后提交一次 `git commit`
+Changed blocks:
+- blk_000014
+- blk_000015
+```
+
+说明：
+
+- `Changed sections` 列出本轮变更涉及的 section id。
+- `Changed blocks` 列出本轮新增或替换的 block id。
+- id 列表在写入 commit message 前必须去重。
+- 每组 id 最多保留 10 条。
+- 如果发生截断，需要说明剩余未展示数量。
+
+截断示例：
+
+```text
+update disclosure
+
+Time: 2026-04-23 18:10
+
+Changed sections:
+- technical_solution
+- embodiments
+
+Changed blocks:
+- blk_000014
+- blk_000015
+
+Truncated: only top 10 changed block ids are shown, 4 more block ids omitted.
+```
+
+## 十四、当前结论
+
+v1 工具体系采用以下原则：
+
+1. 文档定位基于 `section_id` 和 `block_id`。
+2. 文档读取统一走 `document_read`。
+3. 文档写入统一走 `document_edit`。
+4. `document_edit` 是 `disclosure.json` 的唯一写入入口。
+5. 子 agent 通过 `execute_subagent` 启动。
+6. 子 agent 返回 proposal，主 agent 决定是否采纳。
+7. 通用命令统一走 `exec_command`，但不直接修改交底书真相源。
+8. 自动提交基于 changed section ids 和 changed block ids 生成 commit message。

@@ -9,7 +9,7 @@
 - [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
 - [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
 
-本文档合并了原先分开的两类内容：
+本文档覆盖两类内容：
 
 - agent 上下文组成与按需读取原则
 - agent prompt 分层与 prefix cache 设计原则
@@ -218,9 +218,9 @@
 
 例如：
 
-- 读取 `/sections/6`
-- 读取 `/sections/8/children/0`
-- 读取附图说明对应节点的 JSON Pointer 路径
+- 读取 `technical_solution`
+- 读取 `embodiment_1`
+- 读取附图说明对应的 `section_id` 或 `block_id`
 
 这些结果不是默认常驻，而是根据当前任务动态加入。
 
@@ -349,9 +349,11 @@ v1 建议主 agent 只输出两类控制动作：
 ```json
 {
   "kind": "tool_call",
-  "name": "read_json_path",
+  "name": "document_read",
   "arguments": {
-    "path": "/sections/6"
+    "action": "get_section",
+    "section_id": "technical_solution",
+    "include_children": true
   }
 }
 ```
@@ -368,6 +370,11 @@ v1 中，启动子 agent 统一使用一个工具：
 - `goal`
 - `call_type`
 
+可选参数：
+
+- `target_section_id`
+- `target_block_id`
+
 示例：
 
 ```json
@@ -377,7 +384,9 @@ v1 中，启动子 agent 统一使用一个工具：
   "arguments": {
     "agent_id": "solution_refiner",
     "goal": "将当前讨论内容整理成一个更完整的技术方案，并指出仍需用户确认的关键决策。",
-    "call_type": "rich_context_specialist"
+    "call_type": "rich_context_specialist",
+    "target_section_id": "technical_solution",
+    "target_block_id": null
   }
 }
 ```
@@ -387,12 +396,14 @@ v1 中，启动子 agent 统一使用一个工具：
 - `agent_id`：调用哪个子 agent
 - `goal`：对子 agent 的自然语言任务描述，也是最核心的任务语义输入
 - `call_type`：本次调用采用哪种上下文装配策略
+- `target_section_id`：目标章节，可选
+- `target_block_id`：目标 block，可选
 
 说明：
 
 1. `goal` 负责描述“要做什么”
 2. `call_type` 负责选择“按什么类型装配上下文”
-3. `target`、`context` 等细节不由主 agent 显式传递
+3. `target_section_id` 和 `target_block_id` 负责提供结构化目标
 4. 上下文管理器根据 `call_type` 和当前系统状态装配实际上下文
 
 因此，v1 的核心原则是：
@@ -422,14 +433,17 @@ v1 中，启动子 agent 统一使用一个工具：
 - `rich_context_specialist` 更像带着当前现场，切换到一个专门子 agent 的脑子
 - `task_only_specialist` 更像只给任务，不给背景
 
-## 十、子 agent 的最小输出协议
+## 十、子 agent 的统一输出协议
 
 既然子 agent 在调用层被视为一种特殊工具，那么它必须有统一的标准输出。
 
-v1 的最小输出协议固定为两个字段：
+v1 的输出协议固定为：
 
 - `status`
-- `output`
+- `summary`
+- `proposal`
+- `questions`
+- `warnings`
 
 ### 1. status
 
@@ -440,24 +454,55 @@ v1 建议先固定两个值：
 - `success`
 - `failed`
 
-### 2. output
+### 2. summary
 
-`output` 是字符串类型的自然语言内容。
+`summary` 是给主 agent 阅读的简短结论。
 
-它表示该子 agent 对本次任务给出的最终工作结论。
+### 3. proposal
 
-说明：
+`proposal` 是结构化结果。
 
-1. 当 `status=success` 时，`output` 表示成功结果
-2. 当 `status=failed` 时，`output` 表示失败原因、缺失信息或无法继续的理由
-3. `output` 应尽量结果导向，不要写成闲聊式文本
+支持类型：
+
+- `document_edit_proposal`
+- `analysis_result`
+- `review_report`
+
+### 4. questions
+
+`questions` 用于表达需要用户或主 agent 补充确认的信息。
+
+### 5. warnings
+
+`warnings` 用于表达风险、假设和不确定性。
 
 成功示例：
 
 ```json
 {
   "status": "success",
-  "output": "我已将当前讨论内容收敛为一个技术方案：该方案包括特征提取模块、检测模块和结果输出模块，当前仍需用户确认是否强调轻量化网络结构。"
+  "summary": "已生成技术方案章节候选正文。",
+  "proposal": {
+    "type": "document_edit_proposal",
+    "target_section_id": "technical_solution",
+    "intent": "replace_section_blocks",
+    "confidence": 0.84,
+    "rationale": "目标章节适合整体写入候选 blocks。",
+    "operations": [
+      {
+        "op": "replace_section_blocks",
+        "section_id": "technical_solution",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "本发明提供一种图像检测方法。"
+          }
+        ]
+      }
+    ]
+  },
+  "questions": [],
+  "warnings": []
 }
 ```
 
@@ -466,15 +511,21 @@ v1 建议先固定两个值：
 ```json
 {
   "status": "failed",
-  "output": "当前信息不足，无法完成技术方案收敛。缺少现有技术缺陷描述和实施例细节。"
+  "summary": "当前信息不足，无法完成技术方案收敛。",
+  "proposal": null,
+  "questions": [
+    "请补充现有技术缺陷描述。"
+  ],
+  "warnings": []
 }
 ```
 
-因此，v1 对子 agent 输出的定义是：
+说明：
 
 - 外层协议固定
-- 内层内容使用自然语言
-- 不额外引入更复杂的 envelope
+- 内层 `proposal.type` 区分具体结果类型
+- `document_edit_proposal.operations` 只是候选修改
+- 主 agent 负责决定是否采纳候选修改
 ## 十一、主 Agent 的推荐 prompt 结构
 
 主 agent 的 prompt 可按以下结构组织：
@@ -622,13 +673,14 @@ v1 建议先固定两个值：
 4. 主 agent 面向系统的控制输出必须结构化
 5. 子 agent 统一通过 `execute_subagent` 工具触发
 6. `execute_subagent` 的最小参数为 `agent_id + goal + call_type`
-7. 子 agent 的最小输出协议为 `status + output`
-8. prompt 同时按角色和稳定性两个维度拆分
-9. 稳定规则尽量前置，以利用 prefix cache
-10. 高频变化内容尽量后置
-11. 主 agent 与子 agent 不共享同一套完整模板
-12. 子 agent 使用更窄、更专注的模板
-13. git 提交信息和当前时间属于动态后缀
-14. 修改后如有必要，只回读目标章节确认
+7. `execute_subagent` 可携带 `target_section_id` 和 `target_block_id`
+8. 子 agent 的统一输出协议为 `status + summary + proposal + questions + warnings`
+9. prompt 同时按角色和稳定性两个维度拆分
+10. 稳定规则尽量前置，以利用 prefix cache
+11. 高频变化内容尽量后置
+12. 主 agent 与子 agent 不共享同一套完整模板
+13. 子 agent 使用更窄、更专注的模板
+14. git 提交信息和当前时间属于动态后缀
+15. 修改后如有必要，只回读目标章节或目标 block 确认
 
 这套规则用于指导后续主 agent 与子 agent prompt 的实现。

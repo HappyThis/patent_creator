@@ -133,7 +133,8 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 
 应展示一条过程节点，例如：
 
-- `调用 read_json_path`
+- `调用 document_read`
+- `调用 document_edit`
 - `调用 exec_command`
 - `调用 execute_subagent`
 
@@ -153,7 +154,8 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 
 例如：
 
-- `read_json_path 已返回`
+- `document_read 已返回`
+- `document_edit 已完成`
 - `section_writer 已完成`
 
 ### 5. 结果详情的折叠与展开
@@ -230,7 +232,19 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 刷新目录区
 - 刷新渲染区
 - 定位最近修改章节
-- 高亮最近修改章节
+- 高亮最近修改章节或 block
+
+事件数据至少包含：
+
+```json
+{
+  "changed": true,
+  "changed_section_ids": ["technical_solution"],
+  "changed_block_ids": ["blk_000014"],
+  "active_section_id": "technical_solution",
+  "active_block_id": "blk_000014"
+}
+```
 
 ### 5. `round_finished`
 
@@ -256,8 +270,8 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 
 - 支持整篇预览
 - 支持 anchor 滚动
-- 支持最近修改章节自动定位
-- 支持最近修改章节短暂高亮
+- 支持最近修改章节或 block 自动定位
+- 支持最近修改章节或 block 短暂高亮
 
 ### Agent Chat 区
 

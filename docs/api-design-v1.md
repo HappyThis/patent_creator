@@ -2,7 +2,7 @@
 
 ## 文档定位
 
-本文档定义前端 `React` 与后端 `FastAPI` 之间的 V1 API 协议。
+本文档定义前端 `TypeScript + React + Vite` 与后端 `Python 3.11 + FastAPI + Uvicorn` 之间的 V1 API 协议。
 
 本规范重点覆盖：
 
@@ -20,6 +20,7 @@
 - [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
 - [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
 - [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
+- [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
 
 ## 目标
 
@@ -71,6 +72,15 @@ V1 的 API 设计围绕三栏前端展开：
 
 chat 过程中的持续输出、状态变化和文档更新通知，统一通过 `SSE` 传递。
 
+### 5. 对外定位使用 id
+
+API 中涉及文档定位时统一使用：
+
+- `section_id`
+- `block_id`
+- `changed_section_ids`
+- `changed_block_ids`
+
 ## 二、核心资源模型
 
 一个 `project` 对外主要暴露以下对象：
@@ -117,9 +127,20 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
   "project_id": "proj_001",
   "title": "一种图像检测方法",
   "created_at": "2026-04-23T21:00:00+08:00",
-  "updated_at": "2026-04-23T21:10:00+08:00"
+  "updated_at": "2026-04-23T21:10:00+08:00",
+  "active_session_id": "sess_003",
+  "running_session_id": null,
+  "running_round_id": null,
+  "is_busy": false
 }
 ```
+
+字段说明：
+
+- `active_session_id`：当前活跃 session，定义为最近聊过天的 session
+- `running_session_id`：当前正在执行的 session，没有则为 `null`
+- `running_round_id`：当前正在执行的 round，没有则为 `null`
+- `is_busy`：当前 project 是否有正在执行的 round
 
 ## 四、目录接口
 
@@ -137,15 +158,21 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
     {
       "id": "technical_field",
       "title": "技术领域",
+      "level": 2,
+      "anchor": "technical_field",
       "children": []
     },
     {
       "id": "technical_solution",
       "title": "技术方案",
+      "level": 2,
+      "anchor": "technical_solution",
       "children": [
         {
           "id": "processing_flow",
-          "title": "处理流程"
+          "title": "处理流程",
+          "level": 3,
+          "anchor": "processing_flow"
         }
       ]
     }
@@ -164,12 +191,12 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
 可选查询参数：
 
 - `focus_section_id`
-- `focus_pointer`
+- `focus_block_id`
 
 说明：
 
-- 不传时，返回整篇渲染数据
-- 传入时，返回整篇渲染数据，并附带当前聚焦位置
+- 不传时，返回整篇渲染数据。
+- 传入时，返回整篇渲染数据，并附带当前聚焦位置。
 
 响应：
 
@@ -188,6 +215,8 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
         "children": [
           {
             "type": "paragraph",
+            "id": "blk_000001",
+            "section_id": "technical_solution",
             "text": "本发明提供一种图像检测方法。"
           }
         ]
@@ -195,6 +224,7 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
     ]
   },
   "active_section_id": "technical_solution",
+  "active_block_id": "blk_000001",
   "updated_at": "2026-04-23T21:15:00+08:00"
 }
 ```
@@ -214,7 +244,10 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
   "meta": {
     "document_type": "patent_disclosure",
     "schema_version": "v1",
-    "title": "一种图像检测方法"
+    "title": "一种图像检测方法",
+    "id_counters": {
+      "block": 1
+    }
   },
   "sections": []
 }
@@ -246,21 +279,31 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
       "content": "/absolute/path/to/file.txt"
     }
   ],
-  "active_section_id": "technical_solution"
+  "active_section_id": "technical_solution",
+  "active_block_id": null
 }
 ```
 
 字段说明：
 
-- `session_id`：当前 chat 会话标识
+- `session_id`：当前 chat 会话标识，可选
 - `message`：用户本轮输入
 - `references`：可选的参考资料
 - `active_section_id`：可选，用于表示当前焦点章节
+- `active_block_id`：可选，用于表示当前焦点 block
 
 说明：
 
-- 参考资料通过 chat 附带进入系统
-- 不单独设计“材料管理区”或“材料上传区”API
+- 不传 `session_id` 时，后端创建新 session。
+- 用户可以选择任意历史 session 继续聊天。
+- `active_session_id` 始终更新为最近聊过天的 session。
+- 同一 project 任意时刻只允许一个 session 处于执行中。
+- 只要存在未处理完成的消息，前端发送按钮保持禁用，且不允许新开 session 发起执行。
+- `text` 引用直接进入本轮上下文。
+- `url` 引用在当前回合按需抓取并进入本轮上下文。
+- `file_path` 引用在当前回合按需读取并进入本轮上下文。
+- 参考资料不复制到项目目录，不做缓存目录，不作为项目资源持久化。
+- 不单独设计“材料管理区”或“材料上传区”API。
 
 响应：
 
@@ -268,7 +311,39 @@ chat 过程中的持续输出、状态变化和文档更新通知，统一通过
 {
   "accepted": true,
   "session_id": "sess_001",
-  "message_id": "msg_001"
+  "message_id": "msg_001",
+  "round_id": "round_001"
+}
+```
+
+忙碌状态下的失败响应：
+
+```json
+{
+  "error": {
+    "code": "project_busy",
+    "message": "当前已有 session 正在执行，请等待本轮完成后再发送消息。"
+  }
+}
+```
+
+HTTP 错误协议：
+
+- `400`：请求参数错误
+- `403`：权限错误
+- `404`：资源不存在
+- `409`：并发冲突或 `project_busy`
+- `422`：schema 校验失败
+- `500`：系统内部错误
+
+统一错误响应体：
+
+```json
+{
+  "error": {
+    "code": "section_not_found",
+    "message": "section_id 不存在：technical_solution"
+  }
 }
 ```
 
@@ -291,6 +366,7 @@ data: {"text":"我先补全技术方案章节中的处理流程。"}
 event: tool_call_started
 data: {
   "call_id": "call_001",
+  "parent_call_id": null,
   "scope": "main",
   "tool": "execute_subagent",
   "summary": "已启动 section_writer"
@@ -303,12 +379,25 @@ data: {
 event: tool_call_finished
 data: {
   "call_id": "call_001",
+  "parent_call_id": null,
   "scope": "main",
   "tool": "execute_subagent",
   "summary": "section_writer 已完成",
   "result": {
     "status": "success",
-    "output": "我已完成技术方案章节的补写。"
+    "output": {
+      "agent_id": "section_writer",
+      "result": {
+        "status": "success",
+        "summary": "已生成技术方案章节候选正文。",
+        "proposal": {
+          "type": "document_edit_proposal",
+          "operations": []
+        },
+        "questions": [],
+        "warnings": []
+      }
+    }
   }
 }
 ```
@@ -319,8 +408,24 @@ data: {
 event: document_changed
 data: {
   "changed": true,
-  "changed_pointers": ["/sections/6"],
-  "active_section_id": "technical_solution"
+  "changed_section_ids": ["technical_solution"],
+  "changed_block_ids": ["blk_000014"],
+  "primary_section_id": "technical_solution",
+  "primary_block_id": "blk_000014",
+  "change_scope": "block_appended",
+  "active_section_id": "technical_solution",
+  "active_block_id": "blk_000014"
+}
+```
+
+#### `round_failed`
+
+```text
+event: round_failed
+data: {
+  "code": "subagent_runtime_error",
+  "message": "section_writer 执行失败。",
+  "reply": "本轮未完成，请重试或补充信息。"
 }
 ```
 
@@ -331,9 +436,18 @@ event: round_finished
 data: {
   "reply": "我已经补全了技术方案章节，重点补充了处理流程。",
   "changed": true,
-  "changed_pointers": ["/sections/6"],
+  "changed_section_ids": ["technical_solution"],
+  "changed_block_ids": ["blk_000014"],
+  "primary_section_id": "technical_solution",
+  "primary_block_id": "blk_000014",
+  "change_scope": "block_appended",
   "active_section_id": "technical_solution",
-  "committed": true
+  "active_block_id": "blk_000014",
+  "committed": false,
+  "commit_error": {
+    "code": "git_commit_failed",
+    "message": "git commit 执行失败。"
+  }
 }
 ```
 
@@ -342,6 +456,7 @@ data: {
 - 收到 `tool_call_started` 后，在 Chat 区展示进行中的执行节点
 - 收到 `tool_call_finished` 后，将执行节点切换为已完成，并默认折叠结果详情
 - 收到 `document_changed` 后，刷新目录区与渲染区
+- 收到 `round_failed` 后，结束本轮加载状态并展示失败信息
 - 收到 `round_finished` 后，更新 chat 区回合状态
 
 ## 八、Session 日志接口
@@ -366,6 +481,10 @@ data: {
       "type": "user_input",
       "seq": 1,
       "scope": "main",
+      "round_id": "round_001",
+      "message_id": "msg_001",
+      "call_id": null,
+      "parent_call_id": null,
       "payload": {
         "text": "请补写技术方案。"
       }
@@ -444,7 +563,7 @@ V1 前端最小依赖如下接口：
 前端更新：
 
 - chat 区回合状态
-- 最近修改章节定位
+- 最近修改章节或 block 定位
 
 ## 十二、当前结论
 
@@ -454,5 +573,7 @@ V1 API 设计采用如下原则：
 2. 渲染区消费 `render_ast`
 3. Markdown 只作为导出格式
 4. chat 过程采用 SSE
-5. 参考资料通过 chat 附带，不单独做材料管理 API
-6. 目录区、渲染区、chat 区分别由独立接口支撑
+5. API 文档定位使用 `section_id` 和 `block_id`
+6. 文档变更通知使用 `changed_section_ids` 和 `changed_block_ids`
+7. 参考资料通过 chat 附带，不单独做材料管理 API
+8. 目录区、渲染区、chat 区分别由独立接口支撑

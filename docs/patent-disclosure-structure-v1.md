@@ -25,6 +25,7 @@
 4. 交底书支持章节与子章节层级。
 5. 交底书支持段落、列表、图片、表格等块级内容。
 6. Markdown 只是导出格式，不是内部真相源。
+7. 交底书内部定位采用稳定 id 体系。
 
 ## 边界说明
 
@@ -62,7 +63,10 @@
   "meta": {
     "document_type": "patent_disclosure",
     "schema_version": "v1",
-    "title": "一种图像检测方法"
+    "title": "一种图像检测方法",
+    "id_counters": {
+      "block": 0
+    }
   },
   "sections": []
 }
@@ -77,6 +81,7 @@
 - `document_type`：固定为 `patent_disclosure`
 - `schema_version`：当前结构版本，例如 `v1`
 - `title`：交底书标题
+- `id_counters`：系统维护的 id 计数器
 
 最小示例：
 
@@ -84,9 +89,71 @@
 {
   "document_type": "patent_disclosure",
   "schema_version": "v1",
-  "title": "一种图像检测方法"
+  "title": "一种图像检测方法",
+  "id_counters": {
+    "block": 0
+  }
 }
 ```
+
+说明：
+
+- `id_counters` 由系统维护。
+- agent 不直接修改 `id_counters`。
+- 新增 block id 由文档写入工具生成。
+
+## Id 体系
+
+交底书文档采用 id-first 体系。
+
+### Section id
+
+`section.id` 是章节和子章节的稳定标识。
+
+规则：
+
+1. 使用小写 `snake_case`。
+2. 全文唯一。
+3. 标准章节使用固定语义 id。
+4. 新增子章节 id 必须由文档写入工具校验唯一。
+
+示例：
+
+```text
+technical_solution
+processing_flow
+embodiment_1
+```
+
+### Block id
+
+`block.id` 是块级内容的稳定标识。
+
+规则：
+
+1. 使用 `blk_000001` 格式。
+2. 全文唯一。
+3. 新增 block 时由文档写入工具生成。
+4. 替换 block 时保留原 block id。
+5. v1 中 list item 和 table cell 不单独建立 id。
+
+示例：
+
+```text
+blk_000001
+blk_000002
+```
+
+### 定位原则
+
+文档读取、修改、渲染、日志和前端定位统一使用：
+
+```text
+section_id
+block_id
+```
+
+数组下标和文件内部位置不作为公开协议。
 
 ## 章节树
 
@@ -186,6 +253,7 @@ v1 支持四类 block：
 
 ```json
 {
+  "id": "blk_000001",
   "type": "paragraph",
   "text": "本发明提供一种图像检测方法。"
 }
@@ -193,6 +261,7 @@ v1 支持四类 block：
 
 字段说明：
 
+- `id`：稳定的 block 标识
 - `type`：固定为 `paragraph`
 - `text`：段落文本
 
@@ -200,6 +269,7 @@ v1 支持四类 block：
 
 ```json
 {
+  "id": "blk_000002",
   "type": "list",
   "ordered": true,
   "items": [
@@ -212,6 +282,7 @@ v1 支持四类 block：
 
 字段说明：
 
+- `id`：稳定的 block 标识
 - `type`：固定为 `list`
 - `ordered`：`true` 表示有序列表，`false` 表示无序列表
 - `items`：字符串数组
@@ -220,6 +291,7 @@ v1 支持四类 block：
 
 ```json
 {
+  "id": "blk_000003",
   "type": "image",
   "src": "assets/fig1.png",
   "caption": "图1 系统整体架构图",
@@ -229,6 +301,7 @@ v1 支持四类 block：
 
 字段说明：
 
+- `id`：稳定的 block 标识
 - `type`：固定为 `image`
 - `src`：相对或绝对资源路径
 - `caption`：图片标题
@@ -243,6 +316,7 @@ v1 支持四类 block：
 
 ```json
 {
+  "id": "blk_000004",
   "type": "table",
   "columns": ["模块", "作用"],
   "rows": [
@@ -254,6 +328,7 @@ v1 支持四类 block：
 
 字段说明：
 
+- `id`：稳定的 block 标识
 - `type`：固定为 `table`
 - `columns`：表头数组
 - `rows`：表格行数组
@@ -265,7 +340,10 @@ v1 支持四类 block：
   "meta": {
     "document_type": "patent_disclosure",
     "schema_version": "v1",
-    "title": "一种图像检测方法"
+    "title": "一种图像检测方法",
+    "id_counters": {
+      "block": 4
+    }
   },
   "sections": [
     {
@@ -273,6 +351,7 @@ v1 支持四类 block：
       "title": "技术领域",
       "blocks": [
         {
+          "id": "blk_000001",
           "type": "paragraph",
           "text": "本发明涉及计算机视觉技术领域，尤其涉及一种图像检测方法。"
         }
@@ -284,6 +363,7 @@ v1 支持四类 block：
       "title": "技术方案",
       "blocks": [
         {
+          "id": "blk_000002",
           "type": "paragraph",
           "text": "本发明提供一种低计算量的图像检测方案。"
         }
@@ -294,6 +374,7 @@ v1 支持四类 block：
           "title": "处理流程",
           "blocks": [
             {
+              "id": "blk_000003",
               "type": "list",
               "ordered": true,
               "items": [
@@ -317,6 +398,7 @@ v1 支持四类 block：
           "title": "图1说明",
           "blocks": [
             {
+              "id": "blk_000004",
               "type": "image",
               "src": "assets/fig1.png",
               "caption": "图1 系统整体架构图",
@@ -352,6 +434,7 @@ Markdown 导出应基于这棵文档树渲染。
 3. agent 编排信息进入 session 日志，不进入交底书文档。
 4. sub agent 默认处理局部子树，而不是默认加载整篇文档。
 5. 由主 agent 决定每次任务需要读取哪些章节或子章节。
+6. 文档内容通过 `section_id` 和 `block_id` 进行索引、读取和修改。
 
 ## 最终结论
 
@@ -360,6 +443,7 @@ Markdown 导出应基于这棵文档树渲染。
 - 基于 JSON 的交底书文档
 - 章节/子章节树结构
 - 支持块级内容
+- 支持稳定 section id 与 block id
 - 不嵌入 session 内存或 agent 辅助信息
 
 这就是专利写作 agent v1 的交底书文档基础结构。

@@ -26,8 +26,6 @@
 2. 让前端支持章节定位、滚动和高亮
 3. 让 Markdown 导出和前端展示保持语义一致
 
-因此它既不能过于接近底层存储结构，也不能直接退化成 HTML 或 Markdown。
-
 ## 一、总体关系
 
 推荐的数据流如下：
@@ -43,7 +41,22 @@ disclosure.json -> render builder -> render_ast -> Markdown 导出
 - `render_ast` 是统一展示模型
 - `Markdown` 是导出格式，不是内部真相源
 
-## 二、顶层结构
+## 二、定位原则
+
+`render_ast` 的定位字段使用文档 id 体系：
+
+- `section_id`
+- `block_id`
+- `anchor`
+
+说明：
+
+- section 节点使用 `id` 表示章节 id。
+- block 节点使用 `id` 表示 block id。
+- block 节点同时带 `section_id`，便于前端归属和高亮。
+- `anchor` 用于前端滚动定位。
+
+## 三、顶层结构
 
 `render_ast` 顶层建议如下：
 
@@ -60,22 +73,17 @@ disclosure.json -> render builder -> render_ast -> Markdown 导出
 }
 ```
 
-### 字段说明
+字段说明：
 
-- `type`
-  - 固定为 `document`
-- `title`
-  - 当前文档标题
-- `meta`
-  - 展示层需要的少量元信息
-- `outline`
-  - 目录树，直接服务左侧目录区域
-- `children`
-  - 正文渲染树
+- `type`：固定为 `document`
+- `title`：当前文档标题
+- `meta`：展示层需要的少量元信息
+- `outline`：目录树，直接服务左侧目录区域
+- `children`：正文渲染树
 
-## 三、核心节点类型
+## 四、核心节点类型
 
-V1 建议支持以下 6 种节点类型：
+V1 支持以下 6 种节点类型：
 
 1. `document`
 2. `section`
@@ -84,39 +92,36 @@ V1 建议支持以下 6 种节点类型：
 5. `image`
 6. `table`
 
-这套节点类型应与交底书文档本体的块级内容语义保持一致。
+## 五、节点通用字段
 
-## 四、节点通用字段
-
-所有节点建议支持以下通用字段：
+section 节点通用字段：
 
 ```json
 {
   "type": "section",
   "id": "technical_solution",
-  "pointer": "/sections/6",
   "anchor": "technical_solution"
+}
+```
+
+block 节点通用字段：
+
+```json
+{
+  "type": "paragraph",
+  "id": "blk_000001",
+  "section_id": "technical_solution"
 }
 ```
 
 字段说明：
 
-- `type`
-  - 节点类型
-- `id`
-  - 业务节点标识
-- `pointer`
-  - 对应 `disclosure.json` 中的 JSON Pointer
-- `anchor`
-  - 前端滚动定位锚点
+- `type`：节点类型
+- `id`：节点稳定 id
+- `section_id`：block 所属章节 id
+- `anchor`：前端滚动定位锚点
 
-说明：
-
-- `section` 节点建议必须有 `id`
-- `paragraph`、`list`、`image`、`table` 等 block 节点可以没有 `id`
-- `pointer` 是前端定位、高亮、最近修改展示的重要基础字段
-
-## 五、各节点结构
+## 六、各节点结构
 
 ### 1. document
 
@@ -141,7 +146,6 @@ V1 建议支持以下 6 种节点类型：
   "id": "technical_solution",
   "title": "技术方案",
   "level": 2,
-  "pointer": "/sections/6",
   "anchor": "technical_solution",
   "children": []
 }
@@ -149,36 +153,30 @@ V1 建议支持以下 6 种节点类型：
 
 字段说明：
 
-- `title`
-  - 章节标题
-- `level`
-  - 标题层级，例如：
-    - `2` 表示一级正文标题
-    - `3` 表示二级子章节标题
-- `children`
-  - 该章节下的内容节点或子章节节点
+- `id`：章节 id
+- `title`：章节标题
+- `level`：标题层级，例如 `2` 表示一级正文标题，`3` 表示二级子章节标题
+- `anchor`：前端滚动锚点
+- `children`：内容节点或子章节节点
 
 ### 3. paragraph
 
 ```json
 {
   "type": "paragraph",
-  "pointer": "/sections/6/blocks/0",
+  "id": "blk_000001",
+  "section_id": "technical_solution",
   "text": "本发明提供一种图像检测方法。"
 }
 ```
-
-字段说明：
-
-- `text`
-  - 段落正文
 
 ### 4. list
 
 ```json
 {
   "type": "list",
-  "pointer": "/sections/6/blocks/1",
+  "id": "blk_000002",
+  "section_id": "technical_solution",
   "ordered": true,
   "items": [
     "获取输入图像",
@@ -188,40 +186,26 @@ V1 建议支持以下 6 种节点类型：
 }
 ```
 
-字段说明：
-
-- `ordered`
-  - 是否有序列表
-- `items`
-  - 列表项数组
-
 ### 5. image
 
 ```json
 {
   "type": "image",
-  "pointer": "/sections/10/blocks/0",
+  "id": "blk_000003",
+  "section_id": "drawings",
   "src": "/assets/fig1.png",
   "caption": "图1 系统整体架构图",
   "alt": "系统整体架构图"
 }
 ```
 
-字段说明：
-
-- `src`
-  - 图片资源路径
-- `caption`
-  - 图片说明
-- `alt`
-  - 替代文本
-
 ### 6. table
 
 ```json
 {
   "type": "table",
-  "pointer": "/sections/8/blocks/0",
+  "id": "blk_000004",
+  "section_id": "technical_solution",
   "columns": ["模块", "作用"],
   "rows": [
     ["特征提取模块", "提取图像特征"],
@@ -230,14 +214,7 @@ V1 建议支持以下 6 种节点类型：
 }
 ```
 
-字段说明：
-
-- `columns`
-  - 表头
-- `rows`
-  - 表格数据行
-
-## 六、outline 结构
+## 七、outline 结构
 
 左侧目录区域不应自己从正文树中再提取目录。
 
@@ -252,7 +229,6 @@ V1 建议支持以下 6 种节点类型：
       "id": "technical_field",
       "title": "技术领域",
       "level": 2,
-      "pointer": "/sections/1",
       "anchor": "technical_field",
       "children": []
     },
@@ -260,14 +236,12 @@ V1 建议支持以下 6 种节点类型：
       "id": "technical_solution",
       "title": "技术方案",
       "level": 2,
-      "pointer": "/sections/6",
       "anchor": "technical_solution",
       "children": [
         {
           "id": "processing_flow",
           "title": "处理流程",
           "level": 3,
-          "pointer": "/sections/6/children/0",
           "anchor": "processing_flow"
         }
       ]
@@ -282,7 +256,7 @@ V1 建议支持以下 6 种节点类型：
 2. 目录与正文锚点天然一致
 3. 目录与渲染不需要重复构建逻辑
 
-## 七、完整示例
+## 八、完整示例
 
 ```json
 {
@@ -297,14 +271,12 @@ V1 建议支持以下 6 种节点类型：
       "id": "technical_solution",
       "title": "技术方案",
       "level": 2,
-      "pointer": "/sections/6",
       "anchor": "technical_solution",
       "children": [
         {
           "id": "processing_flow",
           "title": "处理流程",
           "level": 3,
-          "pointer": "/sections/6/children/0",
           "anchor": "processing_flow"
         }
       ]
@@ -316,12 +288,12 @@ V1 建议支持以下 6 种节点类型：
       "id": "technical_solution",
       "title": "技术方案",
       "level": 2,
-      "pointer": "/sections/6",
       "anchor": "technical_solution",
       "children": [
         {
           "type": "paragraph",
-          "pointer": "/sections/6/blocks/0",
+          "id": "blk_000001",
+          "section_id": "technical_solution",
           "text": "本发明提供一种图像检测方法。"
         },
         {
@@ -329,12 +301,12 @@ V1 建议支持以下 6 种节点类型：
           "id": "processing_flow",
           "title": "处理流程",
           "level": 3,
-          "pointer": "/sections/6/children/0",
           "anchor": "processing_flow",
           "children": [
             {
               "type": "list",
-              "pointer": "/sections/6/children/0/blocks/0",
+              "id": "blk_000002",
+              "section_id": "processing_flow",
               "ordered": true,
               "items": [
                 "获取输入图像",
@@ -350,17 +322,12 @@ V1 建议支持以下 6 种节点类型：
 }
 ```
 
-## 八、与 disclosure.json 的区别
+## 九、与 disclosure.json 的区别
 
 可以用一句话概括：
 
 - `disclosure.json` 负责“怎么存”
 - `render_ast` 负责“怎么展示”
-
-因此：
-
-- `disclosure.json` 更偏存储结构
-- `render_ast` 更偏展示结构
 
 典型区别包括：
 
@@ -369,7 +336,7 @@ V1 建议支持以下 6 种节点类型：
 3. `render_ast` 显式提供 `anchor`
 4. `render_ast` 将正文统一组织成渲染树
 
-## 九、与 Markdown 的关系
+## 十、与 Markdown 的关系
 
 Markdown 不是 `render_ast` 的替代品，而是 `render_ast` 的一种导出结果。
 
@@ -384,9 +351,9 @@ disclosure.json -> render_ast -> Markdown
 - 前端渲染不直接依赖 Markdown
 - Markdown 导出与前端展示应共享同一套 `render_ast` 语义
 
-## 十、V1 取舍
+## 十一、V1 取舍
 
-### V1 先做
+### V1 支持
 
 - `document`
 - `section`
@@ -395,7 +362,9 @@ disclosure.json -> render_ast -> Markdown
 - `image`
 - `table`
 - `outline`
-- `pointer`
+- `id`
+- `section_id`
+- `block_id`
 - `anchor`
 
 ### V1 暂不做
@@ -406,7 +375,7 @@ disclosure.json -> render_ast -> Markdown
 - 富样式 token 系统
 - 前端可编辑状态描述
 
-## 十一、当前结论
+## 十二、当前结论
 
 V1 的 `render_ast` 定位为：
 
@@ -420,4 +389,4 @@ V1 的 `render_ast` 定位为：
 - 目录树 `outline`
 - 正文树 `children`
 - 节点类型 `section / paragraph / list / image / table`
-- 关键定位字段 `pointer / anchor`
+- 关键定位字段 `id / section_id / anchor`

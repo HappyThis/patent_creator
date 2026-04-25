@@ -136,8 +136,9 @@
 
 1. 接收主 agent 分配的具体任务
 2. 基于提供的最小上下文完成任务
-3. 返回统一最小输出协议
-4. 必要时在自然语言结果中表达修改说明、候选内容或建议
+3. 返回统一输出协议
+4. 必要时返回结构化 proposal
+5. 生成候选正文或候选 `document_edit.operations`
 
 补充说明：
 
@@ -152,10 +153,13 @@
 - 自行管理上下文
 - 自行调用其他子 agent
 - 直接承担用户交互职责
+- 直接修改 `disclosure.json`
 
 权限边界：
 
 - 子 agent 可以调用工具
+- 子 agent 可以调用 `document_read`
+- 子 agent 不允许调用 `document_edit`
 - 子 agent 不具备调用其他 agent 的权限
 - 因此，子 agent 允许多轮 tool use，但不允许继续派生新的子 agent 调用
 
@@ -174,6 +178,7 @@ v1 建议的轻量字段如下：
 - `input_expectation`
 - `output_contract`
 - `tool_permissions`
+- `default_proposal_type`
 
 字段说明：
 
@@ -184,6 +189,7 @@ v1 建议的轻量字段如下：
 - `input_expectation`：调用它时通常需要给哪些输入
 - `output_contract`：调用它后通常会返回什么类型的结果
 - `tool_permissions`：该子 agent 允许调用哪些工具
+- `default_proposal_type`：该子 agent 默认返回的 proposal 类型
 
 说明：
 
@@ -274,7 +280,7 @@ v1 建议的轻量字段如下：
 
 1. 执行具体工具调用
 2. 执行对子 agent 的同步调用
-3. 执行文件读取与文件修改
+3. 执行文档读取与文档修改
 4. 执行 git 相关版本操作
 5. 将执行结果返回给上下文管理器和主流程
 
@@ -283,6 +289,18 @@ v1 建议的轻量字段如下：
 - agent 负责决定“调用什么”
 - 执行器负责真正“去执行”
 - 上下文管理器负责“把执行结果纳入上下文”
+
+文档读取与写入统一通过专用工具完成：
+
+- `document_read`
+- `document_edit`
+
+其中：
+
+- `document_read` 是只读入口
+- `document_edit` 是 `disclosure.json` 的唯一写入入口
+- `document_edit` 只能由主 agent 调用
+- 子 agent 可以提出修改建议，但不直接写入文档
 
 ### 子 agent 的触发方式
 
@@ -339,7 +357,7 @@ v1 中，子 agent 的触发统一抽象为一个工具调用：
 - 以一轮会话为单位决定是否提交
 - 一轮会话指 `用户一次输入 -> 主 agent 完成一次响应`
 - 若这一轮中发生了文件变更，则在主 agent 响应完成后提交一次 `git commit`
-- commit message 直接基于这一轮实际写入过的 JSON Pointer 路径生成，不依赖自由摘要生成
+- commit message 直接基于这一轮实际变更的 section id 和 block id 生成，不依赖自由摘要生成
 
 ### Session 事件日志
 
@@ -414,9 +432,9 @@ session 事件日志不是普通聊天记录，而是结构化事件流。
 
 例如：
 
-- 要写“技术方案”，则读取 `/sections/6`
-- 要确认流程描述，则读取 `/sections/6/children/1`
-- 要检查某张附图说明，则读取对应附图说明节点的 JSON Pointer 路径
+- 要写“技术方案”，则读取 `technical_solution`
+- 要确认流程描述，则读取 `processing_flow`
+- 要检查某张附图说明，则读取对应的 `section_id` 或 `block_id`
 
 这个原则同时适用于主 agent 和子 agent。
 
@@ -426,13 +444,13 @@ session 事件日志不是普通聊天记录，而是结构化事件流。
 
 1. 修改动作会进入当前上下文
 2. 修改动作会记录到 session 日志
-3. 如有必要，可重新读取目标章节进行确认
+3. 如有必要，可重新读取目标章节或目标 block 进行确认
 4. 正文历史版本通过 `git` 进行版本管理
 
 因此：
 
 - 上下文中不需要常驻完整交底书
-- 只需要在必要时回读目标章节确认结果
+- 只需要在必要时回读目标章节或目标 block 确认结果
 
 ## 十二、辅助信息不进入交底书文档
 
