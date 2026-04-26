@@ -1,17 +1,35 @@
-export type ChatMessage = {
+export type ChatMessageEvent = {
   id: string;
+  kind: 'message';
   role: 'user' | 'assistant';
   text: string;
   timestamp: string;
 };
 
-export type TimelineItem = {
+type EventStatus = 'running' | 'done' | 'failed';
+type EventScope = 'main' | `subagent:${string}`;
+
+export type AgentOutputEvent = {
   id: string;
-  kind: 'agent_output' | 'tool_call';
-  status?: 'running' | 'done' | 'failed';
-  scope?: 'main' | `subagent:${string}`;
+  kind: 'agent_output';
+  status?: EventStatus;
+  scope?: EventScope;
   tool?: string;
   title: string;
   summary?: string;
   detail?: string;
 };
+
+export type ToolCallEvent = {
+  id: string;
+  kind: 'tool_call';
+  status?: EventStatus;
+  scope?: EventScope;
+  tool?: string;
+  title: string;
+  summary?: string;
+  detail?: string;
+};
+
+export type ProcessEvent = AgentOutputEvent | ToolCallEvent;
+export type ChatEvent = ChatMessageEvent | ProcessEvent;

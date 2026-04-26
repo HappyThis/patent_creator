@@ -1,5 +1,5 @@
 import { RefObject, useEffect } from 'react';
-import { RenderAst, RenderNode } from '../../types';
+import { RenderAst } from '../../types';
 import { renderPreviewNodes } from './renderPreviewNodes';
 
 type PreviewPanelProps = {
@@ -9,13 +9,8 @@ type PreviewPanelProps = {
   recentSectionIds: string[];
   recentBlockIds: string[];
   previewRef: RefObject<HTMLDivElement>;
+  onActiveSectionChange: (sectionId: string) => void;
 };
-
-function collectSectionIds(nodes: RenderNode[]): string[] {
-  return nodes.flatMap((node) =>
-    node.type === 'section' ? [node.id, ...collectSectionIds(node.children)] : [],
-  );
-}
 
 export function PreviewPanel({
   renderAst,
@@ -24,6 +19,7 @@ export function PreviewPanel({
   recentSectionIds,
   recentBlockIds,
   previewRef,
+  onActiveSectionChange,
 }: PreviewPanelProps) {
   useEffect(() => {
     if (!previewRef.current) {
@@ -39,12 +35,44 @@ export function PreviewPanel({
     }
   }, [activeBlockId, activeSectionId, previewRef]);
 
+  useEffect(() => {
+    const container = previewRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateActiveSection = () => {
+      const sections = Array.from(
+        container.querySelectorAll<HTMLElement>('.preview-section[data-anchor]'),
+      );
+      if (sections.length === 0) {
+        return;
+      }
+
+      const containerTop = container.getBoundingClientRect().top;
+      let currentSectionId = sections[0].dataset.anchor ?? null;
+
+      for (const section of sections) {
+        const offset = section.getBoundingClientRect().top - containerTop;
+        if (offset <= 120) {
+          currentSectionId = section.dataset.anchor ?? currentSectionId;
+        } else {
+          break;
+        }
+      }
+
+      if (currentSectionId) {
+        onActiveSectionChange(currentSectionId);
+      }
+    };
+
+    updateActiveSection();
+    container.addEventListener('scroll', updateActiveSection, { passive: true });
+    return () => container.removeEventListener('scroll', updateActiveSection);
+  }, [onActiveSectionChange, previewRef, renderAst]);
+
   return (
-    <section className="panel preview-panel">
-      <div className="panel-header">
-        <h2>交底书预览</h2>
-        <span>{collectSectionIds(renderAst.children).length} nodes</span>
-      </div>
+    <section className="preview-pane">
       <div className="preview-scroll" ref={previewRef}>
         <article className="document-card">
           <div className="document-meta">

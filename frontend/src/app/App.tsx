@@ -3,16 +3,15 @@ import { ChatPanel } from '../features/chat/ChatPanel';
 import { OutlinePanel } from '../features/outline/OutlinePanel';
 import { PreviewPanel } from '../features/preview/PreviewPanel';
 import { useDemoWorkspace } from '../hooks/useDemoWorkspace';
-import { Topbar } from './layout/Topbar';
 
 function App() {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const {
-    project,
     renderAst,
-    chat,
-    timeline,
+    events,
     composer,
+    isBusy,
+    sessionTabs,
     activeSectionId,
     activeBlockId,
     recentSectionIds,
@@ -25,33 +24,34 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Topbar project={project} />
-
       <main className="workspace">
-        <OutlinePanel
-          outline={renderAst.outline}
-          activeSectionId={activeSectionId}
-          recentSectionIds={recentSectionIds}
-          onSelect={(sectionId) => {
-            setActiveSectionId(sectionId);
-            setActiveBlockId(null);
-          }}
-        />
+        <section className="document-workspace">
+          <OutlinePanel
+            outline={renderAst.outline}
+            activeSectionId={activeSectionId}
+            recentSectionIds={recentSectionIds}
+            onSelect={(sectionId) => {
+              setActiveSectionId(sectionId);
+              setActiveBlockId(null);
+            }}
+          />
 
-        <PreviewPanel
-          renderAst={renderAst}
-          activeSectionId={activeSectionId}
-          activeBlockId={activeBlockId}
-          recentSectionIds={recentSectionIds}
-          recentBlockIds={recentBlockIds}
-          previewRef={previewRef}
-        />
+          <PreviewPanel
+            renderAst={renderAst}
+            activeSectionId={activeSectionId}
+            activeBlockId={activeBlockId}
+            recentSectionIds={recentSectionIds}
+            recentBlockIds={recentBlockIds}
+            previewRef={previewRef}
+            onActiveSectionChange={setActiveSectionId}
+          />
+        </section>
 
         <ChatPanel
-          messages={chat}
-          timeline={timeline}
+          sessionTabs={sessionTabs}
+          events={events}
           composer={composer}
-          isBusy={project.isBusy}
+          isBusy={isBusy}
           onComposerChange={setComposer}
           onSubmit={simulateRound}
         />

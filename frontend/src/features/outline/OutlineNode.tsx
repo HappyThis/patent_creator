@@ -23,7 +23,6 @@ export function OutlineNode({
         onClick={() => onSelect(item.id)}
       >
         <span>{item.title}</span>
-        <code>{item.id}</code>
       </button>
       {item.children?.length ? (
         <div className="outline-children">

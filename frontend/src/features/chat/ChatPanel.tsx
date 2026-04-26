@@ -1,65 +1,118 @@
-import { ChatMessage, TimelineItem } from '../../types';
+import { KeyboardEvent } from 'react';
+import { ChatEvent, ChatMessageEvent, ProcessEvent, SessionTab } from '../../types';
 import { TimelineList } from '../timeline/TimelineList';
 
 type ChatPanelProps = {
-  messages: ChatMessage[];
-  timeline: TimelineItem[];
+  sessionTabs: SessionTab[];
+  events: ChatEvent[];
   composer: string;
   isBusy: boolean;
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
 };
 
+type RenderBlock =
+  | { kind: 'message'; event: ChatMessageEvent }
+  | { kind: 'process'; items: ProcessEvent[] };
+
+function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
+  const blocks: RenderBlock[] = [];
+  let processBuffer: ProcessEvent[] = [];
+
+  const flushProcess = () => {
+    if (processBuffer.length > 0) {
+      blocks.push({ kind: 'process', items: processBuffer });
+      processBuffer = [];
+    }
+  };
+
+  for (const event of events) {
+    if (event.kind === 'message') {
+      flushProcess();
+      blocks.push({ kind: 'message', event });
+      continue;
+    }
+
+    processBuffer.push(event);
+  }
+
+  flushProcess();
+  return blocks;
+}
+
 export function ChatPanel({
-  messages,
-  timeline,
+  sessionTabs,
+  events,
   composer,
   isBusy,
   onComposerChange,
   onSubmit,
 }: ChatPanelProps) {
-  return (
-    <aside className="panel chat-panel">
-      <div className="panel-header">
-        <h2>Agent Chat</h2>
-        <span>{isBusy ? 'running' : 'idle'}</span>
-      </div>
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      onSubmit();
+    }
+  };
 
-      <div className="session-strip">
-        <button className="session-pill active">sess_004</button>
-        <button className="session-pill">sess_003</button>
-        <button className="session-pill">sess_002</button>
+  const blocks = buildRenderBlocks(events);
+
+  return (
+    <aside className="chat-panel">
+      <div className="chat-header">
+        <div className="session-tab-strip" role="tablist" aria-label="Sessions">
+          {sessionTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`session-card-tab ${tab.active ? 'active' : ''}`}
+              role="tab"
+              aria-selected={tab.active}
+            >
+              <span className="session-card-title">{tab.title}</span>
+              {tab.subtitle ? <span className="session-card-subtitle">{tab.subtitle}</span> : null}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="chat-scroll">
         <section className="chat-thread">
-          {messages.map((message) => (
-            <article key={message.id} className={`message ${message.role}`}>
-              <header>
-                <strong>{message.role === 'user' ? '用户' : '主 agent'}</strong>
-                <time>{message.timestamp}</time>
-              </header>
-              <p>{message.text}</p>
-            </article>
-          ))}
-        </section>
+          {blocks.map((block, index) => {
+            if (block.kind === 'message') {
+              const { event } = block;
+              return (
+                <article key={event.id} className={`message-row ${event.role}`}>
+                  <div className={`message-bubble ${event.role}`}>
+                    <p>{event.text}</p>
+                  </div>
+                  <time>{event.timestamp}</time>
+                </article>
+              );
+            }
 
-        <TimelineList items={timeline} />
+            return <TimelineList key={`process_${index}`} items={block.items} />;
+          })}
+        </section>
       </div>
 
       <div className="composer">
-        <textarea
-          value={composer}
-          onChange={(event) => onComposerChange(event.target.value)}
-          placeholder="输入本轮需求，当前原型会模拟一轮 SSE 与 document_edit 落盘。"
-          disabled={isBusy}
-        />
-        <div className="composer-footer">
-          <div className="references-note">
-            支持 text / url / file_path 引用；当前原型只展示前端流程。
-          </div>
-          <button onClick={onSubmit} disabled={isBusy || composer.trim().length === 0}>
-            {isBusy ? '处理中…' : '发送并播放示例回合'}
+        <div className="composer-inline">
+          <textarea
+            value={composer}
+            onChange={(event) => onComposerChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="请输入需求"
+            rows={3}
+            disabled={isBusy}
+          />
+          <button
+            className="composer-send-inline"
+            onClick={onSubmit}
+            disabled={isBusy || composer.trim().length === 0}
+            aria-label="发送"
+            title="发送"
+          >
+            ↑
           </button>
         </div>
       </div>

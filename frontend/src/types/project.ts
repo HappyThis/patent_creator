@@ -5,3 +5,10 @@ export type ProjectState = {
   isBusy: boolean;
   runningRoundId: string | null;
 };
+
+export type SessionTab = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  active: boolean;
+};

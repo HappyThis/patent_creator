@@ -8,24 +8,14 @@ type OutlinePanelProps = {
   onSelect: (sectionId: string) => void;
 };
 
-function flattenOutline(items: OutlineItem[]): OutlineItem[] {
-  return items.flatMap((item) => [item, ...(item.children ? flattenOutline(item.children) : [])]);
-}
-
 export function OutlinePanel({
   outline,
   activeSectionId,
   recentSectionIds,
   onSelect,
 }: OutlinePanelProps) {
-  const outlineIndex = flattenOutline(outline);
-
   return (
-    <aside className="panel outline-panel">
-      <div className="panel-header">
-        <h2>目录</h2>
-        <span>{outlineIndex.length} sections</span>
-      </div>
+    <aside className="outline-pane">
       <div className="outline-list">
         {outline.map((item) => (
           <OutlineNode

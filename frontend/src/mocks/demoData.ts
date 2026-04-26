@@ -1,7 +1,7 @@
-import { ChatMessage, ProjectState, RenderAst, RenderNode, TimelineItem } from '../types';
+import { ChatEvent, ProjectState, RenderAst, RenderNode } from '../types';
 
 export const initialProject: ProjectState = {
-  projectId: 'proj_001',
+  projectId: 'patent_creator',
   title: '一种图像检测方法',
   activeSessionId: 'sess_003',
   isBusy: false,
@@ -215,31 +215,30 @@ export const replacementTechnicalSolutionChildren: RenderNode[] = [
   },
 ];
 
-export const initialChat: ChatMessage[] = [
+export const initialEvents: ChatEvent[] = [
   {
     id: 'msg_user_001',
+    kind: 'message',
     role: 'user',
     text: '请把技术方案部分写得更完整一点，并强调低算力实时性。',
     timestamp: '21:10',
   },
   {
     id: 'msg_assistant_001',
+    kind: 'message',
     role: 'assistant',
     text: '我会补充整体架构和处理流程，并把实时性目标写进技术效果。',
     timestamp: '21:10',
   },
-];
-
-export const initialTimeline: TimelineItem[] = [
   {
-    id: 'tl_001',
+    id: 'evt_note_001',
     kind: 'agent_output',
     title: '主 agent',
     summary: '准备补写技术方案与有益效果。',
     detail: '目标章节：technical_solution、technical_effects',
   },
   {
-    id: 'tl_002',
+    id: 'evt_tool_001',
     kind: 'tool_call',
     title: 'document_read',
     tool: 'document_read',
@@ -249,7 +248,7 @@ export const initialTimeline: TimelineItem[] = [
     detail: 'action: get_section',
   },
   {
-    id: 'tl_003',
+    id: 'evt_tool_002',
     kind: 'tool_call',
     title: 'execute_subagent',
     tool: 'execute_subagent',
@@ -257,5 +256,12 @@ export const initialTimeline: TimelineItem[] = [
     scope: 'main',
     summary: 'section_writer 已返回候选 proposal',
     detail: 'proposal.type=document_edit_proposal',
+  },
+  {
+    id: 'msg_assistant_002',
+    kind: 'message',
+    role: 'assistant',
+    text: '我已经补充了技术方案和有益效果中的关键约束，下一步可以继续补实施例细节。',
+    timestamp: '21:10',
   },
 ];
