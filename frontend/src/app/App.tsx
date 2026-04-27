@@ -18,7 +18,7 @@ function App() {
     recentBlockIds,
     setComposer,
     setActiveSectionId,
-    setActiveBlockId,
+    selectSection,
     simulateRound,
   } = useDemoWorkspace();
 
@@ -30,10 +30,7 @@ function App() {
             outline={renderAst.outline}
             activeSectionId={activeSectionId}
             recentSectionIds={recentSectionIds}
-            onSelect={(sectionId) => {
-              setActiveSectionId(sectionId);
-              setActiveBlockId(null);
-            }}
+            onSelect={selectSection}
           />
 
           <PreviewPanel
