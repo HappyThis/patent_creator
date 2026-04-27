@@ -57,7 +57,11 @@ class ChatService:
         self.llm_client = llm_client
         self._project_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    async def start_round(self, project_id: str, payload: ChatMessageRequest) -> ChatMessageResponse:
+    async def prepare_round(
+        self,
+        project_id: str,
+        payload: ChatMessageRequest,
+    ) -> tuple[ChatMessageResponse, RoundState]:
         async with self._project_locks[project_id]:
             project = self.store.get_project(project_id)
             if project.is_busy:
@@ -90,13 +94,21 @@ class ChatService:
                 },
             )
 
-        asyncio.create_task(self._run_round(project_id, payload, RoundState(session_id, message_id, round_id)))
-        return ChatMessageResponse(
+        response = ChatMessageResponse(
             accepted=True,
             session_id=session_id,
             message_id=message_id,
             round_id=round_id,
         )
+        return response, RoundState(session_id, message_id, round_id)
+
+    async def start_round(self, project_id: str, payload: ChatMessageRequest) -> ChatMessageResponse:
+        response, state = await self.prepare_round(project_id, payload)
+        self.launch_round(project_id, payload, state)
+        return response
+
+    def launch_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
+        asyncio.create_task(self._run_round(project_id, payload, state))
 
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
@@ -132,10 +144,19 @@ class ChatService:
                     project_id,
                     state.session_id,
                 )
+                streamed_reply_parts: list[str] = []
+
+                async def on_text_delta(delta: str) -> None:
+                    if not delta:
+                        return
+                    streamed_reply_parts.append(delta)
+                    await self.bus.publish(key, "assistant_delta", {"text": delta, "scope": "main"})
+
                 action = await decide_main_agent_step(
                     self.llm_client,
                     system_prompt=system_prompt,
                     messages=messages,
+                    on_text_delta=on_text_delta,
                 )
 
                 if action.type == "respond":
@@ -146,7 +167,12 @@ class ChatService:
                         len(final_reply),
                     )
                     messages.append({"role": "assistant", "content": final_reply})
-                    await self._emit_agent_output(project_id, state, final_reply)
+                    await self._emit_agent_output(
+                        project_id,
+                        state,
+                        final_reply,
+                        publish=not bool(streamed_reply_parts),
+                    )
                     break
 
                 # tool_call 分支
@@ -290,7 +316,7 @@ class ChatService:
 
         raise ApiError(400, "unsupported_main_tool", f"主 agent 不支持的工具：{tool_name}")
 
-    async def _emit_agent_output(self, project_id: str, state: RoundState, text: str) -> None:
+    async def _emit_agent_output(self, project_id: str, state: RoundState, text: str, publish: bool = True) -> None:
         self.store.append_session_event(
             project_id,
             state.session_id,
@@ -300,7 +326,8 @@ class ChatService:
             message_id=state.message_id,
             payload={"text": text},
         )
-        await self.bus.publish((project_id, state.session_id), "agent_output", {"text": text})
+        if publish:
+            await self.bus.publish((project_id, state.session_id), "agent_output", {"text": text})
 
     async def _emit_tool(
         self,

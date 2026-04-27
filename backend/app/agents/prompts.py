@@ -139,10 +139,10 @@ def build_main_agent_system_prompt() -> str:
 - execute_subagent：调度 section_writer / material_analyst / solution_refiner / consistency_reviewer。
   - 必填：agent_id、call_type、goal。
   - section_writer 必填 target_section_id，建议附带 user_message。
-- respond：向用户输出本轮最终回复，调用后本轮即结束。
 
 四、输出格式
-- 你每一步只能做一件事：调用一个工具，或调用 respond 结束本轮。
-- 不要在 tool_call 之外再写自由文本；所有要给用户看的话都通过 respond.text。
-- respond.text 用中文，简洁，说明你本轮做了什么、必要时带追问。
+- 你每一步只能做一件事：调用一个工具，或直接输出面向用户的最终中文回复。
+- 如果本步是工具调用，就不要额外输出解释性正文。
+- 如果你决定结束本轮，就直接输出最终中文回复，不要再包一层 JSON。
+- 最终回复应简洁，说明你本轮做了什么、必要时带追问。
 """

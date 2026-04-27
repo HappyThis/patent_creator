@@ -42,6 +42,7 @@ type SessionEventResponse = {
 type ToolState = {
   id: string;
   kind: 'tool_call';
+  timestamp?: string;
   title: string;
   tool?: string;
   scope?: ProcessEvent['scope'];
@@ -111,6 +112,7 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
         events.push({
           id: event.id,
           kind: 'agent_output',
+          timestamp: formatTimestamp(event.ts),
           title: '主 agent',
           summary: String(event.payload.text ?? ''),
           detail: event.scope !== 'main' ? String(event.scope) : undefined,
@@ -133,6 +135,7 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
       const item: ToolState = {
         id: event.call_id || event.id,
         kind: 'tool_call',
+        timestamp: formatTimestamp(event.ts),
         title: String(event.payload.tool ?? 'tool_call'),
         tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
         scope: event.scope as ProcessEvent['scope'],
@@ -155,6 +158,7 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
     const updatedItem: ToolState = {
       id: toolId,
       kind: 'tool_call',
+      timestamp: formatTimestamp(event.ts),
       title: String(event.payload.tool ?? 'tool_call'),
       tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
       scope: event.scope as ProcessEvent['scope'],
@@ -188,6 +192,7 @@ function applyRunningToolEvent(
   const nextEvent: ProcessEvent = {
     id: toolId,
     kind: 'tool_call',
+    timestamp: formatTimestamp(),
     title: String(payload.tool ?? 'tool_call'),
     tool: typeof payload.tool === 'string' ? payload.tool : undefined,
     scope: payload.scope as ProcessEvent['scope'],
@@ -209,6 +214,97 @@ function applyRunningToolEvent(
   return next;
 }
 
+function applyAssistantDelta(
+  current: ChatEvent[],
+  messageId: string,
+  delta: string,
+  timestamp: string,
+): ChatEvent[] {
+  if (!delta) {
+    return current;
+  }
+  const existingIndex = current.findIndex((item) => item.kind === 'message' && item.id === messageId);
+  if (existingIndex === -1) {
+    return [
+      ...current,
+      {
+        id: messageId,
+        kind: 'message',
+        role: 'assistant',
+        text: delta,
+        timestamp,
+      },
+    ];
+  }
+
+  const next = [...current];
+  const existing = next[existingIndex];
+  if (existing.kind !== 'message') {
+    return current;
+  }
+  next[existingIndex] = {
+    ...existing,
+    text: `${existing.text}${delta}`,
+  };
+  return next;
+}
+
+function finalizeRoundEvents(current: ChatEvent[], reply: string, timestamp: string): ChatEvent[] {
+  if (!reply) {
+    return current;
+  }
+
+  const lastMessageIndex = [...current].reverse().findIndex((item) => item.kind === 'message');
+  const boundary = lastMessageIndex === -1 ? 0 : current.length - lastMessageIndex;
+  const tail = current.slice(boundary);
+  const hasToolCalls = tail.some((item) => item.kind === 'tool_call');
+  const trailingAgentOutput = tail.length > 0 ? tail[tail.length - 1] : undefined;
+
+  if (
+    !hasToolCalls &&
+    trailingAgentOutput?.kind === 'agent_output' &&
+    (trailingAgentOutput.summary ?? '') === reply
+  ) {
+    return [
+      ...current.slice(0, -1),
+      {
+        id: trailingAgentOutput.id,
+        kind: 'message',
+        role: 'assistant',
+        text: reply,
+        timestamp: trailingAgentOutput.timestamp ?? timestamp,
+      },
+    ];
+  }
+
+  const trailingMessage = current.length > 0 ? current[current.length - 1] : undefined;
+  if (
+    trailingMessage?.kind === 'message' &&
+    trailingMessage.role === 'assistant' &&
+    trailingMessage.id.startsWith('assistant_stream_')
+  ) {
+    return [
+      ...current.slice(0, -1),
+      {
+        ...trailingMessage,
+        text: reply,
+        timestamp: trailingMessage.timestamp || timestamp,
+      },
+    ];
+  }
+
+  return [
+    ...current,
+    {
+      id: `assistant_final_${Date.now()}`,
+      kind: 'message',
+      role: 'assistant',
+      text: reply,
+      timestamp,
+    },
+  ];
+}
+
 export function useWorkspace() {
   const [project, setProject] = useState<ProjectState | null>(null);
   const [renderAst, setRenderAst] = useState<RenderAst>(emptyRenderAst);
@@ -217,7 +313,8 @@ export function useWorkspace() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const streamRef = useRef<{ close: () => void } | null>(null);
+  const streamingAssistantIdRef = useRef<string | null>(null);
   const {
     activeSectionId,
     activeBlockId,
@@ -230,9 +327,10 @@ export function useWorkspace() {
     resetRecent,
   } = useWorkspaceSelection();
 
-  const closeEventSource = useCallback(() => {
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
+  const closeStream = useCallback(() => {
+    streamRef.current?.close();
+    streamRef.current = null;
+    streamingAssistantIdRef.current = null;
   }, []);
 
   const refreshRenderAst = useCallback(
@@ -325,113 +423,128 @@ export function useWorkspace() {
 
     return () => {
       cancelled = true;
-      closeEventSource();
+      closeStream();
     };
-  }, [closeEventSource, ensureProject]);
+  }, [closeStream, ensureProject]);
 
   const handleSessionSelect = useCallback(
     async (session_id: string) => {
       if (!project || session_id === selectedSessionId) {
         return;
       }
-      closeEventSource();
+      closeStream();
       setSelectedSessionId(session_id);
       resetRecent();
       await loadSessionEvents(project.project_id, session_id);
     },
-    [closeEventSource, loadSessionEvents, project, resetRecent, selectedSessionId],
+    [closeStream, loadSessionEvents, project, resetRecent, selectedSessionId],
   );
 
-  const connectStream = useCallback(
-    (project_id: string, session_id: string) => {
-      closeEventSource();
-      const source = sseClient.connect(project_id, session_id);
-      eventSourceRef.current = source;
+  const consumeStreamEvent = useCallback(
+    async (project_id: string, eventName: string, payload: Record<string, unknown>) => {
+      if (eventName === 'round_started') {
+        setProject((current) =>
+          current
+            ? {
+                ...current,
+                active_session_id: String(payload.session_id ?? current.active_session_id ?? ''),
+                running_session_id: String(payload.session_id ?? current.running_session_id ?? ''),
+                running_round_id: String(payload.round_id ?? current.running_round_id ?? ''),
+                is_busy: true,
+              }
+            : current,
+        );
+        if (payload.session_id) {
+          setSelectedSessionId(String(payload.session_id));
+        }
+        if (payload.round_id) {
+          streamingAssistantIdRef.current = `assistant_stream_${String(payload.round_id)}`;
+        }
+        return;
+      }
 
-      source.addEventListener('agent_output', (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as { text: string };
+      if (eventName === 'assistant_delta') {
+        const delta = String(payload.text ?? '');
+        const messageId = streamingAssistantIdRef.current ?? `assistant_stream_${Date.now()}`;
+        streamingAssistantIdRef.current = messageId;
+        setEvents((current) => applyAssistantDelta(current, messageId, delta, formatTimestamp()));
+        return;
+      }
+
+      if (eventName === 'agent_output') {
         setEvents((current) => [
           ...current,
           {
             id: `agent_note_${Date.now()}_${current.length}`,
             kind: 'agent_output',
+            timestamp: formatTimestamp(),
             title: '主 agent',
-            summary: payload.text,
+            summary: String(payload.text ?? ''),
             status: 'done',
             scope: 'main',
           },
         ]);
-      });
+        return;
+      }
 
-      source.addEventListener('tool_call_started', (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as Record<string, unknown>;
+      if (eventName === 'tool_call_started') {
         setEvents((current) => applyRunningToolEvent(current, payload, 'running'));
-      });
+        return;
+      }
 
-      source.addEventListener('tool_call_finished', (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as Record<string, unknown>;
+      if (eventName === 'tool_call_finished') {
         const result = payload.result as Record<string, unknown> | undefined;
         const status = result?.status === 'failed' ? 'failed' : 'done';
         setEvents((current) => applyRunningToolEvent(current, payload, status));
-      });
+        return;
+      }
 
-      source.addEventListener('document_changed', async (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as {
+      if (eventName === 'document_changed') {
+        const documentPayload = payload as {
           changed_section_ids?: string[];
           changed_block_ids?: string[];
           active_section_id?: string | null;
           active_block_id?: string | null;
         };
-        focusDocumentChange(payload);
+        focusDocumentChange(documentPayload);
         await refreshRenderAst(project_id, {
-          focus_section_id: payload.active_section_id,
-          focus_block_id: payload.active_block_id,
+          focus_section_id: documentPayload.active_section_id,
+          focus_block_id: documentPayload.active_block_id,
         });
-      });
+        return;
+      }
 
-      source.addEventListener('round_finished', async (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as { reply?: string };
-        closeEventSource();
+      if (eventName === 'round_finished') {
+        closeStream();
         if (payload.reply) {
-          setEvents((current) => [
-            ...current,
-            {
-              id: `assistant_final_${Date.now()}`,
-              kind: 'message',
-              role: 'assistant',
-              text: payload.reply ?? '本轮已完成。',
-              timestamp: formatTimestamp(),
-            },
-          ]);
+          const reply = String(payload.reply ?? '本轮已完成。');
+          const timestamp = formatTimestamp();
+          setEvents((current) => finalizeRoundEvents(current, reply, timestamp));
         }
         const nextProject = await refreshProject(project_id);
-        await refreshSessions(project_id, session_id);
+        await refreshSessions(project_id, nextProject.active_session_id);
         if (nextProject.active_session_id) {
           setSelectedSessionId(nextProject.active_session_id);
         }
-      });
+        return;
+      }
 
-      source.addEventListener('round_failed', async (event) => {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as { reply?: string };
-        closeEventSource();
+      if (eventName === 'round_failed') {
+        closeStream();
         setEvents((current) => [
           ...current,
           {
             id: `assistant_error_${Date.now()}`,
             kind: 'message',
             role: 'assistant',
-            text: payload.reply ?? '本轮处理失败。',
+            text: String(payload.reply ?? '本轮处理失败。'),
             timestamp: formatTimestamp(),
           },
         ]);
         await refreshProject(project_id);
-      });
-
-      source.onerror = () => {
-        closeEventSource();
-      };
+      }
     },
-    [closeEventSource, focusDocumentChange, refreshProject, refreshRenderAst, refreshSessions],
+    [closeStream, focusDocumentChange, refreshProject, refreshRenderAst, refreshSessions],
   );
 
   const submitMessage = useCallback(async () => {
@@ -452,25 +565,43 @@ export function useWorkspace() {
     setComposer('');
 
     try {
-      const response = await apiClient.sendChatMessage(project.project_id, {
-        session_id: selectedSessionId,
-        message,
-        active_section_id: activeSectionId || null,
-        active_block_id: activeBlockId,
-      });
       setProject((current) =>
         current
           ? {
               ...current,
-              active_session_id: response.session_id,
-              running_session_id: response.session_id,
-              running_round_id: response.round_id,
               is_busy: true,
             }
           : current,
       );
-      setSelectedSessionId(response.session_id);
-      connectStream(project.project_id, response.session_id);
+      closeStream();
+      const handle = await sseClient.streamChatMessage(
+        project.project_id,
+        {
+          session_id: selectedSessionId,
+          message,
+          active_section_id: activeSectionId || null,
+          active_block_id: activeBlockId,
+        },
+        (eventName, eventPayload) => {
+          void consumeStreamEvent(project.project_id, eventName, eventPayload);
+        },
+      );
+      streamRef.current = handle;
+      void handle.done.catch(async (error: unknown) => {
+        closeStream();
+        const messageText = error instanceof Error ? error.message : '流式消息处理失败。';
+        setEvents((current) => [
+          ...current,
+          {
+            id: `msg_stream_error_${Date.now()}`,
+            kind: 'message',
+            role: 'assistant',
+            text: messageText,
+            timestamp: formatTimestamp(),
+          },
+        ]);
+        await refreshProject(project.project_id);
+      });
     } catch (error: unknown) {
       const messageText = error instanceof Error ? error.message : '发送消息失败。';
       setComposer(message);
@@ -490,7 +621,8 @@ export function useWorkspace() {
     activeBlockId,
     activeSectionId,
     composer,
-    connectStream,
+    closeStream,
+    consumeStreamEvent,
     project,
     refreshProject,
     selectedSessionId,

@@ -83,8 +83,9 @@ class ExecutorEngine:
             )
 
         if declaration.id == "section_writer":
-            effective_target = str(target_section_id or "technical_solution")
-            # 若未提供 target_section_id，补读一次默认章节
+            if not target_section_id:
+                return tool_failed("missing_target_section_id", "section_writer 必须提供 target_section_id。")
+            effective_target = str(target_section_id)
             if section_snapshot is None:
                 section_snapshot = self._subagent_read_section(
                     project_id=project_id,

@@ -13,20 +13,6 @@ export type ApiClient = {
     active_block_id: string | null;
     updated_at: string;
   }>;
-  sendChatMessage: (
-    project_id: string,
-    payload: {
-      session_id?: string | null;
-      message: string;
-      active_section_id?: string | null;
-      active_block_id?: string | null;
-    },
-  ) => Promise<{
-    accepted: boolean;
-    session_id: string;
-    message_id: string;
-    round_id: string;
-  }>;
   listSessions: (project_id: string) => Promise<{ sessions: SessionSummary[] }>;
   getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: unknown[] }>;
 };
@@ -93,17 +79,6 @@ export const apiClient: ApiClient = {
       active_block_id: string | null;
       updated_at: string;
     }>(`/api/projects/${project_id}/render${query ? `?${query}` : ''}`);
-  },
-  async sendChatMessage(project_id, payload) {
-    return request<{
-      accepted: boolean;
-      session_id: string;
-      message_id: string;
-      round_id: string;
-    }>(`/api/projects/${project_id}/chat/messages`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
   },
   async listSessions(project_id) {
     return request<{ sessions: SessionSummary[] }>(`/api/projects/${project_id}/sessions`);

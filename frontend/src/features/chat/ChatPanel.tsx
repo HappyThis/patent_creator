@@ -24,6 +24,23 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
 
   const flushProcess = () => {
     if (processBuffer.length > 0) {
+      const toolCalls = processBuffer.filter((item) => item.kind === 'tool_call');
+      if (toolCalls.length === 0) {
+        for (const item of processBuffer) {
+          blocks.push({
+            kind: 'message',
+            event: {
+              id: item.id,
+              kind: 'message',
+              role: 'assistant',
+              text: item.summary ?? '',
+              timestamp: item.timestamp ?? '',
+            },
+          });
+        }
+        processBuffer = [];
+        return;
+      }
       blocks.push({ kind: 'process', items: processBuffer });
       processBuffer = [];
     }

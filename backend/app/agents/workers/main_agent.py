@@ -7,12 +7,13 @@ from ...core import ApiError
 
 
 class SupportsGenerateWithTools(Protocol):
-    async def generate_with_tools(
+    async def generate_with_tools_stream(
         self,
         *,
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        on_text_delta: Any,
         temperature: float = 0.2,
     ) -> dict[str, Any]:
         ...
@@ -124,23 +125,6 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "respond",
-            "description": "向用户输出本轮最终回复。调用后本轮即结束。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "面向用户的中文回复。",
-                    },
-                },
-                "required": ["text"],
-            },
-        },
-    },
 ]
 
 
@@ -149,13 +133,15 @@ async def decide_main_agent_step(
     *,
     system_prompt: str,
     messages: list[dict[str, Any]],
+    on_text_delta: Any | None = None,
     temperature: float = 0.2,
 ) -> MainAgentAction:
     """请求主 agent 做一步决策，返回统一的 Action 结构。"""
-    result = await llm_client.generate_with_tools(
+    result = await llm_client.generate_with_tools_stream(
         system_prompt=system_prompt,
         messages=messages,
         tools=MAIN_AGENT_TOOLS,
+        on_text_delta=on_text_delta,
         temperature=temperature,
     )
     action_type = result.get("type")

@@ -15,7 +15,7 @@ from app.services import AppServices
 class ScriptedLLMClient:
     """驱动主 agent loop 的脚本化 stub。
 
-    - generate_with_tools 按外部提供的 script 顺序返回 action。
+    - generate_with_tools_stream 按外部提供的 script 顺序返回 action。
     - generate_json 给 section_writer 用，直接返回可解析的 operations。
     """
 
@@ -23,19 +23,23 @@ class ScriptedLLMClient:
         self._script = list(script)
         self._cursor = 0
 
-    async def generate_with_tools(
+    async def generate_with_tools_stream(
         self,
         *,
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        on_text_delta: Any = None,
         temperature: float = 0.2,
     ) -> dict[str, Any]:
         if self._cursor >= len(self._script):
             raise AssertionError("ScriptedLLMClient script exhausted")
         step = self._script[self._cursor]
         self._cursor += 1
-        return step(messages)
+        result = step(messages)
+        if result.get("type") == "respond" and on_text_delta is not None:
+            await on_text_delta(str(result.get("text") or ""))
+        return result
 
     async def generate_json(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> dict[str, Any]:
         context = json.loads(user_prompt)
@@ -169,7 +173,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_main_agent_loop_max_steps_fallback(tmp_path: Path) -> None:
+async def test_main_agent_loop_max_steps_limit_response(tmp_path: Path) -> None:
     """主 agent 持续 read 不 respond，达到 max_steps 后用兜底回复结束。"""
 
     def step_read(_: list[dict[str, Any]]) -> dict[str, Any]:

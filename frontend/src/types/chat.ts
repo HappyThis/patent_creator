@@ -12,6 +12,7 @@ type EventScope = 'main' | `subagent:${string}`;
 export type AgentOutputEvent = {
   id: string;
   kind: 'agent_output';
+  timestamp?: string;
   status?: EventStatus;
   scope?: EventScope;
   tool?: string;
@@ -23,6 +24,7 @@ export type AgentOutputEvent = {
 export type ToolCallEvent = {
   id: string;
   kind: 'tool_call';
+  timestamp?: string;
   status?: EventStatus;
   scope?: EventScope;
   tool?: string;

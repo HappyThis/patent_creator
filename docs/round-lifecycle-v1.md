@@ -95,7 +95,7 @@ user_input
    - `message_id`
    - `session_id`，如果请求未提供
 4. 后端把本轮 `user_input` 写入 session 日志。
-5. 前端建立或继续监听 SSE。
+5. 前端持续读取该 `POST /api/projects/{project_id}/chat/messages` 返回的 SSE 流。
 
 并发约束：
 

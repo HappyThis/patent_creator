@@ -257,7 +257,7 @@ API 中涉及文档定位时统一使用：
 
 ### 1. `POST /api/projects/{project_id}/chat/messages`
 
-发送一条用户消息。
+发送一条用户消息，并直接建立本轮 SSE 流。
 
 请求：
 
@@ -289,10 +289,16 @@ API 中涉及文档定位时统一使用：
 - 如提供 `active_section_id` / `active_block_id`，表示前端当前焦点位置，可作为当前回合的优先上下文。
 - 不单独设计“材料管理区”或“材料上传区”API，也不单独设计 `references` 输入字段。
 
-响应：
+响应类型：
 
-```json
-{
+- `Content-Type: text/event-stream`
+- 首个事件固定为 `round_started`
+
+`round_started` 示例：
+
+```text
+event: round_started
+data: {
   "accepted": true,
   "session_id": "sess_001",
   "message_id": "msg_001",
@@ -331,11 +337,7 @@ HTTP 错误协议：
 }
 ```
 
-### 2. `GET /api/projects/{project_id}/chat/stream?session_id=sess_001`
-
-建立 SSE 流，接收主 agent 的流式过程输出。
-
-建议事件类型如下：
+同一条 `POST /api/projects/{project_id}/chat/messages` 连接中，服务端继续输出以下流式事件：
 
 #### `agent_output`
 
@@ -526,8 +528,7 @@ V1 前端最小依赖如下接口：
 3. `GET /api/projects/{project_id}/outline`
 4. `GET /api/projects/{project_id}/render`
 5. `POST /api/projects/{project_id}/chat/messages`
-6. `GET /api/projects/{project_id}/chat/stream`
-7. `POST /api/projects/{project_id}/export/markdown`
+6. `POST /api/projects/{project_id}/export/markdown`
 
 以下接口可作为调试或增强接口：
 
@@ -543,11 +544,11 @@ V1 前端最小依赖如下接口：
 
 - `POST /api/projects/{project_id}/chat/messages`
 
-### 2. 前端监听流式结果
+### 2. 前端消费流式结果
 
-前端建立：
+前端持续读取同一个：
 
-- `GET /api/projects/{project_id}/chat/stream`
+- `POST /api/projects/{project_id}/chat/messages`
 
 ### 3. 文档发生修改
 
@@ -578,7 +579,7 @@ V1 API 设计采用如下原则：
 1. 前端以 `project` 为核心资源
 2. 渲染区消费 `render_ast`
 3. Markdown 只作为导出格式
-4. chat 过程采用 SSE
+4. chat 过程采用 SSE，且由 `POST /chat/messages` 直接返回流
 5. API 文档定位使用 `section_id` 和 `block_id`
 6. 文档变更通知使用 `changed_section_ids` 和 `changed_block_ids`
 7. 参考资料通过 chat 附带，不单独做材料管理 API

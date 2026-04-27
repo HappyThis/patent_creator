@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -108,12 +107,13 @@ class StubLLMClient:
             "warnings": [],
         }
 
-    async def generate_with_tools(
+    async def generate_with_tools_stream(
         self,
         *,
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        on_text_delta: Any = None,
         temperature: float = 0.2,
     ) -> dict[str, Any]:
         """模拟主 agent loop：execute_subagent -> document_edit -> respond。"""
@@ -154,16 +154,22 @@ class StubLLMClient:
             or subagent_result["output"]["result"].get("summary")
             or "已完成本轮修改。"
         )
+        if on_text_delta is not None:
+            await on_text_delta(reply)
         return {"type": "respond", "text": reply}
 
 
-async def collect_sse_events(client: httpx.AsyncClient, project_id: str, session_id: str) -> list[tuple[str, dict]]:
+async def collect_stream_events(
+    client: httpx.AsyncClient,
+    project_id: str,
+    payload: dict[str, Any],
+) -> list[tuple[str, dict]]:
     events: list[tuple[str, dict]] = []
     current_event: str | None = None
     async with client.stream(
-        "GET",
-        f"/api/projects/{project_id}/chat/stream",
-        params={"session_id": session_id},
+        "POST",
+        f"/api/projects/{project_id}/chat/messages",
+        json=payload,
     ) as response:
         assert response.status_code == 200
         async for line in response.aiter_lines():
@@ -208,26 +214,16 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert render_response.status_code == 200
         assert render_response.json()["render_ast"]["title"] == "一种图像检测方法"
 
-        chat_response = await client.post(
-            f"/api/projects/{project_id}/chat/messages",
-            json={"message": "请补充技术效果章节，强调低算力实时性的收益。"},
+        sse_events = await collect_stream_events(
+            client,
+            project_id,
+            {"message": "请补充技术效果章节，强调低算力实时性的收益。"},
         )
-        assert chat_response.status_code == 200
-        session_id = chat_response.json()["session_id"]
-
-        for _ in range(100):
-            project_state = await client.get(f"/api/projects/{project_id}")
-            assert project_state.status_code == 200
-            if not project_state.json()["is_busy"]:
-                break
-            await asyncio.sleep(0.02)
-        else:
-            raise AssertionError("chat round did not finish in time")
-
-        sse_events = await collect_sse_events(client, project_id, session_id)
         event_names = [name for name, _ in sse_events]
+        assert event_names[0] == "round_started"
         assert "document_changed" in event_names
         assert event_names[-1] == "round_finished"
+        session_id = sse_events[0][1]["session_id"]
 
         session_events = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/events")
         assert session_events.status_code == 200
@@ -264,23 +260,17 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert export_path.exists()
         assert "技术效果" in export_path.read_text(encoding="utf-8")
 
-        second_chat_response = await client.post(
-            f"/api/projects/{project_id}/chat/messages",
-            json={
+        second_stream_events = await collect_stream_events(
+            client,
+            project_id,
+            {
                 "session_id": session_id,
                 "message": "继续完善这里的处理流程和整体架构。",
                 "active_section_id": "technical_solution",
             },
         )
-        assert second_chat_response.status_code == 200
-        for _ in range(100):
-            project_state = await client.get(f"/api/projects/{project_id}")
-            assert project_state.status_code == 200
-            if not project_state.json()["is_busy"]:
-                break
-            await asyncio.sleep(0.02)
-        else:
-            raise AssertionError("second chat round did not finish in time")
+        assert second_stream_events[0][0] == "round_started"
+        assert second_stream_events[-1][0] == "round_finished"
 
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200

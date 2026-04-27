@@ -27,6 +27,12 @@ class SessionEventBus:
             self._subscribers[key].add(queue)
         return snapshot, queue
 
+    async def subscribe_live(self, key: tuple[str, str]) -> asyncio.Queue[tuple[str, dict[str, Any]]]:
+        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+        async with self._lock:
+            self._subscribers[key].add(queue)
+        return queue
+
     async def unsubscribe(self, key: tuple[str, str], queue: asyncio.Queue[tuple[str, dict[str, Any]]]) -> None:
         async with self._lock:
             self._subscribers[key].discard(queue)
