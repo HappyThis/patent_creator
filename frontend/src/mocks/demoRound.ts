@@ -21,13 +21,36 @@ export const updatedSelectionState = {
 export function buildSessionTabs(project: ProjectState): SessionTab[] {
   return [
     {
-      id: project.activeSessionId,
+      session_id: project.active_session_id ?? 'sess_001',
+      updated_at: project.updated_at ?? project.created_at,
+      event_count: 0,
+      last_round_id: project.running_round_id,
+      latest_user_text: null,
+      is_active: true,
       title: '当前会话',
-      subtitle: project.projectId,
+      subtitle: project.project_id,
       active: true,
     },
-    { id: 'sess_003', title: 'sess_003', active: false },
-    { id: 'sess_002', title: 'sess_002', active: false },
+    {
+      session_id: 'sess_003',
+      updated_at: project.updated_at ?? project.created_at,
+      event_count: 0,
+      last_round_id: null,
+      latest_user_text: null,
+      is_active: false,
+      title: 'sess_003',
+      active: false,
+    },
+    {
+      session_id: 'sess_002',
+      updated_at: project.updated_at ?? project.created_at,
+      event_count: 0,
+      last_round_id: null,
+      latest_user_text: null,
+      is_active: false,
+      title: 'sess_002',
+      active: false,
+    },
   ];
 }
 

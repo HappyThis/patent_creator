@@ -323,7 +323,7 @@ button {
 
 .message-row.user {
   align-self: stretch;
-  align-items: center;
+  align-items: flex-end;
 }
 
 .message-row.assistant {

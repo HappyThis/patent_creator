@@ -264,21 +264,7 @@ API 中涉及文档定位时统一使用：
 ```json
 {
   "session_id": "sess_001",
-  "message": "请把技术方案这一章写得更具体一点。",
-  "references": [
-    {
-      "type": "text",
-      "content": "现有方案主要包括特征提取和检测模块。"
-    },
-    {
-      "type": "url",
-      "content": "https://example.com/ref"
-    },
-    {
-      "type": "file_path",
-      "content": "/absolute/path/to/file.txt"
-    }
-  ],
+  "message": "请把技术方案这一章写得更具体一点，并强调低算力实时性约束。",
   "active_section_id": "technical_solution",
   "active_block_id": null
 }
@@ -288,7 +274,6 @@ API 中涉及文档定位时统一使用：
 
 - `session_id`：当前 chat 会话标识，可选
 - `message`：用户本轮输入
-- `references`：可选的参考资料
 - `active_section_id`：可选，用于表示当前焦点章节
 - `active_block_id`：可选，用于表示当前焦点 block
 
@@ -299,11 +284,10 @@ API 中涉及文档定位时统一使用：
 - `active_session_id` 始终更新为最近聊过天的 session。
 - 同一 project 任意时刻只允许一个 session 处于执行中。
 - 只要存在未处理完成的消息，前端发送按钮保持禁用，且不允许新开 session 发起执行。
-- `text` 引用直接进入本轮上下文。
-- `url` 引用在当前回合按需抓取并进入本轮上下文。
-- `file_path` 引用在当前回合按需读取并进入本轮上下文。
-- 参考资料不复制到项目目录，不做缓存目录，不作为项目资源持久化。
-- 不单独设计“材料管理区”或“材料上传区”API。
+- 用户输入的全部有效信息都包含在 `message` 文本中。
+- agent 在当前回合内自行从 `message` 中提取术语、目标、章节线索和待补信息。
+- 如提供 `active_section_id` / `active_block_id`，表示前端当前焦点位置，可作为当前回合的优先上下文。
+- 不单独设计“材料管理区”或“材料上传区”API，也不单独设计 `references` 输入字段。
 
 响应：
 
@@ -461,6 +445,27 @@ data: {
 
 ## 八、Session 日志接口
 
+### `GET /api/projects/{project_id}/sessions`
+
+返回当前 project 下已有 session 的摘要列表。
+
+响应：
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "sess_001",
+      "updated_at": "2026-04-23T21:15:00+08:00",
+      "event_count": 8,
+      "last_round_id": "round_001",
+      "latest_user_text": "请补写技术方案。",
+      "is_active": true
+    }
+  ]
+}
+```
+
 ### `GET /api/projects/{project_id}/sessions/{session_id}/events`
 
 返回指定 session 的事件日志。
@@ -527,6 +532,7 @@ V1 前端最小依赖如下接口：
 以下接口可作为调试或增强接口：
 
 - `GET /api/projects/{project_id}/document`
+- `GET /api/projects/{project_id}/sessions`
 - `GET /api/projects/{project_id}/sessions/{session_id}/events`
 
 ## 十一、一轮交互的最小链路

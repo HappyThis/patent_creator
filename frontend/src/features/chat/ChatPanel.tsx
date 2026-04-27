@@ -9,6 +9,7 @@ type ChatPanelProps = {
   isBusy: boolean;
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
+  onSessionSelect: (session_id: string) => void;
 };
 
 type RenderBlock =
@@ -47,6 +48,7 @@ export function ChatPanel({
   isBusy,
   onComposerChange,
   onSubmit,
+  onSessionSelect,
 }: ChatPanelProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -63,10 +65,12 @@ export function ChatPanel({
         <div className="session-tab-strip" role="tablist" aria-label="Sessions">
           {sessionTabs.map((tab) => (
             <button
-              key={tab.id}
+              key={tab.session_id}
               className={`session-card-tab ${tab.active ? 'active' : ''}`}
               role="tab"
               aria-selected={tab.active}
+              onClick={() => onSessionSelect(tab.session_id)}
+              disabled={isBusy && !tab.active}
             >
               <span className="session-card-title">{tab.title}</span>
               {tab.subtitle ? <span className="session-card-subtitle">{tab.subtitle}</span> : null}

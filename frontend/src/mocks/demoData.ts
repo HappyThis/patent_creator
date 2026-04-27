@@ -1,11 +1,14 @@
 import { ChatEvent, ProjectState, RenderAst, RenderNode } from '../types';
 
 export const initialProject: ProjectState = {
-  projectId: 'patent_creator',
+  project_id: 'patent_creator',
   title: '一种图像检测方法',
-  activeSessionId: 'sess_003',
-  isBusy: false,
-  runningRoundId: null,
+  created_at: '2026-04-23T21:00:00+08:00',
+  updated_at: '2026-04-23T21:10:00+08:00',
+  active_session_id: 'sess_003',
+  running_session_id: null,
+  is_busy: false,
+  running_round_id: null,
 };
 
 export const initialRenderAst: RenderAst = {

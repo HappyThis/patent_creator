@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { ChatPanel } from '../features/chat/ChatPanel';
 import { OutlinePanel } from '../features/outline/OutlinePanel';
 import { PreviewPanel } from '../features/preview/PreviewPanel';
-import { useDemoWorkspace } from '../hooks/useDemoWorkspace';
+import { useWorkspace } from '../hooks/useWorkspace';
 
 function App() {
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -19,8 +19,9 @@ function App() {
     setComposer,
     setActiveSectionId,
     selectSection,
-    simulateRound,
-  } = useDemoWorkspace();
+    submitMessage,
+    handleSessionSelect,
+  } = useWorkspace();
 
   return (
     <div className="app-shell">
@@ -50,7 +51,8 @@ function App() {
           composer={composer}
           isBusy={isBusy}
           onComposerChange={setComposer}
-          onSubmit={simulateRound}
+          onSubmit={submitMessage}
+          onSessionSelect={handleSessionSelect}
         />
       </main>
     </div>

@@ -168,8 +168,7 @@ v1 建议取值：
   "call_id": null,
   "parent_call_id": null,
   "payload": {
-    "text": "我想写一个图像检测方向的专利交底书。",
-    "references": []
+    "text": "我想写一个图像检测方向的专利交底书。"
   }
 }
 ```
@@ -354,7 +353,7 @@ v1 建议取值：
 ## 十、完整示例
 
 ```jsonl
-{"id":"evt_000001","ts":"2026-04-23T15:30:00+08:00","type":"user_input","seq":1,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":null,"parent_call_id":null,"payload":{"text":"我想写一个图像检测方向的专利交底书。","references":[]}}
+{"id":"evt_000001","ts":"2026-04-23T15:30:00+08:00","type":"user_input","seq":1,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":null,"parent_call_id":null,"payload":{"text":"我想写一个图像检测方向的专利交底书。"}}
 {"id":"evt_000002","ts":"2026-04-23T15:30:10+08:00","type":"tool_call","seq":2,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","arguments":{"agent_id":"material_analyst","goal":"从当前用户输入中提炼技术方向、目标和待确认信息。","call_type":"task_only_specialist","target_section_id":null,"target_block_id":null}}}
 {"id":"evt_000003","ts":"2026-04-23T15:30:11+08:00","type":"tool_call","seq":3,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","arguments":{"action":"get_outline"}}}
 {"id":"evt_000004","ts":"2026-04-23T15:30:11+08:00","type":"tool_result","seq":4,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","status":"success","output":{"sections":[]}}}
