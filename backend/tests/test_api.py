@@ -108,6 +108,54 @@ class StubLLMClient:
             "warnings": [],
         }
 
+    async def generate_with_tools(
+        self,
+        *,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        """模拟主 agent loop：execute_subagent -> document_edit -> respond。"""
+        tool_results = [msg for msg in messages if msg.get("role") == "tool"]
+        user_payload = json.loads(messages[0]["content"]) if messages else {}
+
+        if not tool_results:
+            user_message = user_payload.get("user_message", "")
+            target_section_id = user_payload.get("active_section_id")
+            if not target_section_id:
+                target_section_id = "technical_effects" if "技术效果" in user_message else "technical_solution"
+            return {
+                "type": "tool_call",
+                "tool": "execute_subagent",
+                "arguments": {
+                    "agent_id": "section_writer",
+                    "call_type": "rich_context_specialist",
+                    "goal": f"根据用户最新请求完善章节：{user_message}",
+                    "target_section_id": target_section_id,
+                    "user_message": user_message,
+                },
+                "tool_call_id": "stub_call_1",
+            }
+
+        if len(tool_results) == 1:
+            subagent_result = json.loads(tool_results[0]["content"])
+            operations = subagent_result["output"]["result"]["proposal"]["operations"]
+            return {
+                "type": "tool_call",
+                "tool": "document_edit",
+                "arguments": {"operations": operations},
+                "tool_call_id": "stub_call_2",
+            }
+
+        subagent_result = json.loads(tool_results[0]["content"])
+        reply = (
+            subagent_result["output"]["result"].get("reply")
+            or subagent_result["output"]["result"].get("summary")
+            or "已完成本轮修改。"
+        )
+        return {"type": "respond", "text": reply}
+
 
 async def collect_sse_events(client: httpx.AsyncClient, project_id: str, session_id: str) -> list[tuple[str, dict]]:
     events: list[tuple[str, dict]] = []

@@ -17,12 +17,19 @@ class Settings:
     cors_allow_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     round_step_delay: float = 0.15
     round_finish_delay: float = 0.1
+    main_agent_max_steps: int = 10
+    log_dir: Path = Path("logs")
+    log_level: str = "INFO"
+    log_backup_days: int = 30
+    log_llm_payload: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
         _load_repo_env()
         backend_dir = Path(__file__).resolve().parents[2]
-        data_dir = Path(os.getenv("PATENT_CREATOR_DATA_DIR", backend_dir / "data"))
+        repo_dir = Path(__file__).resolve().parents[3]
+        data_dir = Path(_env_or("PATENT_CREATOR_DATA_DIR", str(backend_dir / "data")))
+        log_dir = Path(_env_or("PATENT_CREATOR_LOG_DIR", str(repo_dir / "logs")))
         return cls(
             data_dir=data_dir,
             git_user_name=os.getenv("PATENT_CREATOR_GIT_USER_NAME", "Patent Creator"),
@@ -37,7 +44,20 @@ class Settings:
             ),
             round_step_delay=float(os.getenv("PATENT_CREATOR_ROUND_STEP_DELAY", "0.15")),
             round_finish_delay=float(os.getenv("PATENT_CREATOR_ROUND_FINISH_DELAY", "0.1")),
+            main_agent_max_steps=int(os.getenv("PATENT_CREATOR_MAIN_AGENT_MAX_STEPS", "10")),
+            log_dir=log_dir,
+            log_level=os.getenv("PATENT_CREATOR_LOG_LEVEL", "INFO"),
+            log_backup_days=int(os.getenv("PATENT_CREATOR_LOG_BACKUP_DAYS", "30")),
+            log_llm_payload=_parse_bool_env(os.getenv("PATENT_CREATOR_LOG_LLM_PAYLOAD"), False),
         )
+
+
+def _env_or(name: str, default: str) -> str:
+    """读取环境变量；未设置或空字符串均回退到 default。"""
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value
 
 
 def _parse_csv_env(raw_value: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -45,6 +65,12 @@ def _parse_csv_env(raw_value: str | None, default: tuple[str, ...]) -> tuple[str
         return default
     values = tuple(item.strip() for item in raw_value.split(",") if item.strip())
     return values or default
+
+
+def _parse_bool_env(raw_value: str | None, default: bool) -> bool:
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _load_repo_env() -> None:

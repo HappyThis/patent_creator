@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
+from ..agents.prompts import build_main_agent_system_prompt
+from ..agents.runtime.openai_compat import OpenAICompatibleClient
+from ..agents.workers import MainAgentAction, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
-from ..domain import derive_message_intent
+from ..runtime.context import ContextManager
 from ..runtime.executor import ExecutorEngine
 from ..schemas import ChatMessageRequest, ChatMessageResponse
 from ..storage.workspace_store import WorkspaceStore
 from .event_bus import SessionEventBus
+
+logger = logging.getLogger("patent_creator.chat")
 
 
 @dataclass(slots=True)
@@ -21,18 +27,34 @@ class RoundState:
     round_id: str
 
 
+DEFAULT_CHANGED_PAYLOAD: dict[str, Any] = {
+    "changed": False,
+    "changed_section_ids": [],
+    "changed_block_ids": [],
+    "primary_section_id": None,
+    "primary_block_id": None,
+    "change_scope": None,
+    "active_section_id": None,
+    "active_block_id": None,
+}
+
+
 class ChatService:
     def __init__(
         self,
         store: WorkspaceStore,
+        context_manager: ContextManager,
         executor: ExecutorEngine,
         bus: SessionEventBus,
         settings: Settings,
+        llm_client: OpenAICompatibleClient,
     ) -> None:
         self.store = store
+        self.context_manager = context_manager
         self.executor = executor
         self.bus = bus
         self.settings = settings
+        self.llm_client = llm_client
         self._project_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def start_round(self, project_id: str, payload: ChatMessageRequest) -> ChatMessageResponse:
@@ -78,99 +100,146 @@ class ChatService:
 
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
-        disclosure = self.store.get_disclosure(project_id)
-        intent = derive_message_intent(disclosure["sections"], payload.message, payload.active_section_id)
-        changed_payload: dict[str, Any] = {
-            "changed": False,
-            "changed_section_ids": [],
-            "changed_block_ids": [],
-            "primary_section_id": intent.target_section_id,
-            "primary_block_id": None,
-            "change_scope": None,
-            "active_section_id": intent.target_section_id,
-            "active_block_id": payload.active_block_id,
-        }
+        system_prompt = build_main_agent_system_prompt()
+        messages = self.context_manager.build_main_agent_messages(
+            project_id,
+            state.session_id,
+            user_message=payload.message,
+            active_section_id=payload.active_section_id,
+            active_block_id=payload.active_block_id,
+        )
+        changed_payload: dict[str, Any] = dict(DEFAULT_CHANGED_PAYLOAD)
+        changed_payload["active_section_id"] = payload.active_section_id
+        changed_payload["active_block_id"] = payload.active_block_id
+        final_reply: str | None = None
+        logger.info(
+            "round started project=%s session=%s round=%s message_len=%d",
+            project_id,
+            state.session_id,
+            state.round_id,
+            len(payload.message or ""),
+        )
+
         try:
             await self._sleep()
-            await self._emit_agent_output(
-                project_id,
-                state,
-                f"我会先阅读你的文本内容，定位到“{intent.target_section_id}”相关章节，再把本轮变更同步到预览区。",
-            )
+            max_steps = max(1, self.settings.main_agent_max_steps)
 
-            await self._sleep()
-            read_arguments = {"action": "get_section", "section_id": intent.target_section_id, "include_children": True}
-            read_result = self.executor.document_read(project_id, read_arguments)
-            await self._emit_tool(
-                project_id,
-                state,
-                tool="document_read",
-                arguments=read_arguments,
-                summary_started=f"开始读取 {intent.target_section_id}",
-                summary_finished=f"{intent.target_section_id} 已读取",
-                result=read_result,
-            )
-            self._raise_if_tool_failed(read_result)
+            for step_index in range(max_steps):
+                logger.info(
+                    "round step=%d/%d project=%s session=%s",
+                    step_index + 1,
+                    max_steps,
+                    project_id,
+                    state.session_id,
+                )
+                action = await decide_main_agent_step(
+                    self.llm_client,
+                    system_prompt=system_prompt,
+                    messages=messages,
+                )
 
-            await self._sleep()
-            subagent_arguments = {
-                "agent_id": "section_writer",
-                "goal": f"根据用户原始请求提炼章节信息并补全正文。匹配方式：{intent.matched_by}。用户原始请求：{payload.message}",
-                "call_type": "rich_context_specialist",
-                "target_section_id": intent.target_section_id,
-                "target_block_id": payload.active_block_id,
-                "user_message": payload.message,
-            }
-            subagent_result = await self._emit_execute_subagent(
-                project_id,
-                state,
-                arguments=subagent_arguments,
-            )
-            self._raise_if_tool_failed(subagent_result)
+                if action.type == "respond":
+                    final_reply = action.text or ""
+                    logger.info(
+                        "round step=%d action=respond text_len=%d",
+                        step_index + 1,
+                        len(final_reply),
+                    )
+                    messages.append({"role": "assistant", "content": final_reply})
+                    await self._emit_agent_output(project_id, state, final_reply)
+                    break
 
-            await self._sleep()
-            operations = subagent_result["output"]["result"]["proposal"]["operations"]
-            edit_arguments = {"operations": operations}
-            edit_result = self.executor.document_edit(project_id, edit_arguments)
-            await self._emit_tool(
-                project_id,
-                state,
-                tool="document_edit",
-                arguments=edit_arguments,
-                summary_started="开始写入 disclosure.json",
-                summary_finished="文档更新已完成",
-                result=edit_result,
-            )
-            self._raise_if_tool_failed(edit_result)
-            changed_payload = {
-                "changed": True,
-                **edit_result["output"],
-                "active_section_id": edit_result["output"]["primary_section_id"],
-                "active_block_id": edit_result["output"]["primary_block_id"],
-            }
-            await self.bus.publish(key, "document_changed", changed_payload)
+                # tool_call 分支
+                tool_call_id = action.tool_call_id or generate_id("llm_call")
+                tool_name = action.tool or ""
+                arguments = action.arguments or {}
+                logger.info(
+                    "round step=%d action=tool_call tool=%s arguments=%s",
+                    step_index + 1,
+                    tool_name,
+                    arguments,
+                )
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                                },
+                            }
+                        ],
+                    }
+                )
+
+                result = await self._dispatch_tool(project_id, state, tool_name, arguments)
+                logger.info(
+                    "round step=%d tool=%s status=%s",
+                    step_index + 1,
+                    tool_name,
+                    result.get("status"),
+                )
+                self._raise_if_tool_failed(result)
+
+                if tool_name == "document_edit":
+                    output = result["output"]
+                    changed_payload = {
+                        "changed": True,
+                        **output,
+                        "active_section_id": output.get("primary_section_id"),
+                        "active_block_id": output.get("primary_block_id"),
+                    }
+                    await self.bus.publish(key, "document_changed", changed_payload)
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
+                await self._sleep()
+            else:
+                final_reply = "本轮步数已达上限，请继续补充信息或重试。"
+                logger.warning(
+                    "round max_steps_reached project=%s session=%s max_steps=%d",
+                    project_id,
+                    state.session_id,
+                    max_steps,
+                )
+                await self._emit_agent_output(project_id, state, final_reply)
 
             await self._sleep(self.settings.round_finish_delay)
-            final_reply = (
-                subagent_result["output"]["result"].get("reply")
-                or subagent_result["output"]["result"].get("summary")
-                or f"我已经根据你的文本内容更新了“{intent.target_section_id}”对应章节。"
-            )
-            await self._emit_agent_output(project_id, state, final_reply)
-
             committed, commit_error = await self._commit(project_id, changed_payload)
             await self._set_project_idle(project_id)
+            logger.info(
+                "round finished project=%s session=%s changed=%s committed=%s",
+                project_id,
+                state.session_id,
+                changed_payload.get("changed"),
+                committed,
+            )
             await self.bus.publish(
                 key,
                 "round_finished",
                 {
-                    "reply": final_reply,
+                    "reply": final_reply or "",
                     **changed_payload,
                     "committed": committed,
                     "commit_error": commit_error,
                 },
             )
         except Exception as exc:
+            logger.exception(
+                "round failed project=%s session=%s round=%s",
+                project_id,
+                state.session_id,
+                state.round_id,
+            )
             await self._set_project_idle(project_id)
             await self.bus.publish(
                 key,
@@ -181,6 +250,45 @@ class ChatService:
                     "reply": "本轮未完成，请重试或补充信息。",
                 },
             )
+
+    async def _dispatch_tool(
+        self,
+        project_id: str,
+        state: RoundState,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        if tool_name == "document_read":
+            result = self.executor.document_read(project_id, arguments)
+            section_id = arguments.get("section_id") or arguments.get("block_id") or ""
+            await self._emit_tool(
+                project_id,
+                state,
+                tool="document_read",
+                arguments=arguments,
+                summary_started=f"开始读取 {section_id}" if section_id else "开始读取章节",
+                summary_finished=f"{section_id} 已读取" if section_id else "章节已读取",
+                result=result,
+            )
+            return result
+
+        if tool_name == "document_edit":
+            result = self.executor.document_edit(project_id, arguments)
+            await self._emit_tool(
+                project_id,
+                state,
+                tool="document_edit",
+                arguments=arguments,
+                summary_started="开始写入 disclosure.json",
+                summary_finished="文档更新已完成",
+                result=result,
+            )
+            return result
+
+        if tool_name == "execute_subagent":
+            return await self._emit_execute_subagent(project_id, state, arguments=arguments)
+
+        raise ApiError(400, "unsupported_main_tool", f"主 agent 不支持的工具：{tool_name}")
 
     async def _emit_agent_output(self, project_id: str, state: RoundState, text: str) -> None:
         self.store.append_session_event(
@@ -259,7 +367,7 @@ class ChatService:
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         call_id = generate_id("call")
-        agent_id = arguments["agent_id"]
+        agent_id = str(arguments.get("agent_id") or "")
         self.store.append_session_event(
             project_id,
             state.session_id,
@@ -278,41 +386,18 @@ class ChatService:
                 "parent_call_id": None,
                 "scope": "main",
                 "tool": "execute_subagent",
-                "summary": f"已启动 {agent_id}",
+                "summary": f"已启动 {agent_id}" if agent_id else "已启动子 agent",
             },
         )
 
-        sub_call_id = generate_id("call")
-        sub_read_arguments = {
-            "action": "get_section",
-            "section_id": arguments.get("target_section_id") or "technical_solution",
-            "include_children": True,
-        }
-        self.store.append_session_event(
+        result = await self.executor.execute_subagent(
             project_id,
-            state.session_id,
-            event_type="tool_call",
-            scope=f"subagent:{agent_id}",
+            arguments,
+            session_id=state.session_id,
             round_id=state.round_id,
             message_id=state.message_id,
-            call_id=sub_call_id,
             parent_call_id=call_id,
-            payload={"tool": "document_read", "arguments": sub_read_arguments},
         )
-        sub_read_result = self.executor.document_read(project_id, sub_read_arguments, scope="subagent")
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_result",
-            scope=f"subagent:{agent_id}",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=sub_call_id,
-            parent_call_id=call_id,
-            payload={"tool": "document_read", **sub_read_result},
-        )
-
-        result = await self.executor.execute_subagent(project_id, arguments, session_id=state.session_id)
         self.store.append_session_event(
             project_id,
             state.session_id,
@@ -331,7 +416,7 @@ class ChatService:
                 "parent_call_id": None,
                 "scope": "main",
                 "tool": "execute_subagent",
-                "summary": f"{agent_id} 已完成",
+                "summary": f"{agent_id} 已完成" if agent_id else "子 agent 已完成",
                 "result": result,
             },
         )

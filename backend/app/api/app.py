@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from ..core import ApiError, Settings
+from ..core import ApiError, Settings, setup_logging
 from ..schemas import ErrorEnvelope
 from ..services import AppServices
 from .routes import (
@@ -20,6 +20,11 @@ from .routes import (
 
 def create_app(settings: Settings | None = None, services: AppServices | None = None) -> FastAPI:
     active_settings = settings or Settings.from_env()
+    setup_logging(
+        active_settings.log_dir,
+        active_settings.log_level,
+        backup_count=active_settings.log_backup_days,
+    )
     active_services = services or AppServices(active_settings)
 
     @asynccontextmanager

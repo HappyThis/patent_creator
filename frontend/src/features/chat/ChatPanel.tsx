@@ -1,4 +1,6 @@
-import { KeyboardEvent } from 'react';
+import { CompositionEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ChatEvent, ChatMessageEvent, ProcessEvent, SessionTab } from '../../types';
 import { TimelineList } from '../timeline/TimelineList';
 
@@ -50,14 +52,38 @@ export function ChatPanel({
   onSubmit,
   onSessionSelect,
 }: ChatPanelProps) {
+  const [isComposing, setIsComposing] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const handleCompositionStart = (_event: CompositionEvent<HTMLTextAreaElement>) => {
+    setIsComposing(true);
+  };
+
+  const handleCompositionEnd = (_event: CompositionEvent<HTMLTextAreaElement>) => {
+    setIsComposing(false);
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      onSubmit();
+    if (event.key !== 'Enter' || event.shiftKey) {
+      return;
     }
+    // 输入法组合中，回车用于确认候选词，不应触发发送。
+    // isComposing 覆盖绝大多数浏览器；event.nativeEvent.isComposing / keyCode===229 兜底。
+    if (isComposing || event.nativeEvent.isComposing || event.keyCode === 229) {
+      return;
+    }
+    event.preventDefault();
+    onSubmit();
   };
 
   const blocks = buildRenderBlocks(events);
+
+  useEffect(() => {
+    // 每次事件更新后滚动到底部，确保最新消息可见。
+    const container = scrollRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [events, sessionTabs]);
 
   return (
     <aside className="chat-panel">
@@ -79,7 +105,7 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className="chat-scroll">
+      <div className="chat-scroll" ref={scrollRef}>
         <section className="chat-thread">
           {blocks.map((block, index) => {
             if (block.kind === 'message') {
@@ -87,7 +113,18 @@ export function ChatPanel({
               return (
                 <article key={event.id} className={`message-row ${event.role}`}>
                   <div className={`message-bubble ${event.role}`}>
-                    <p>{event.text}</p>
+                    <div className="markdown-body">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          a: ({ node: _node, ...props }) => (
+                            <a {...props} target="_blank" rel="noopener noreferrer" />
+                          ),
+                        }}
+                      >
+                        {event.text ?? ''}
+                      </ReactMarkdown>
+                    </div>
                   </div>
                   <time>{event.timestamp}</time>
                 </article>
@@ -105,6 +142,8 @@ export function ChatPanel({
             value={composer}
             onChange={(event) => onComposerChange(event.target.value)}
             onKeyDown={handleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder="请输入需求"
             rows={3}
             disabled={isBusy}

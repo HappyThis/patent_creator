@@ -16,4 +16,11 @@ class AppServices:
         self.llm_client = llm_client or OpenAICompatibleClient(settings)
         self.executor = ExecutorEngine(self.store, self.context_manager, self.llm_client)
         self.bus = SessionEventBus()
-        self.chat = ChatService(self.store, self.executor, self.bus, settings)
+        self.chat = ChatService(
+            self.store,
+            self.context_manager,
+            self.executor,
+            self.bus,
+            settings,
+            self.llm_client,
+        )
