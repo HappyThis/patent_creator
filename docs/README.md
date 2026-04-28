@@ -2,7 +2,7 @@
 
 ## 当前文档
 
-当前 `docs` 目录包含 12 份核心设计文档：
+当前 `docs` 目录包含 13 份核心设计/状态文档：
 
 1. [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
 2. [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
@@ -16,6 +16,7 @@
 10. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
 11. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
 12. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
+13. [后端实现状态 v1](/Users/yangchaoqun/myProj/patent_creator/docs/backend-implementation-status-v1.md)
 
 ## 是否需要合并
 

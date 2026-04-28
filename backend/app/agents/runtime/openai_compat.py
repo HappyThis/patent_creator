@@ -38,6 +38,7 @@ class OpenAICompatibleClient:
             base_url=self.settings.openai_compat_base_url,
             api_key=self.settings.openai_compat_api_key,
             timeout=self.settings.llm_timeout,
+            max_retries=self.settings.llm_max_retries,
         )
         return self._client
 
@@ -60,12 +61,12 @@ class OpenAICompatibleClient:
         try:
             completion = await client.chat.completions.create(
                 model=self.settings.openai_model,
-                temperature=temperature,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                extra_body=self._thinking_extra_body(),
             )
         except APIStatusError as exc:
             logger.warning("generate_json http_error status=%s body=%s", exc.status_code, _describe_api_error(exc))
@@ -98,7 +99,6 @@ class OpenAICompatibleClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
-        temperature: float = 0.2,
     ) -> dict[str, Any]:
         client = self._require_client()
         tool_names = [t.get("function", {}).get("name") for t in tools]
@@ -112,7 +112,6 @@ class OpenAICompatibleClient:
         try:
             stream = await client.chat.completions.create(
                 model=self.settings.openai_model,
-                temperature=temperature,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     *messages,
@@ -120,6 +119,7 @@ class OpenAICompatibleClient:
                 tools=tools,
                 tool_choice="auto",
                 stream=True,
+                extra_body=self._thinking_extra_body(),
             )
         except APIStatusError as exc:
             logger.warning(
@@ -133,6 +133,7 @@ class OpenAICompatibleClient:
             raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
 
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
         usage: Any = None
         async for chunk in stream:
@@ -140,6 +141,10 @@ class OpenAICompatibleClient:
             if not getattr(chunk, "choices", None):
                 continue
             delta = chunk.choices[0].delta
+
+            reasoning_delta = getattr(delta, "reasoning_content", None)
+            if isinstance(reasoning_delta, str) and reasoning_delta:
+                reasoning_parts.append(reasoning_delta)
 
             content_delta = getattr(delta, "content", None)
             if isinstance(content_delta, str) and content_delta:
@@ -185,33 +190,74 @@ class OpenAICompatibleClient:
                     item["function"]["arguments"] += str(function_arguments)
 
         elapsed = time.monotonic() - started
+        content = "".join(content_parts)
+        reasoning_content = "".join(reasoning_parts)
         if tool_calls:
-            first = tool_calls[min(tool_calls.keys())]
-            name = str(first["function"].get("name") or "").strip()
-            if not name:
-                raise ApiError(502, "llm_invalid_tool_call", "模型返回的 tool_call 缺少 name。")
-            arguments = self._parse_tool_arguments(first["function"].get("arguments"))
+            ordered_tool_calls = [tool_calls[index] for index in sorted(tool_calls)]
+            parsed_tool_calls = [self._parse_tool_call(item, index) for index, item in enumerate(ordered_tool_calls)]
             logger.info(
-                "generate_with_tools_stream done elapsed=%.2fs usage=%s decision=tool_call tool=%s",
+                "generate_with_tools_stream done elapsed=%.2fs usage=%s decision=tool_calls count=%d",
                 elapsed,
                 _describe_usage(usage),
-                name,
+                len(parsed_tool_calls),
             )
             return {
-                "type": "tool_call",
-                "tool": name,
-                "arguments": arguments,
-                "tool_call_id": str(first.get("id") or ""),
+                "type": "tool_calls",
+                "tool_calls": parsed_tool_calls,
+                "assistant_message": self._assistant_message(
+                    content=content,
+                    reasoning_content=reasoning_content,
+                    tool_calls=ordered_tool_calls,
+                ),
             }
 
-        text = "".join(content_parts)
         logger.info(
             "generate_with_tools_stream done elapsed=%.2fs usage=%s decision=respond text_len=%d",
             elapsed,
             _describe_usage(usage),
-            len(text),
+            len(content),
         )
-        return {"type": "respond", "text": text}
+        return {
+            "type": "respond",
+            "text": content,
+            "assistant_message": self._assistant_message(
+                content=content,
+                reasoning_content=reasoning_content,
+                tool_calls=[],
+            ),
+        }
+
+    @staticmethod
+    def _assistant_message(
+        *,
+        content: str,
+        reasoning_content: str,
+        tool_calls: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        message: dict[str, Any] = {"role": "assistant", "content": content}
+        if reasoning_content:
+            message["reasoning_content"] = reasoning_content
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        return message
+
+    @staticmethod
+    def _thinking_extra_body() -> dict[str, Any]:
+        return {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+
+    @classmethod
+    def _parse_tool_call(cls, raw_call: dict[str, Any], index: int) -> dict[str, Any]:
+        tool_call_id = str(raw_call.get("id") or "").strip()
+        if not tool_call_id:
+            raise ApiError(502, "llm_invalid_tool_call", f"模型返回的 tool_calls[{index}] 缺少 id。")
+        function = raw_call.get("function")
+        if not isinstance(function, dict):
+            raise ApiError(502, "llm_invalid_tool_call", f"模型返回的 tool_calls[{index}] 缺少 function。")
+        name = str(function.get("name") or "").strip()
+        if not name:
+            raise ApiError(502, "llm_invalid_tool_call", f"模型返回的 tool_calls[{index}] 缺少 function.name。")
+        arguments = cls._parse_tool_arguments(function.get("arguments"))
+        return {"tool": name, "arguments": arguments, "tool_call_id": tool_call_id}
 
     @staticmethod
     def _extract_text(completion: Any) -> str:

@@ -58,7 +58,7 @@ class WorkspaceStore:
         return self.read_json(path)
 
     def save_disclosure(self, project_id: str, disclosure: dict[str, Any]) -> None:
-        self.write_json(self.disclosure_file(project_id), disclosure)
+        self.write_json_atomic(self.disclosure_file(project_id), disclosure)
 
     def session_exists(self, project_id: str, session_id: str) -> bool:
         return self.session_file(project_id, session_id).exists()
@@ -190,6 +190,12 @@ class WorkspaceStore:
     @staticmethod
     def write_json(path: Path, payload: dict[str, Any]) -> None:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+        tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(path)
 
     @staticmethod
     def read_json(path: Path) -> dict[str, Any]:

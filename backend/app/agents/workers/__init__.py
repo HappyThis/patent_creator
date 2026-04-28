@@ -6,6 +6,7 @@ from .consistency_reviewer import (
 from .main_agent import (
     MAIN_AGENT_TOOLS,
     MainAgentAction,
+    MainAgentToolCall,
     SupportsGenerateWithTools,
     decide_main_agent_step,
 )
@@ -29,6 +30,7 @@ from .solution_refiner import (
 __all__ = [
     "MAIN_AGENT_TOOLS",
     "MainAgentAction",
+    "MainAgentToolCall",
     "SupportsGenerateJson",
     "SupportsGenerateWithTools",
     "build_consistency_reviewer_context",

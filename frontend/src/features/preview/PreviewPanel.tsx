@@ -1,11 +1,11 @@
 import { RefObject, useEffect } from 'react';
 import { RenderAst } from '../../types';
+import { PreviewFocusTarget } from '../../hooks/useWorkspaceSelection';
 import { renderPreviewNodes } from './renderPreviewNodes';
 
 type PreviewPanelProps = {
   renderAst: RenderAst;
-  activeSectionId: string;
-  activeBlockId: string | null;
+  previewFocusTarget: PreviewFocusTarget | null;
   recentSectionIds: string[];
   recentBlockIds: string[];
   previewRef: RefObject<HTMLDivElement>;
@@ -14,8 +14,7 @@ type PreviewPanelProps = {
 
 export function PreviewPanel({
   renderAst,
-  activeSectionId,
-  activeBlockId,
+  previewFocusTarget,
   recentSectionIds,
   recentBlockIds,
   previewRef,
@@ -25,15 +24,18 @@ export function PreviewPanel({
     if (!previewRef.current) {
       return;
     }
+    if (!previewFocusTarget?.sectionId) {
+      return;
+    }
 
-    const selector = activeBlockId
-      ? `[data-block-id="${activeBlockId}"]`
-      : `[data-anchor="${activeSectionId}"]`;
+    const selector = previewFocusTarget.blockId
+      ? `[data-block-id="${previewFocusTarget.blockId}"]`
+      : `[data-anchor="${previewFocusTarget.sectionId}"]`;
     const element = previewRef.current.querySelector(selector);
     if (element instanceof HTMLElement) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [activeBlockId, activeSectionId, previewRef]);
+  }, [previewFocusTarget, previewRef]);
 
   useEffect(() => {
     const container = previewRef.current;

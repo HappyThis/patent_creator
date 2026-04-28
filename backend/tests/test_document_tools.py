@@ -16,7 +16,8 @@ class DummyLLMClient(OpenAICompatibleClient):
 def make_executor(tmp_path: Path) -> tuple[ExecutorEngine, str]:
     store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
     project = store.create_project("一种图像检测方法")
-    return ExecutorEngine(store, ContextManager(store), DummyLLMClient()), project.project_id
+    settings = Settings(data_dir=tmp_path / "data", git_user_name="Test User", git_user_email="test@example.com")
+    return ExecutorEngine(store, ContextManager(store), DummyLLMClient(), settings), project.project_id
 
 
 def test_document_read_and_edit_protocol(tmp_path: Path) -> None:
@@ -86,3 +87,25 @@ def test_document_edit_is_atomic_and_permission_checked(tmp_path: Path) -> None:
     search_result = executor.document_read(project_id, {"action": "search_blocks", "query": "不应写入"})
     assert search_result["status"] == "success"
     assert search_result["output"]["matches"] == []
+
+
+def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+
+    pwd_result = executor.exec_command(project_id, {"command": "pwd"})
+    assert pwd_result["status"] == "success"
+    assert pwd_result["output"]["exit_code"] == 0
+
+    pipe_result = executor.exec_command(project_id, {"command": "printf ok | wc -c"})
+    assert pipe_result["status"] == "success"
+    assert pipe_result["output"]["exit_code"] == 0
+    assert pipe_result["output"]["stdout"].strip() == "2"
+
+    write_result = executor.exec_command(project_id, {"command": "touch unsafe.txt"})
+    assert write_result["status"] == "success"
+    assert write_result["output"]["exit_code"] == 0
+    assert (executor.store.project_dir(project_id) / "unsafe.txt").exists()
+
+    denied_scope = executor.exec_command(project_id, {"command": "pwd"}, scope="unknown")  # type: ignore[arg-type]
+    assert denied_scope["status"] == "failed"
+    assert denied_scope["output"]["code"] == "permission_denied"

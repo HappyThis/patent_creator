@@ -558,6 +558,23 @@ button {
   white-space: pre-wrap;
 }
 
+.round-status {
+  border-top: 1px solid var(--dark-border);
+  padding-top: 12px;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.round-status span,
+.round-status small {
+  display: block;
+}
+
+.round-status.failed {
+  color: #8a4b42;
+}
+
 .status-dot {
   width: 7px;
   height: 7px;

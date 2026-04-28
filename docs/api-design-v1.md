@@ -339,6 +339,20 @@ HTTP 错误协议：
 
 同一条 `POST /api/projects/{project_id}/chat/messages` 连接中，服务端继续输出以下流式事件：
 
+#### `assistant_delta`
+
+```text
+event: assistant_delta
+data: {"text":"我已经"}
+```
+
+说明：
+
+- 当模型正在输出面向用户的自然语言时，后端直接按文本 delta 转发给前端。
+- `assistant_delta` 只用于文本流式展示，不代表本轮已经完成。
+- 如果当前 delta 是工具调用片段，后端不会把它作为文本发送，而是累计完整 tool call 后再进入工具执行。
+- 本轮最终仍由 `round_finished.reply` 收束。
+
 #### `agent_output`
 
 ```text
@@ -439,6 +453,7 @@ data: {
 
 前端处理建议：
 
+- 收到 `assistant_delta` 后，追加到当前流式 assistant 消息
 - 收到 `tool_call_started` 后，在 Chat 区展示进行中的执行节点
 - 收到 `tool_call_finished` 后，将执行节点切换为已完成，并默认折叠结果详情
 - 收到 `document_changed` 后，刷新目录区与渲染区

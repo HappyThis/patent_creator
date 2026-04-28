@@ -51,12 +51,20 @@ def build_solution_refiner_result(payload: dict[str, Any]) -> dict[str, Any]:
     solution_outline = str(payload.get("solution_outline") or "").strip()
     questions = _string_list(payload.get("questions"))
     warnings = _string_list(payload.get("warnings"))
+    operations = payload.get("operations")
 
-    return {
-        "status": "success",
-        "summary": summary,
-        "reply": reply,
-        "proposal": {
+    if payload.get("proposal_type") == "document_edit_proposal" and isinstance(operations, list) and operations:
+        proposal = {
+            "type": "document_edit_proposal",
+            "target_section_id": payload.get("target_section_id"),
+            "target_block_id": payload.get("target_block_id"),
+            "intent": str(payload.get("intent") or "refine_solution"),
+            "confidence": float(payload.get("confidence") or 0.72),
+            "rationale": rationale,
+            "operations": [item for item in operations if isinstance(item, dict)],
+        }
+    else:
+        proposal = {
             "type": "analysis_result",
             "rationale": rationale,
             "solution_outline": solution_outline,
@@ -64,7 +72,13 @@ def build_solution_refiner_result(payload: dict[str, Any]) -> dict[str, Any]:
             "key_constraints": key_constraints,
             "innovations": innovations,
             "open_questions": open_questions,
-        },
+        }
+
+    return {
+        "status": "success",
+        "summary": summary,
+        "reply": reply,
+        "proposal": proposal,
         "questions": questions,
         "warnings": warnings,
     }

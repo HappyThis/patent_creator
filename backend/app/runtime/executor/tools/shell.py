@@ -22,15 +22,26 @@ def exec_command(
         return tool_failed("invalid_operation", "command 字段缺失。")
 
     timeout = float(arguments.get("timeout", 30))
-    completed = subprocess.run(
-        command,
-        cwd=store.project_dir(project_id),
-        capture_output=True,
-        shell=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=store.project_dir(project_id),
+            capture_output=True,
+            shell=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return tool_failed(
+            "command_timeout",
+            f"命令执行超时：{timeout} 秒。",
+            command=command,
+            stdout=exc.stdout or "",
+            stderr=exc.stderr or "",
+        )
+    except OSError as exc:
+        return tool_failed("command_execution_failed", f"命令执行失败：{exc}", command=command)
     return tool_success(
         {
             "command": command,

@@ -1,14 +1,26 @@
 import { useCallback, useState } from 'react';
 
+export type PreviewFocusTarget = {
+  sectionId: string;
+  blockId: string | null;
+  nonce: number;
+};
+
 export function useWorkspaceSelection() {
   const [activeSectionId, setActiveSectionId] = useState('');
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [recentSectionIds, setRecentSectionIds] = useState<string[]>([]);
   const [recentBlockIds, setRecentBlockIds] = useState<string[]>([]);
+  const [previewFocusTarget, setPreviewFocusTarget] = useState<PreviewFocusTarget | null>(null);
 
   const selectSection = useCallback((sectionId: string) => {
     setActiveSectionId(sectionId);
     setActiveBlockId(null);
+    setPreviewFocusTarget({
+      sectionId,
+      blockId: null,
+      nonce: Date.now(),
+    });
   }, []);
 
   const syncActiveSection = useCallback((sectionId: string | null | undefined) => {
@@ -28,6 +40,11 @@ export function useWorkspaceSelection() {
       setRecentBlockIds(payload.changed_block_ids ?? []);
       if (payload.active_section_id) {
         setActiveSectionId(payload.active_section_id);
+        setPreviewFocusTarget({
+          sectionId: payload.active_section_id,
+          blockId: payload.active_block_id ?? null,
+          nonce: Date.now(),
+        });
       }
       setActiveBlockId(payload.active_block_id ?? null);
     },
@@ -44,6 +61,7 @@ export function useWorkspaceSelection() {
     activeBlockId,
     recentSectionIds,
     recentBlockIds,
+    previewFocusTarget,
     setActiveSectionId,
     selectSection,
     syncActiveSection,

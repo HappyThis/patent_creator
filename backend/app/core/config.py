@@ -10,14 +10,16 @@ class Settings:
     data_dir: Path
     git_user_name: str
     git_user_email: str
-    openai_compat_base_url: str = "https://api.deepseek.com/v1"
+    openai_compat_base_url: str = "https://api.deepseek.com"
     openai_compat_api_key: str | None = None
     openai_model: str = "deepseek-v4-pro"
     llm_timeout: float = 45.0
+    llm_max_retries: int = 2
     cors_allow_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     round_step_delay: float = 0.15
     round_finish_delay: float = 0.1
     main_agent_max_steps: int = 10
+    subagent_max_steps: int = 5
     log_dir: Path = Path("logs")
     log_level: str = "INFO"
     log_backup_days: int = 30
@@ -34,10 +36,11 @@ class Settings:
             data_dir=data_dir,
             git_user_name=os.getenv("PATENT_CREATOR_GIT_USER_NAME", "Patent Creator"),
             git_user_email=os.getenv("PATENT_CREATOR_GIT_USER_EMAIL", "patent-creator@local"),
-            openai_compat_base_url=os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.deepseek.com/v1"),
+            openai_compat_base_url=os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.deepseek.com"),
             openai_compat_api_key=os.getenv("OPENAI_COMPAT_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "deepseek-v4-pro"),
             llm_timeout=float(os.getenv("PATENT_CREATOR_LLM_TIMEOUT", "45")),
+            llm_max_retries=int(os.getenv("PATENT_CREATOR_LLM_MAX_RETRIES", "2")),
             cors_allow_origins=_parse_csv_env(
                 os.getenv("PATENT_CREATOR_CORS_ALLOW_ORIGINS"),
                 ("http://127.0.0.1:5173", "http://localhost:5173"),
@@ -45,6 +48,7 @@ class Settings:
             round_step_delay=float(os.getenv("PATENT_CREATOR_ROUND_STEP_DELAY", "0.15")),
             round_finish_delay=float(os.getenv("PATENT_CREATOR_ROUND_FINISH_DELAY", "0.1")),
             main_agent_max_steps=int(os.getenv("PATENT_CREATOR_MAIN_AGENT_MAX_STEPS", "10")),
+            subagent_max_steps=int(os.getenv("PATENT_CREATOR_SUBAGENT_MAX_STEPS", "5")),
             log_dir=log_dir,
             log_level=os.getenv("PATENT_CREATOR_LOG_LEVEL", "INFO"),
             log_backup_days=int(os.getenv("PATENT_CREATOR_LOG_BACKUP_DAYS", "30")),

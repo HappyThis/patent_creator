@@ -43,6 +43,9 @@ type ToolState = {
   id: string;
   kind: 'tool_call';
   timestamp?: string;
+  round_id?: string;
+  message_id?: string;
+  seq?: number;
   title: string;
   tool?: string;
   scope?: ProcessEvent['scope'];
@@ -86,11 +89,14 @@ function buildSessionTabs(
 function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
   const events: ChatEvent[] = [];
   const toolIndex = new Map<string, number>();
-  const lastAgentOutputIndexByRound = new Map<string, number>();
+  const lastAgentOutputByRound = new Map<string, { index: number; text: string }>();
 
   rawEvents.forEach((event, index) => {
     if (event.type === 'agent_output') {
-      lastAgentOutputIndexByRound.set(event.round_id, index);
+      lastAgentOutputByRound.set(event.round_id, {
+        index,
+        text: normalizeMessageText(String(event.payload.text ?? '')),
+      });
     }
   });
 
@@ -102,19 +108,30 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
         role: 'user',
         text: String(event.payload.text ?? ''),
         timestamp: formatTimestamp(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
       });
       continue;
     }
 
     if (event.type === 'agent_output') {
-      const isFinalReply = lastAgentOutputIndexByRound.get(event.round_id) === index;
+      const finalReply = lastAgentOutputByRound.get(event.round_id);
+      const currentText = String(event.payload.text ?? '');
+      const isFinalReply = finalReply?.index === index;
+      if (!isFinalReply && finalReply?.text === normalizeMessageText(currentText)) {
+        continue;
+      }
       if (!isFinalReply) {
         events.push({
           id: event.id,
           kind: 'agent_output',
           timestamp: formatTimestamp(event.ts),
+          round_id: event.round_id,
+          message_id: event.message_id,
+          seq: event.seq,
           title: '主 agent',
-          summary: String(event.payload.text ?? ''),
+          summary: currentText,
           detail: event.scope !== 'main' ? String(event.scope) : undefined,
           scope: event.scope as ProcessEvent['scope'],
           status: 'done',
@@ -125,8 +142,11 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
         id: event.id,
         kind: 'message',
         role: 'assistant',
-        text: String(event.payload.text ?? ''),
+        text: currentText,
         timestamp: formatTimestamp(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
       });
       continue;
     }
@@ -136,6 +156,9 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
         id: event.call_id || event.id,
         kind: 'tool_call',
         timestamp: formatTimestamp(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
         title: String(event.payload.tool ?? 'tool_call'),
         tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
         scope: event.scope as ProcessEvent['scope'],
@@ -159,6 +182,9 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
       id: toolId,
       kind: 'tool_call',
       timestamp: formatTimestamp(event.ts),
+      round_id: event.round_id,
+      message_id: event.message_id,
+      seq: event.seq,
       title: String(event.payload.tool ?? 'tool_call'),
       tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
       scope: event.scope as ProcessEvent['scope'],
@@ -193,6 +219,8 @@ function applyRunningToolEvent(
     id: toolId,
     kind: 'tool_call',
     timestamp: formatTimestamp(),
+    round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
+    message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
     title: String(payload.tool ?? 'tool_call'),
     tool: typeof payload.tool === 'string' ? payload.tool : undefined,
     scope: payload.scope as ProcessEvent['scope'],
@@ -219,6 +247,8 @@ function applyAssistantDelta(
   messageId: string,
   delta: string,
   timestamp: string,
+  roundId?: string,
+  sourceMessageId?: string,
 ): ChatEvent[] {
   if (!delta) {
     return current;
@@ -233,6 +263,8 @@ function applyAssistantDelta(
         role: 'assistant',
         text: delta,
         timestamp,
+        round_id: roundId,
+        message_id: sourceMessageId,
       },
     ];
   }
@@ -245,50 +277,102 @@ function applyAssistantDelta(
   next[existingIndex] = {
     ...existing,
     text: `${existing.text}${delta}`,
+    round_id: existing.round_id ?? roundId,
+    message_id: existing.message_id ?? sourceMessageId,
   };
   return next;
 }
 
-function finalizeRoundEvents(current: ChatEvent[], reply: string, timestamp: string): ChatEvent[] {
+function normalizeMessageText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function finalizeRoundEvents(
+  current: ChatEvent[],
+  reply: string,
+  timestamp: string,
+  roundId?: string,
+  sourceMessageId?: string,
+): ChatEvent[] {
   if (!reply) {
     return current;
   }
 
-  const lastMessageIndex = [...current].reverse().findIndex((item) => item.kind === 'message');
-  const boundary = lastMessageIndex === -1 ? 0 : current.length - lastMessageIndex;
-  const tail = current.slice(boundary);
-  const hasToolCalls = tail.some((item) => item.kind === 'tool_call');
-  const trailingAgentOutput = tail.length > 0 ? tail[tail.length - 1] : undefined;
+  const normalizedReply = normalizeMessageText(reply);
+  let lastUserMessageIndex = -1;
+  for (let index = current.length - 1; index >= 0; index -= 1) {
+    const item = current[index];
+    if (item.kind === 'message' && item.role === 'user') {
+      lastUserMessageIndex = index;
+      break;
+    }
+  }
 
-  if (
-    !hasToolCalls &&
-    trailingAgentOutput?.kind === 'agent_output' &&
-    (trailingAgentOutput.summary ?? '') === reply
-  ) {
+  const roundMatches = (item: ChatEvent) => (roundId ? item.round_id === roundId : true);
+  const boundary = roundId ? 0 : lastUserMessageIndex + 1;
+  const tail = current.slice(boundary).filter(roundMatches);
+  const duplicateAssistantIndex = tail.findIndex(
+    (item) =>
+      item.kind === 'message' &&
+      item.role === 'assistant' &&
+      normalizeMessageText(item.text) === normalizedReply,
+  );
+
+  if (duplicateAssistantIndex !== -1) {
+    return current;
+  }
+
+  const streamMessageIndex = tail.findIndex(
+    (item) =>
+      item.kind === 'message' &&
+      item.role === 'assistant' &&
+      item.id.startsWith('assistant_stream_'),
+  );
+
+  if (streamMessageIndex !== -1) {
+    const streamMessageId = tail[streamMessageIndex].id;
+    const actualIndex = current.findIndex((item) => item.id === streamMessageId);
+    if (actualIndex === -1) {
+      return current;
+    }
+    const next = [...current];
+    const streamMessage = next[actualIndex];
+    if (streamMessage.kind === 'message') {
+      next[actualIndex] = {
+        ...streamMessage,
+        text: reply,
+        timestamp: streamMessage.timestamp || timestamp,
+        round_id: streamMessage.round_id ?? roundId,
+        message_id: streamMessage.message_id ?? sourceMessageId,
+      };
+    }
+    return next;
+  }
+
+  const duplicateAgentOutputIndex = tail.findIndex(
+    (item) =>
+      item.kind === 'agent_output' &&
+      normalizeMessageText(item.summary ?? '') === normalizedReply,
+  );
+
+  if (duplicateAgentOutputIndex !== -1) {
+    const agentOutputId = tail[duplicateAgentOutputIndex].id;
+    const actualIndex = current.findIndex((item) => item.id === agentOutputId);
+    if (actualIndex === -1) {
+      return current;
+    }
+    const agentOutput = current[actualIndex];
     return [
-      ...current.slice(0, -1),
+      ...current.slice(0, actualIndex),
+      ...current.slice(actualIndex + 1),
       {
-        id: trailingAgentOutput.id,
+        id: agentOutput.id,
         kind: 'message',
         role: 'assistant',
         text: reply,
-        timestamp: trailingAgentOutput.timestamp ?? timestamp,
-      },
-    ];
-  }
-
-  const trailingMessage = current.length > 0 ? current[current.length - 1] : undefined;
-  if (
-    trailingMessage?.kind === 'message' &&
-    trailingMessage.role === 'assistant' &&
-    trailingMessage.id.startsWith('assistant_stream_')
-  ) {
-    return [
-      ...current.slice(0, -1),
-      {
-        ...trailingMessage,
-        text: reply,
-        timestamp: trailingMessage.timestamp || timestamp,
+        timestamp: agentOutput.timestamp ?? timestamp,
+        round_id: agentOutput.round_id ?? roundId,
+        message_id: agentOutput.message_id ?? sourceMessageId,
       },
     ];
   }
@@ -301,6 +385,8 @@ function finalizeRoundEvents(current: ChatEvent[], reply: string, timestamp: str
       role: 'assistant',
       text: reply,
       timestamp,
+      round_id: roundId,
+      message_id: sourceMessageId,
     },
   ];
 }
@@ -315,11 +401,13 @@ export function useWorkspace() {
   const [isLoading, setIsLoading] = useState(true);
   const streamRef = useRef<{ close: () => void } | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
+  const optimisticUserMessageIdRef = useRef<string | null>(null);
   const {
     activeSectionId,
     activeBlockId,
     recentSectionIds,
     recentBlockIds,
+    previewFocusTarget,
     setActiveSectionId,
     selectSection,
     syncActiveSection,
@@ -443,6 +531,8 @@ export function useWorkspace() {
   const consumeStreamEvent = useCallback(
     async (project_id: string, eventName: string, payload: Record<string, unknown>) => {
       if (eventName === 'round_started') {
+        const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
+        const messageId = typeof payload.message_id === 'string' ? payload.message_id : undefined;
         setProject((current) =>
           current
             ? {
@@ -457,8 +547,24 @@ export function useWorkspace() {
         if (payload.session_id) {
           setSelectedSessionId(String(payload.session_id));
         }
-        if (payload.round_id) {
-          streamingAssistantIdRef.current = `assistant_stream_${String(payload.round_id)}`;
+        if (roundId) {
+          streamingAssistantIdRef.current = `assistant_stream_${roundId}`;
+          const optimisticId = optimisticUserMessageIdRef.current;
+          if (optimisticId) {
+            setEvents((current) =>
+              current.map((item) =>
+                item.id === optimisticId && item.kind === 'message' && item.role === 'user'
+                  ? {
+                      ...item,
+                      id: messageId ?? item.id,
+                      round_id: roundId,
+                      message_id: messageId,
+                    }
+                  : item,
+              ),
+            );
+            optimisticUserMessageIdRef.current = null;
+          }
         }
         return;
       }
@@ -467,7 +573,16 @@ export function useWorkspace() {
         const delta = String(payload.text ?? '');
         const messageId = streamingAssistantIdRef.current ?? `assistant_stream_${Date.now()}`;
         streamingAssistantIdRef.current = messageId;
-        setEvents((current) => applyAssistantDelta(current, messageId, delta, formatTimestamp()));
+        setEvents((current) =>
+          applyAssistantDelta(
+            current,
+            messageId,
+            delta,
+            formatTimestamp(),
+            typeof payload.round_id === 'string' ? payload.round_id : undefined,
+            typeof payload.message_id === 'string' ? payload.message_id : undefined,
+          ),
+        );
         return;
       }
 
@@ -478,6 +593,8 @@ export function useWorkspace() {
             id: `agent_note_${Date.now()}_${current.length}`,
             kind: 'agent_output',
             timestamp: formatTimestamp(),
+            round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
+            message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
             title: '主 agent',
             summary: String(payload.text ?? ''),
             status: 'done',
@@ -519,7 +636,33 @@ export function useWorkspace() {
         if (payload.reply) {
           const reply = String(payload.reply ?? '本轮已完成。');
           const timestamp = formatTimestamp();
-          setEvents((current) => finalizeRoundEvents(current, reply, timestamp));
+          setEvents((current) =>
+            finalizeRoundEvents(
+              current,
+              reply,
+              timestamp,
+              typeof payload.round_id === 'string' ? payload.round_id : undefined,
+              typeof payload.message_id === 'string' ? payload.message_id : undefined,
+            ),
+          );
+        }
+        const changed = payload.changed === true;
+        const committed = payload.committed === true;
+        const commitError = payload.commit_error as Record<string, unknown> | null | undefined;
+        if (changed || commitError) {
+          setEvents((current) => [
+            ...current,
+            {
+              id: `round_status_${Date.now()}_${current.length}`,
+              kind: 'round_status',
+              round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
+              message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+              status: committed ? 'done' : 'failed',
+              summary: committed ? '本轮修改已保存到版本历史。' : '本轮修改已完成，但版本提交失败。',
+              detail: commitError ? String(commitError.message ?? '') : undefined,
+              timestamp: formatTimestamp(),
+            },
+          ]);
         }
         const nextProject = await refreshProject(project_id);
         await refreshSessions(project_id, nextProject.active_session_id);
@@ -539,6 +682,8 @@ export function useWorkspace() {
             role: 'assistant',
             text: String(payload.reply ?? '本轮处理失败。'),
             timestamp: formatTimestamp(),
+            round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
+            message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
           },
         ]);
         await refreshProject(project_id);
@@ -553,14 +698,16 @@ export function useWorkspace() {
       return;
     }
 
+    const optimisticId = `msg_local_${Date.now()}`;
     const optimisticMessage: ChatEvent = {
-      id: `msg_local_${Date.now()}`,
+      id: optimisticId,
       kind: 'message',
       role: 'user',
       text: message,
       timestamp: formatTimestamp(),
     };
 
+    optimisticUserMessageIdRef.current = optimisticId;
     setEvents((current) => [...current, optimisticMessage]);
     setComposer('');
 
@@ -641,6 +788,7 @@ export function useWorkspace() {
     sessionTabs,
     activeSectionId,
     activeBlockId,
+    previewFocusTarget,
     recentSectionIds,
     recentBlockIds,
     setComposer,

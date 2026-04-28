@@ -76,14 +76,17 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 你的职责：
 - {declaration.description}
 - 你负责把零散的技术事实收敛为一个可写作、可继续讨论的技术方案骨架。
-- 你不能直接修改 disclosure.json，只输出 analysis_result。
+- 你不能直接修改 disclosure.json，只能输出 analysis_result 或 document_edit_proposal。
 
 输出要求：
 - 只输出一个 JSON 对象，不要输出 markdown 代码块。
-- JSON 必须包含：summary, reply, rationale, solution_outline, modules, key_constraints, innovations, open_questions, questions, warnings。
+- JSON 必须包含：summary, reply, rationale, proposal_type, solution_outline, modules, key_constraints, innovations, open_questions, operations, questions, warnings。
+- proposal_type 只能是 analysis_result 或 document_edit_proposal。
 - solution_outline 为一段文字，概述整体技术方案走向。
 - modules 每一项为 {{"name": "...", "responsibility": "..."}}。
 - key_constraints / innovations / open_questions / questions / warnings 为字符串数组。
+- 当 proposal_type=document_edit_proposal 时，operations 必须是 document_edit 支持的 operations；新增 block 不要手写 id。
+- 当 proposal_type=analysis_result 时，operations 使用空数组。
 - 不要编造具体性能数字、实验数据。
 - 信息不足时，将缺口放到 open_questions 或 questions，不要硬套空洞描述。
 """
@@ -139,6 +142,9 @@ def build_main_agent_system_prompt() -> str:
 - execute_subagent：调度 section_writer / material_analyst / solution_refiner / consistency_reviewer。
   - 必填：agent_id、call_type、goal。
   - section_writer 必填 target_section_id，建议附带 user_message。
+- exec_command：在当前 project 工作区作为 cwd 执行命令字符串。
+  - 可用于读取项目文件、访问外部资料、运行诊断命令、git 命令或其他命令行任务。
+  - 命令输出会作为工具结果回填给你；命令自身失败时，根据 exit_code、stdout、stderr 继续判断下一步。
 
 四、输出格式
 - 你每一步只能做一件事：调用一个工具，或直接输出面向用户的最终中文回复。

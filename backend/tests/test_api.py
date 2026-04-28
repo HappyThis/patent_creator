@@ -114,9 +114,109 @@ class StubLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
-        temperature: float = 0.2,
     ) -> dict[str, Any]:
         """模拟主 agent loop：execute_subagent -> document_edit -> respond。"""
+        if "子 agent：section_writer" in system_prompt:
+            context = json.loads(messages[0]["content"])
+            target_section_id = context["task"]["target_section_id"]
+            goal = context["task"]["goal"]
+            if target_section_id == "technical_solution":
+                payload = {
+                    "summary": "已生成技术方案候选正文。",
+                    "reply": "我已经补充了技术方案里的整体架构和处理流程，并把结果同步到文档中。",
+                    "rationale": "用户明确要求继续完善技术方案章节。",
+                    "operations": [
+                        {
+                            "op": "replace_section",
+                            "section_id": "technical_solution",
+                            "section": {
+                                "id": "technical_solution",
+                                "title": "技术方案",
+                                "blocks": [
+                                    {
+                                        "type": "paragraph",
+                                        "text": f"本节结合用户当前要求“{goal}”，补充适用于低算力终端的整体方案说明。",
+                                    },
+                                    {
+                                        "type": "paragraph",
+                                        "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
+                                    },
+                                ],
+                                "children": [
+                                    {
+                                        "id": "overall_architecture",
+                                        "title": "整体架构",
+                                        "blocks": [
+                                            {
+                                                "type": "table",
+                                                "columns": ["模块", "职责"],
+                                                "rows": [
+                                                    ["预处理模块", "完成缩放、归一化和候选区域粗筛"],
+                                                    ["推理模块", "仅对高价值候选区域执行完整检测"],
+                                                ],
+                                            }
+                                        ],
+                                        "children": [],
+                                    },
+                                    {
+                                        "id": "processing_flow",
+                                        "title": "处理流程",
+                                        "blocks": [
+                                            {
+                                                "type": "list",
+                                                "ordered": True,
+                                                "items": [
+                                                    "获取当前帧图像并复用上一帧稳定特征。",
+                                                    "筛出满足阈值的候选区域。",
+                                                    "对候选区域执行轻量化检测与结果校正。",
+                                                ],
+                                            }
+                                        ],
+                                        "children": [],
+                                    },
+                                ],
+                            },
+                        }
+                    ],
+                    "questions": [],
+                    "warnings": [],
+                }
+            else:
+                payload = {
+                    "summary": "已生成技术效果候选正文。",
+                    "reply": "我已经补充了技术效果章节，重点强调了低算力实时性的收益。",
+                    "rationale": "用户明确希望强调实时性收益。",
+                    "operations": [
+                        {
+                            "op": "replace_section_blocks",
+                            "section_id": target_section_id,
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
+                                },
+                                {
+                                    "type": "list",
+                                    "ordered": False,
+                                    "items": [
+                                        "缩短端到端检测时延，提升实时响应能力。",
+                                        "在有限算力预算下保持检测稳定性。",
+                                        "降低持续运行时的能耗和温升压力。",
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                    "questions": [],
+                    "warnings": [],
+                }
+            text = json.dumps(payload, ensure_ascii=False)
+            return {
+                "type": "respond",
+                "text": text,
+                "assistant_message": {"role": "assistant", "content": text},
+            }
+
         tool_results = [msg for msg in messages if msg.get("role") == "tool"]
         user_payload = json.loads(messages[0]["content"]) if messages else {}
 
@@ -125,27 +225,55 @@ class StubLLMClient:
             target_section_id = user_payload.get("active_section_id")
             if not target_section_id:
                 target_section_id = "technical_effects" if "技术效果" in user_message else "technical_solution"
+            arguments = {
+                "agent_id": "section_writer",
+                "call_type": "rich_context_specialist",
+                "goal": f"根据用户最新请求完善章节：{user_message}",
+                "target_section_id": target_section_id,
+                "user_message": user_message,
+            }
             return {
-                "type": "tool_call",
-                "tool": "execute_subagent",
-                "arguments": {
-                    "agent_id": "section_writer",
-                    "call_type": "rich_context_specialist",
-                    "goal": f"根据用户最新请求完善章节：{user_message}",
-                    "target_section_id": target_section_id,
-                    "user_message": user_message,
+                "type": "tool_calls",
+                "tool_calls": [{"tool": "execute_subagent", "arguments": arguments, "tool_call_id": "stub_call_1"}],
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "需要调用 section_writer 完成章节写作。",
+                    "tool_calls": [
+                        {
+                            "id": "stub_call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "execute_subagent",
+                                "arguments": json.dumps(arguments, ensure_ascii=False),
+                            },
+                        }
+                    ],
                 },
-                "tool_call_id": "stub_call_1",
             }
 
         if len(tool_results) == 1:
             subagent_result = json.loads(tool_results[0]["content"])
             operations = subagent_result["output"]["result"]["proposal"]["operations"]
+            arguments = {"operations": operations}
             return {
-                "type": "tool_call",
-                "tool": "document_edit",
-                "arguments": {"operations": operations},
-                "tool_call_id": "stub_call_2",
+                "type": "tool_calls",
+                "tool_calls": [{"tool": "document_edit", "arguments": arguments, "tool_call_id": "stub_call_2"}],
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "需要将子 agent proposal 写入文档。",
+                    "tool_calls": [
+                        {
+                            "id": "stub_call_2",
+                            "type": "function",
+                            "function": {
+                                "name": "document_edit",
+                                "arguments": json.dumps(arguments, ensure_ascii=False),
+                            },
+                        }
+                    ],
+                },
             }
 
         subagent_result = json.loads(tool_results[0]["content"])
@@ -156,7 +284,15 @@ class StubLLMClient:
         )
         if on_text_delta is not None:
             await on_text_delta(reply)
-        return {"type": "respond", "text": reply}
+        return {
+            "type": "respond",
+            "text": reply,
+            "assistant_message": {
+                "role": "assistant",
+                "content": reply,
+                "reasoning_content": "已完成工具调用，准备回复用户。",
+            },
+        }
 
 
 async def collect_stream_events(

@@ -16,47 +16,123 @@ type ChatPanelProps = {
 
 type RenderBlock =
   | { kind: 'message'; event: ChatMessageEvent }
-  | { kind: 'process'; items: ProcessEvent[] };
+  | { kind: 'process'; items: ProcessEvent[] }
+  | { kind: 'round_status'; event: Extract<ChatEvent, { kind: 'round_status' }> };
+
+type ChatRound = {
+  id: string;
+  user?: ChatMessageEvent;
+  processItems: ProcessEvent[];
+  assistantMessages: ChatMessageEvent[];
+  statuses: Extract<ChatEvent, { kind: 'round_status' }>[];
+};
 
 function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
   const blocks: RenderBlock[] = [];
-  let processBuffer: ProcessEvent[] = [];
-
-  const flushProcess = () => {
-    if (processBuffer.length > 0) {
-      const toolCalls = processBuffer.filter((item) => item.kind === 'tool_call');
-      if (toolCalls.length === 0) {
-        for (const item of processBuffer) {
-          blocks.push({
-            kind: 'message',
-            event: {
-              id: item.id,
-              kind: 'message',
-              role: 'assistant',
-              text: item.summary ?? '',
-              timestamp: item.timestamp ?? '',
-            },
-          });
-        }
-        processBuffer = [];
-        return;
-      }
-      blocks.push({ kind: 'process', items: processBuffer });
-      processBuffer = [];
-    }
-  };
+  const rounds = new Map<string, ChatRound>();
+  const roundOrder: string[] = [];
+  const looseEvents: ChatEvent[] = [];
 
   for (const event of events) {
-    if (event.kind === 'message') {
-      flushProcess();
-      blocks.push({ kind: 'message', event });
+    if (!event.round_id) {
+      looseEvents.push(event);
       continue;
     }
 
-    processBuffer.push(event);
+    if (!rounds.has(event.round_id)) {
+      rounds.set(event.round_id, {
+        id: event.round_id,
+        processItems: [],
+        assistantMessages: [],
+        statuses: [],
+      });
+      roundOrder.push(event.round_id);
+    }
+
+    const round = rounds.get(event.round_id);
+    if (!round) {
+      continue;
+    }
+
+    if (event.kind === 'message' && event.role === 'user') {
+      round.user = event;
+      continue;
+    }
+
+    if (event.kind === 'message' && event.role === 'assistant') {
+      round.assistantMessages.push(event);
+      continue;
+    }
+
+    if (event.kind === 'agent_output' || event.kind === 'tool_call') {
+      round.processItems.push(event);
+      continue;
+    }
+
+    if (event.kind === 'round_status') {
+      round.statuses.push(event);
+    }
   }
 
-  flushProcess();
+  for (const event of looseEvents) {
+    if (event.kind === 'message') {
+      blocks.push({ kind: 'message', event });
+    } else if (event.kind === 'round_status') {
+      blocks.push({ kind: 'round_status', event });
+    } else if (event.kind === 'tool_call') {
+      blocks.push({ kind: 'process', items: [event] });
+    } else if (event.summary) {
+      blocks.push({
+        kind: 'message',
+        event: {
+          id: event.id,
+          kind: 'message',
+          role: 'assistant',
+          text: event.summary,
+          timestamp: event.timestamp ?? '',
+        },
+      });
+    }
+  }
+
+  for (const roundId of roundOrder) {
+    const round = rounds.get(roundId);
+    if (!round) {
+      continue;
+    }
+
+    if (round.user) {
+      blocks.push({ kind: 'message', event: round.user });
+    }
+
+    const toolCalls = round.processItems.filter((item) => item.kind === 'tool_call');
+    if (toolCalls.length > 0) {
+      blocks.push({ kind: 'process', items: round.processItems });
+    } else {
+      for (const item of round.processItems) {
+        blocks.push({
+          kind: 'message',
+          event: {
+            id: item.id,
+            kind: 'message',
+            role: 'assistant',
+            text: item.summary ?? '',
+            timestamp: item.timestamp ?? '',
+            round_id: round.id,
+          },
+        });
+      }
+    }
+
+    for (const message of round.assistantMessages) {
+      blocks.push({ kind: 'message', event: message });
+    }
+
+    for (const status of round.statuses) {
+      blocks.push({ kind: 'round_status', event: status });
+    }
+  }
+
   return blocks;
 }
 
@@ -148,7 +224,16 @@ export function ChatPanel({
               );
             }
 
-            return <TimelineList key={`process_${index}`} items={block.items} />;
+            if (block.kind === 'process') {
+              return <TimelineList key={`process_${index}`} items={block.items} />;
+            }
+
+            return (
+              <article key={block.event.id} className={`round-status ${block.event.status}`}>
+                <span>{block.event.summary}</span>
+                {block.event.detail ? <small>{block.event.detail}</small> : null}
+              </article>
+            );
           })}
         </section>
       </div>

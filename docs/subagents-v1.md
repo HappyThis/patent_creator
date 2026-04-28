@@ -47,12 +47,19 @@ v1 阶段先收敛为 4 个业务子 agent：
 7. 子 agent 可以读取文档，但不直接修改 `disclosure.json`。
 8. 子 agent 支持多轮 tool use，但不允许继续调用其他子 agent。
 
+当前实现口径：
+
+- 4 个子 agent 均通过统一的子 agent loop 运行。
+- 子 agent 可在 loop 中调用 `document_read` 和 `exec_command`。
+- 子 agent 的内部工具调用会写入 session log，并通过 SSE 以 `scope=subagent:<agent_id>` 实时推送。
+- 子 agent 最终仍必须输出统一 envelope，再由主 agent 决定是否采纳。
+
 ## 二、权限边界
 
 子 agent 可以：
 
 - 调用 `document_read`
-- 调用允许范围内的 `exec_command`
+- 调用 `exec_command`
 - 分析用户资料和已有正文
 - 生成候选正文 blocks
 - 生成候选 `document_edit.operations`

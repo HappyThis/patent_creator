@@ -13,7 +13,7 @@ function App() {
     isBusy,
     sessionTabs,
     activeSectionId,
-    activeBlockId,
+    previewFocusTarget,
     recentSectionIds,
     recentBlockIds,
     setComposer,
@@ -36,8 +36,7 @@ function App() {
 
           <PreviewPanel
             renderAst={renderAst}
-            activeSectionId={activeSectionId}
-            activeBlockId={activeBlockId}
+            previewFocusTarget={previewFocusTarget}
             recentSectionIds={recentSectionIds}
             recentBlockIds={recentBlockIds}
             previewRef={previewRef}

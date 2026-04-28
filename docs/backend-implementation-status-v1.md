@@ -2,7 +2,7 @@
 
 ## 已核对文档
 
-已按当前后端实现逐项核对 `docs/` 下 13 份文档：
+已按当前后端实现逐项核对 `docs/` 下核心设计与状态文档：
 
 - `README.md`
 - `agent-principles-v1.md`
@@ -33,16 +33,24 @@
 - 自动提交：回合结束后按文档变更执行工作区 git commit
 - chat 输入模型：以 `message` 为唯一用户语义输入，后端在回合内自行提取章节线索与任务目标
 - OpenAI 兼容模型接入：支持通过 `OPENAI_COMPAT_BASE_URL` / `OPENAI_COMPAT_API_KEY` / `OPENAI_MODEL` 配置真实模型调用
-- DeepSeek 默认配置：默认以 `https://api.deepseek.com/v1` 和 `deepseek-v4-pro` 作为测试模型口径
+- DeepSeek 默认配置：默认以 `https://api.deepseek.com` 和 `deepseek-v4-pro` 作为测试模型口径
+- LLM 超时与重试：支持 `PATENT_CREATOR_LLM_TIMEOUT` 与 `PATENT_CREATOR_LLM_MAX_RETRIES`
+- 真实 LLM 主 agent loop：已接入 OpenAI-compatible tool calling，支持多工具调用、流式文本 delta 和 DeepSeek thinking/tool-call 协议
+- 子 agent loop：4 个子 agent 均通过统一 loop 运行，可调用 `document_read` 与 `exec_command`
+- 子 agent SSE：子 agent 内部工具调用会以 `scope=subagent:<agent_id>` 写入 session log 并实时推送
 - `section_writer`：已接入真实 LLM runtime，输出 `document_edit_proposal` 后再通过 `document_edit` 落盘
+- `material_analyst` / `solution_refiner` / `consistency_reviewer`：已接入真实 LLM runtime，并输出各自 proposal envelope
+- `solution_refiner`：支持 `analysis_result`，也支持在必要时返回 `document_edit_proposal`
+- `call_type`：已区分 `task_only_specialist`、`rich_context_specialist`、`forked_context` 的上下文装配策略
+- `exec_command`：已接入主 agent 与子 agent，以项目工作区为 cwd 执行命令字符串，不做命令白名单限制
+- `disclosure.json` 写入：已使用临时文件替换方式落盘，避免半写入文件
 - 目录结构：已拆出 `app/agents` 与 `app/runtime`，将 agent 能力、上下文管理和执行器职责分开
 
 ## 暂未实现为真实能力
 
-- 真实 LLM 主 agent loop：当前是可替换的规则化编排流程
-- `material_analyst` / `solution_refiner` / `consistency_reviewer`：当前仍是占位实现，协议和目录已对齐
-- prompt 模板与 prefix cache：当前仅完成结构拆分，尚未做前缀缓存优化
-- 复杂 `exec_command` 安全策略：当前按工作区目录执行命令，后续需要加白名单或审批
+- 显式 prefix cache：当前已按稳定/半稳定/动态片段组织 prompt，但未接入供应商级显式缓存控制
+- 更细粒度命令审批：当前 `exec_command` 不做命令白名单限制，尚未加入用户审批流
+- 子 agent 并行调度：v1 仍采用同步子 agent 调用模型
 
 ## 结构原则
 

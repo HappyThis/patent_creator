@@ -96,6 +96,14 @@ v1 保留以下核心工具：
 - 直接修改 `disclosure.json`
 - 绕过 `document_edit` 执行文档写入
 
+当前实现口径：
+
+- `exec_command` 已暴露给主 agent 和子 agent。
+- 以当前 project 工作区为 cwd 执行命令字符串。
+- 不做命令白名单限制，支持 shell 能力，例如管道、重定向、命令拼接和外部访问。
+- 工具层只校验调用方 scope 权限、`command` 是否为空和 timeout 执行结果。
+- 命令自身失败时仍以工具结果返回，由 agent 根据 `exit_code`、`stdout`、`stderr` 继续判断。
+
 ## 三、工具权限
 
 v1 工具权限如下：
@@ -870,15 +878,16 @@ review_report
 
 - `exec_command.status` 表示工具调用层是否成功返回结果。
 - `output.exit_code` 表示命令本身是否执行成功。
+- `status=failed` 会作为工具结果返回给 agent 继续处理，不会自动让整个 round 失败。
 - `exec_command` 不用于直接修改 `disclosure.json`。
 
 执行约定：
 
 - 默认工作目录为当前 project 工作区根目录。
-- `exec_command` 可以读取任意文件，只要运行时权限允许。
-- `exec_command` 可以执行网络命令，只要运行时权限允许。
-- `exec_command` 可以读写工作区内的普通辅助文件。
-- 交底书正文真相源的修改仍然只能通过 `document_edit` 完成。
+- 当前实现不做命令白名单限制。
+- 命令字符串按 shell 执行，支持管道、重定向、命令拼接等 shell 能力。
+- 命令本身执行失败仍返回 `status=success`，并通过 `output.exit_code` 表示。
+- 只有调用方无权限、`command` 缺失、运行时异常等工具层问题才返回 `status=failed`。
 - 超时时间由 agent 在调用时按任务给出。
 - `stdout` 和 `stderr` 的截断策略由 agent 按本轮任务需要决定。
 

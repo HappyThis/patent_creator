@@ -417,15 +417,21 @@ v1 中，启动子 agent 统一使用一个工具：
 - `100%` 继承当前调用方上下文
 - 包括系统提示词
 
+当前实现中，`forked_context` 会在专业子 agent 自己的 system prompt 下，额外注入最近 session 事件摘要，尽量保留调用现场；不会让子 agent 继承主 agent 的系统提示词，以避免职责边界混淆。
+
 #### 2. `rich_context_specialist`
 
 - 继承当前调用方的非系统提示词部分
 - 使用自己的 system prompt
 
+当前实现中，`rich_context_specialist` 会注入目录、最近用户输入，并在提供 `target_section_id` 时预读目标章节。
+
 #### 3. `task_only_specialist`
 
 - 只继承 `goal`
 - 不继承其他上下文
+
+当前实现中，`task_only_specialist` 只注入任务、用户原始输入和结构化目标 id；如需正文或目录，子 agent 必须通过 `document_read` 自行读取。
 
 说明：
 

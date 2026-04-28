@@ -145,6 +145,12 @@ user_input
 8. 上下文管理器把结果纳入主 agent 当前工作上下文。
 9. 主 agent 继续下一轮 loop。
 
+说明：
+
+- `tool_result.status=failed` 表示该工具调用失败，但不等同于整个 round 失败。
+- 工具失败结果应回填给主 agent，由主 agent 决定换一种方式、向用户说明限制，或结束本轮。
+- 只有运行时异常、协议不合法、模型无法收束等不可恢复错误，才推送 `round_failed`。
+
 ## 七、如果 tool 是 `execute_subagent`
 
 这是主流程中的调度工具。
@@ -194,6 +200,12 @@ user_input
    - `proposal`
    - `questions`
    - `warnings`
+
+当前实现要求：
+
+- 子 agent 内部工具事件的 `parent_call_id` 指向主流程的 `execute_subagent` 调用。
+- 子 agent 只能调用 `document_read` 和 `exec_command`。
+- 子 agent 结束时必须返回合法 JSON envelope；不合法时本轮进入 `round_failed`。
 
 ### 子 agent 收束
 

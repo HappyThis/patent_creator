@@ -9,7 +9,7 @@ from typing import Any
 
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.openai_compat import OpenAICompatibleClient
-from ..agents.workers import MainAgentAction, decide_main_agent_step
+from ..agents.workers import MainAgentAction, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
 from ..runtime.context import ContextManager
 from ..runtime.executor import ExecutorEngine
@@ -150,7 +150,16 @@ class ChatService:
                     if not delta:
                         return
                     streamed_reply_parts.append(delta)
-                    await self.bus.publish(key, "assistant_delta", {"text": delta, "scope": "main"})
+                    await self.bus.publish(
+                        key,
+                        "assistant_delta",
+                        {
+                            "text": delta,
+                            "scope": "main",
+                            "round_id": state.round_id,
+                            "message_id": state.message_id,
+                        },
+                    )
 
                 action = await decide_main_agent_step(
                     self.llm_client,
@@ -166,7 +175,7 @@ class ChatService:
                         step_index + 1,
                         len(final_reply),
                     )
-                    messages.append({"role": "assistant", "content": final_reply})
+                    messages.append(action.assistant_message)
                     await self._emit_agent_output(
                         project_id,
                         state,
@@ -175,59 +184,39 @@ class ChatService:
                     )
                     break
 
-                # tool_call 分支
-                tool_call_id = action.tool_call_id or generate_id("llm_call")
-                tool_name = action.tool or ""
-                arguments = action.arguments or {}
-                logger.info(
-                    "round step=%d action=tool_call tool=%s arguments=%s",
-                    step_index + 1,
-                    tool_name,
-                    arguments,
-                )
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [
+                # tool_calls 分支：DeepSeek 要求 assistant(tool_calls) 后紧跟每个 tool_call_id 的 tool 结果。
+                tool_calls = action.tool_calls or []
+                logger.info("round step=%d action=tool_calls count=%d", step_index + 1, len(tool_calls))
+                messages.append(action.assistant_message)
+
+                for tool_call in tool_calls:
+                    result = await self._execute_tool_call(project_id, state, tool_call)
+
+                    if tool_call.tool == "document_edit" and result.get("status") == "success":
+                        output = result["output"]
+                        changed_payload = {
+                            "changed": True,
+                            **output,
+                            "active_section_id": output.get("primary_section_id"),
+                            "active_block_id": output.get("primary_block_id"),
+                        }
+                        await self.bus.publish(
+                            key,
+                            "document_changed",
                             {
-                                "id": tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "arguments": json.dumps(arguments, ensure_ascii=False),
-                                },
-                            }
-                        ],
-                    }
-                )
+                                **changed_payload,
+                                "round_id": state.round_id,
+                                "message_id": state.message_id,
+                            },
+                        )
 
-                result = await self._dispatch_tool(project_id, state, tool_name, arguments)
-                logger.info(
-                    "round step=%d tool=%s status=%s",
-                    step_index + 1,
-                    tool_name,
-                    result.get("status"),
-                )
-                self._raise_if_tool_failed(result)
-
-                if tool_name == "document_edit":
-                    output = result["output"]
-                    changed_payload = {
-                        "changed": True,
-                        **output,
-                        "active_section_id": output.get("primary_section_id"),
-                        "active_block_id": output.get("primary_block_id"),
-                    }
-                    await self.bus.publish(key, "document_changed", changed_payload)
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps(result, ensure_ascii=False),
-                    }
-                )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.tool_call_id,
+                            "content": json.dumps(result, ensure_ascii=False),
+                        }
+                    )
                 await self._sleep()
             else:
                 final_reply = "本轮步数已达上限，请继续补充信息或重试。"
@@ -257,6 +246,8 @@ class ChatService:
                     **changed_payload,
                     "committed": committed,
                     "commit_error": commit_error,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
                 },
             )
         except Exception as exc:
@@ -274,6 +265,8 @@ class ChatService:
                     "code": "round_runtime_error",
                     "message": str(exc),
                     "reply": "本轮未完成，请重试或补充信息。",
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
                 },
             )
 
@@ -314,7 +307,41 @@ class ChatService:
         if tool_name == "execute_subagent":
             return await self._emit_execute_subagent(project_id, state, arguments=arguments)
 
+        if tool_name == "exec_command":
+            result = self.executor.exec_command(project_id, arguments)
+            await self._emit_tool(
+                project_id,
+                state,
+                tool="exec_command",
+                arguments=arguments,
+                summary_started="开始执行诊断命令",
+                summary_finished="诊断命令已完成",
+                result=result,
+            )
+            return result
+
         raise ApiError(400, "unsupported_main_tool", f"主 agent 不支持的工具：{tool_name}")
+
+    async def _execute_tool_call(
+        self,
+        project_id: str,
+        state: RoundState,
+        tool_call: MainAgentToolCall,
+    ) -> dict[str, Any]:
+        logger.info(
+            "round tool_call id=%s tool=%s arguments=%s",
+            tool_call.tool_call_id,
+            tool_call.tool,
+            tool_call.arguments,
+        )
+        result = await self._dispatch_tool(project_id, state, tool_call.tool, tool_call.arguments)
+        logger.info(
+            "round tool_call id=%s tool=%s status=%s",
+            tool_call.tool_call_id,
+            tool_call.tool,
+            result.get("status"),
+        )
+        return result
 
     async def _emit_agent_output(self, project_id: str, state: RoundState, text: str, publish: bool = True) -> None:
         self.store.append_session_event(
@@ -327,7 +354,15 @@ class ChatService:
             payload={"text": text},
         )
         if publish:
-            await self.bus.publish((project_id, state.session_id), "agent_output", {"text": text})
+            await self.bus.publish(
+                (project_id, state.session_id),
+                "agent_output",
+                {
+                    "text": text,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
 
     async def _emit_tool(
         self,
@@ -360,6 +395,8 @@ class ChatService:
                 "scope": "main",
                 "tool": tool,
                 "summary": summary_started,
+                "round_id": state.round_id,
+                "message_id": state.message_id,
             },
         )
         self.store.append_session_event(
@@ -382,6 +419,8 @@ class ChatService:
                 "tool": tool,
                 "summary": summary_finished,
                 "result": result,
+                "round_id": state.round_id,
+                "message_id": state.message_id,
             },
         )
         return call_id
@@ -414,6 +453,8 @@ class ChatService:
                 "scope": "main",
                 "tool": "execute_subagent",
                 "summary": f"已启动 {agent_id}" if agent_id else "已启动子 agent",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
             },
         )
 
@@ -424,6 +465,15 @@ class ChatService:
             round_id=state.round_id,
             message_id=state.message_id,
             parent_call_id=call_id,
+            on_tool_event=lambda event_name, event_payload: self.bus.publish(
+                (project_id, state.session_id),
+                event_name,
+                {
+                    **event_payload,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            ),
         )
         self.store.append_session_event(
             project_id,
@@ -445,6 +495,8 @@ class ChatService:
                 "tool": "execute_subagent",
                 "summary": f"{agent_id} 已完成" if agent_id else "子 agent 已完成",
                 "result": result,
+                "round_id": state.round_id,
+                "message_id": state.message_id,
             },
         )
         return result
@@ -467,12 +519,6 @@ class ChatService:
 
     async def _sleep(self, duration: float | None = None) -> None:
         await asyncio.sleep(self.settings.round_step_delay if duration is None else duration)
-
-    @staticmethod
-    def _raise_if_tool_failed(result: dict[str, Any]) -> None:
-        if result["status"] == "failed":
-            output = result["output"]
-            raise ApiError(500, output.get("code", "tool_failed"), output.get("message", "工具调用失败。"))
 
 
 def format_sse_event(event: str, payload: dict[str, Any]) -> str:
