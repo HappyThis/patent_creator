@@ -12,21 +12,6 @@ export type ChatMessageEvent = {
 type EventStatus = 'running' | 'done' | 'failed';
 type EventScope = 'main' | `subagent:${string}`;
 
-export type AgentOutputEvent = {
-  id: string;
-  kind: 'agent_output';
-  timestamp?: string;
-  round_id?: string;
-  message_id?: string;
-  seq?: number;
-  status?: EventStatus;
-  scope?: EventScope;
-  tool?: string;
-  title: string;
-  summary?: string;
-  detail?: string;
-};
-
 export type ToolCallEvent = {
   id: string;
   kind: 'tool_call';
@@ -34,6 +19,7 @@ export type ToolCallEvent = {
   round_id?: string;
   message_id?: string;
   seq?: number;
+  parent_call_id?: string | null;
   status?: EventStatus;
   scope?: EventScope;
   tool?: string;
@@ -54,5 +40,5 @@ export type RoundStatusEvent = {
   detail?: string;
 };
 
-export type ProcessEvent = AgentOutputEvent | ToolCallEvent;
+export type ProcessEvent = ToolCallEvent;
 export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent;

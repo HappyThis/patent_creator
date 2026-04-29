@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Awaitable, Callable
 
 from ...agents import get_subagent
@@ -36,6 +37,8 @@ from .tools.shell import exec_command
 from .types import AgentScope
 
 ToolEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+logger = logging.getLogger("patent_creator.executor")
 
 SUBAGENT_TOOLS: list[dict[str, Any]] = [
     {
@@ -134,17 +137,24 @@ class ExecutorEngine:
             parent_call_id=parent_call_id,
             on_tool_event=on_tool_event,
         )
-        result = await self._run_subagent_loop(
-            project_id=project_id,
-            agent_id=declaration.id,
-            call_type=str(call_type),
-            context=context,
-            session_id=session_id,
-            round_id=round_id,
-            message_id=message_id,
-            parent_call_id=parent_call_id,
-            on_tool_event=on_tool_event,
-        )
+        try:
+            result = await self._run_subagent_loop(
+                project_id=project_id,
+                agent_id=declaration.id,
+                call_type=str(call_type),
+                context=context,
+                session_id=session_id,
+                round_id=round_id,
+                message_id=message_id,
+                parent_call_id=parent_call_id,
+                on_tool_event=on_tool_event,
+            )
+        except ApiError as exc:
+            logger.warning("subagent failed agent=%s code=%s message=%s", declaration.id, exc.code, exc.message)
+            return tool_failed(exc.code, exc.message)
+        except Exception as exc:
+            logger.exception("subagent runtime error agent=%s", declaration.id)
+            return tool_failed("subagent_runtime_error", f"{declaration.id} 执行失败：{exc}")
         return tool_success(
             {
                 "agent_id": declaration.id,
@@ -261,6 +271,7 @@ class ExecutorEngine:
                 messages=messages,
                 tools=SUBAGENT_TOOLS,
                 on_text_delta=None,
+                response_format_json=True,
             )
             assistant_message = action.get("assistant_message")
             if not isinstance(assistant_message, dict):

@@ -6,7 +6,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from ...schemas import ChatMessageRequest, SessionEventsResponse, SessionListResponse
+from ...schemas import ChatMessageRequest, ContextUsageSummary, SessionEventsResponse, SessionListResponse
 from ...services.app_services import AppServices
 from ...services.chat import format_sse_event
 
@@ -49,8 +49,12 @@ def create_chat_router(services: AppServices) -> APIRouter:
     @router.get("/sessions", response_model=SessionListResponse)
     async def list_sessions(project_id: str) -> SessionListResponse:
         project = services.store.get_project(project_id)
+        sessions = services.store.list_sessions(project_id, active_session_id=project.active_session_id)
+        for session in sessions:
+            usage = services.context_manager.context_usage(project_id, session.session_id)
+            session.context_usage = ContextUsageSummary.model_validate(usage.model_dump()) if usage else None
         return SessionListResponse(
-            sessions=services.store.list_sessions(project_id, active_session_id=project.active_session_id)
+            sessions=sessions
         )
 
     return router

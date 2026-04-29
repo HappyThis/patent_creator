@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..prompts import build_solution_refiner_system_prompt, build_solution_refiner_user_prompt
-from ..types import SubagentDeclaration
-from .section_writer import SupportsGenerateJson
-
-
 def build_solution_refiner_context(
     *,
     goal: str,
@@ -24,19 +19,6 @@ def build_solution_refiner_context(
         "target_section": target_section,
         "recent_user_inputs": recent_user_inputs,
     }
-
-
-async def run_solution_refiner(
-    declaration: SubagentDeclaration,
-    llm_client: SupportsGenerateJson,
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    payload = await llm_client.generate_json(
-        system_prompt=build_solution_refiner_system_prompt(declaration),
-        user_prompt=build_solution_refiner_user_prompt(context),
-        temperature=0.0,
-    )
-    return build_solution_refiner_result(payload)
 
 
 def build_solution_refiner_result(payload: dict[str, Any]) -> dict[str, Any]:

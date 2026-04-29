@@ -61,10 +61,20 @@
 
 ## 三、工作区目录结构
 
-建议每个工作区采用如下目录结构：
+运行数据默认保存在当前系统用户目录下：
 
 ```text
-workspace/
+~/.patent_creator/
+  current_project_id
+  projects/
+```
+
+可通过环境变量 `PATENT_CREATOR_DATA_DIR` 覆盖该目录。项目代码仓库内不再默认承载运行数据，避免会话日志、导出文件和运行态内容混入源代码目录。
+
+每个 project 对应一个内部工作区：
+
+```text
+~/.patent_creator/projects/{project_id}/
   project.json
   disclosure.json
   sessions/
@@ -313,7 +323,7 @@ Time: YYYY-MM-DD HH:mm
 工作区初始化规范固定为：
 
 ```text
-workspace/
+~/.patent_creator/projects/{project_id}/
   project.json
   disclosure.json
   sessions/

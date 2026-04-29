@@ -17,7 +17,7 @@ def make_executor(tmp_path: Path) -> tuple[ExecutorEngine, str]:
     store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
     project = store.create_project("一种图像检测方法")
     settings = Settings(data_dir=tmp_path / "data", git_user_name="Test User", git_user_email="test@example.com")
-    return ExecutorEngine(store, ContextManager(store), DummyLLMClient(), settings), project.project_id
+    return ExecutorEngine(store, ContextManager(store, settings), DummyLLMClient(), settings), project.project_id
 
 
 def test_document_read_and_edit_protocol(tmp_path: Path) -> None:

@@ -99,6 +99,7 @@ class OpenAICompatibleClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        response_format_json: bool = False,
     ) -> dict[str, Any]:
         client = self._require_client()
         tool_names = [t.get("function", {}).get("name") for t in tools]
@@ -110,16 +111,21 @@ class OpenAICompatibleClient:
         )
         started = time.monotonic()
         try:
-            stream = await client.chat.completions.create(
-                model=self.settings.openai_model,
-                messages=[
+            request_payload: dict[str, Any] = {
+                "model": self.settings.openai_model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     *messages,
                 ],
-                tools=tools,
-                tool_choice="auto",
-                stream=True,
-                extra_body=self._thinking_extra_body(),
+                "tools": tools,
+                "tool_choice": "auto",
+                "stream": True,
+                "extra_body": self._thinking_extra_body(),
+            }
+            if response_format_json:
+                request_payload["response_format"] = {"type": "json_object"}
+            stream = await client.chat.completions.create(
+                **request_payload,
             )
         except APIStatusError as exc:
             logger.warning(

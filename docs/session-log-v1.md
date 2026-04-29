@@ -20,7 +20,9 @@
 - 子 agent 调用记录方式
 - 文档变更记录方式
 
-本文档不定义日志轮转策略和日志压缩策略。
+本文档不定义日志轮转策略和上下文压缩策略。上下文恢复、压缩与 cursor 管理见：
+
+- [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
 
 ## 一、目标
 
@@ -86,12 +88,19 @@ v1 建议使用：
 
 ## 四、事件类型
 
-v1 先保留 4 类事件：
+v1 基础事件包括：
 
 1. `user_input`
 2. `agent_output`
 3. `tool_call`
 4. `tool_result`
+
+上下文管理扩展事件包括：
+
+1. `context_summary`
+2. `context_pruned`
+
+扩展事件的具体 payload 由上下文管理规范定义。
 
 说明：
 
@@ -206,7 +215,7 @@ v1 建议取值：
 
 说明：
 
-- `agent_output` 用于 UI 可见输出。
+- `agent_output` 用于记录主 agent 最终回复，供历史恢复与 session 回放使用。
 - 本轮最终回复也会在 SSE 的 `round_finished.reply` 中收束。
 
 ### 3. tool_call

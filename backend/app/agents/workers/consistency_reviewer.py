@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..prompts import build_consistency_reviewer_system_prompt, build_consistency_reviewer_user_prompt
-from ..types import SubagentDeclaration
-from .section_writer import SupportsGenerateJson
-
-
 _ALLOWED_SEVERITIES = {"low", "medium", "high"}
 
 
@@ -29,19 +24,6 @@ def build_consistency_reviewer_context(
         "target_section": target_section,
         "recent_user_inputs": recent_user_inputs,
     }
-
-
-async def run_consistency_reviewer(
-    declaration: SubagentDeclaration,
-    llm_client: SupportsGenerateJson,
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    payload = await llm_client.generate_json(
-        system_prompt=build_consistency_reviewer_system_prompt(declaration),
-        user_prompt=build_consistency_reviewer_user_prompt(context),
-        temperature=0.0,
-    )
-    return build_consistency_reviewer_result(payload)
 
 
 def build_consistency_reviewer_result(payload: dict[str, Any]) -> dict[str, Any]:

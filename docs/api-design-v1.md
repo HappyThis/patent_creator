@@ -94,25 +94,27 @@ API 中涉及文档定位时统一使用：
 
 ## 三、项目接口
 
-### 1. `POST /api/projects`
+### 1. `GET /api/projects`
 
-创建一个新的交底书项目，并自动初始化内部工作区。
-
-请求：
-
-```json
-{
-  "title": "一种图像检测方法"
-}
-```
+获取项目列表。当前阶段采用单工作区约定：后端保证第一条 project 是所有前端页面共同使用的当前 project；如果尚无项目，后端会自动初始化一个默认项目。公开创建项目接口暂不提供，避免隐式产生多个 project。
 
 响应：
 
 ```json
 {
-  "project_id": "proj_001",
-  "title": "一种图像检测方法",
-  "created_at": "2026-04-23T21:00:00+08:00"
+  "projects": [
+    {
+      "project_id": "proj_001",
+      "title": "一种图像检测方法",
+      "created_at": "2026-04-23T21:00:00+08:00",
+      "updated_at": "2026-04-23T21:10:00+08:00",
+      "active_session_id": "sess_001",
+      "running_session_id": null,
+      "running_round_id": null,
+      "is_busy": false,
+      "active_session_context": null
+    }
+  ]
 }
 ```
 
@@ -353,13 +355,6 @@ data: {"text":"我已经"}
 - 如果当前 delta 是工具调用片段，后端不会把它作为文本发送，而是累计完整 tool call 后再进入工具执行。
 - 本轮最终仍由 `round_finished.reply` 收束。
 
-#### `agent_output`
-
-```text
-event: agent_output
-data: {"text":"我先补全技术方案章节中的处理流程。"}
-```
-
 #### `tool_call_started`
 
 ```text
@@ -476,8 +471,16 @@ data: {
       "updated_at": "2026-04-23T21:15:00+08:00",
       "event_count": 8,
       "last_round_id": "round_001",
-      "latest_user_text": "请补写技术方案。",
-      "is_active": true
+      "first_user_text": "请补写技术方案。",
+      "is_active": true,
+      "context_usage": {
+        "max_tokens": 128000,
+        "used_tokens": 24000,
+        "used_ratio": 0.1875,
+        "threshold_tokens": 96000,
+        "reserved_output_tokens": 8000,
+        "status": "ok"
+      }
     }
   ]
 }
@@ -538,7 +541,7 @@ data: {
 
 V1 前端最小依赖如下接口：
 
-1. `POST /api/projects`
+1. `GET /api/projects`
 2. `GET /api/projects/{project_id}`
 3. `GET /api/projects/{project_id}/outline`
 4. `GET /api/projects/{project_id}/render`

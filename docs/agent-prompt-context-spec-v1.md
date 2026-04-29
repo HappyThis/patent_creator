@@ -14,6 +14,10 @@
 - agent 上下文组成与按需读取原则
 - agent prompt 分层与 prefix cache 设计原则
 
+更细的 session 恢复、上下文窗口、cursor、压缩和兜底裁剪策略见：
+
+- [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+
 ## 目标
 
 本文档重点回答四个问题：
@@ -618,6 +622,8 @@ v1 建议先固定两个值：
 
 - 不需要把整篇交底书重新塞回上下文
 - 只需要对目标位置进行必要回读
+
+上下文窗口超限时，不由 prompt 自身解决，而由 `ContextManager` 根据上下文管理规范执行压缩或 cursor 兜底移动。
 
 ## 十四、关于 git 提交信息的放置建议
 

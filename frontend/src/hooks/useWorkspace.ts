@@ -12,7 +12,6 @@ import {
 } from '../types';
 import { useWorkspaceSelection } from './useWorkspaceSelection';
 
-const PROJECT_STORAGE_KEY = 'patent_creator_project_id';
 const DEFAULT_PROJECT_TITLE = '一种图像检测方法';
 
 const emptyRenderAst: RenderAst = {
@@ -29,7 +28,7 @@ const emptyRenderAst: RenderAst = {
 type SessionEventResponse = {
   id: string;
   ts: string;
-  type: 'user_input' | 'agent_output' | 'tool_call' | 'tool_result';
+  type: 'user_input' | 'agent_output' | 'tool_call' | 'tool_result' | 'context_summary' | 'context_pruned';
   seq: number;
   scope: string;
   round_id: string;
@@ -46,6 +45,7 @@ type ToolState = {
   round_id?: string;
   message_id?: string;
   seq?: number;
+  parent_call_id?: string | null;
   title: string;
   tool?: string;
   scope?: ProcessEvent['scope'];
@@ -61,6 +61,15 @@ function formatTimestamp(value?: string): string {
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function buildSessionTitle(firstUserText?: string | null): string {
+  const normalized = (firstUserText ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return '未命名会话';
+  }
+  const firstSentence = normalized.split(/[。！？.!?\n]/)[0]?.trim() || normalized;
+  return firstSentence.slice(0, 18);
+}
+
 function formatToolDetail(payload: unknown): string {
   if (payload == null) {
     return '无详细结果';
@@ -74,33 +83,54 @@ function buildSessionTabs(
 ): SessionTab[] {
   return sessions.map((session) => ({
     ...session,
-    title:
-      session.session_id === selected_session_id
-        ? '当前会话'
-        : session.latest_user_text?.slice(0, 18) || session.session_id,
-    subtitle:
-      session.session_id === selected_session_id
-        ? session.session_id
-        : `更新于 ${formatTimestamp(session.updated_at)}`,
+    title: buildSessionTitle(session.first_user_text),
+    subtitle: `更新于 ${formatTimestamp(session.updated_at)}`,
     active: session.session_id === selected_session_id,
   }));
+}
+
+function upsertActiveSessionSummary(
+  sessions: SessionSummary[],
+  sessionId: string,
+  firstUserText: string | null,
+  roundId?: string,
+): SessionSummary[] {
+  const updatedAt = new Date().toISOString();
+  const existing = sessions.find((session) => session.session_id === sessionId);
+  const activeSession: SessionSummary = existing
+    ? {
+        ...existing,
+        updated_at: updatedAt,
+        event_count: Math.max(existing.event_count, 1),
+        last_round_id: roundId ?? existing.last_round_id,
+        first_user_text: existing.first_user_text || firstUserText,
+        is_active: true,
+      }
+    : {
+        session_id: sessionId,
+        updated_at: updatedAt,
+        event_count: 1,
+        last_round_id: roundId ?? null,
+        first_user_text: firstUserText,
+        is_active: true,
+        context_usage: null,
+      };
+
+  const inactiveSessions = sessions
+    .filter((session) => session.session_id !== sessionId)
+    .map((session) => ({
+      ...session,
+      is_active: false,
+    }));
+
+  return [activeSession, ...inactiveSessions];
 }
 
 function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
   const events: ChatEvent[] = [];
   const toolIndex = new Map<string, number>();
-  const lastAgentOutputByRound = new Map<string, { index: number; text: string }>();
 
-  rawEvents.forEach((event, index) => {
-    if (event.type === 'agent_output') {
-      lastAgentOutputByRound.set(event.round_id, {
-        index,
-        text: normalizeMessageText(String(event.payload.text ?? '')),
-      });
-    }
-  });
-
-  for (const [index, event] of rawEvents.entries()) {
+  for (const event of rawEvents) {
     if (event.type === 'user_input') {
       events.push({
         id: event.message_id,
@@ -116,28 +146,7 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
     }
 
     if (event.type === 'agent_output') {
-      const finalReply = lastAgentOutputByRound.get(event.round_id);
       const currentText = String(event.payload.text ?? '');
-      const isFinalReply = finalReply?.index === index;
-      if (!isFinalReply && finalReply?.text === normalizeMessageText(currentText)) {
-        continue;
-      }
-      if (!isFinalReply) {
-        events.push({
-          id: event.id,
-          kind: 'agent_output',
-          timestamp: formatTimestamp(event.ts),
-          round_id: event.round_id,
-          message_id: event.message_id,
-          seq: event.seq,
-          title: '主 agent',
-          summary: currentText,
-          detail: event.scope !== 'main' ? String(event.scope) : undefined,
-          scope: event.scope as ProcessEvent['scope'],
-          status: 'done',
-        });
-        continue;
-      }
       events.push({
         id: event.id,
         kind: 'message',
@@ -151,6 +160,10 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
       continue;
     }
 
+    if (event.type === 'context_summary' || event.type === 'context_pruned') {
+      continue;
+    }
+
     if (event.type === 'tool_call') {
       const item: ToolState = {
         id: event.call_id || event.id,
@@ -159,6 +172,7 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
+        parent_call_id: event.parent_call_id,
         title: String(event.payload.tool ?? 'tool_call'),
         tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
         scope: event.scope as ProcessEvent['scope'],
@@ -185,6 +199,7 @@ function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
       round_id: event.round_id,
       message_id: event.message_id,
       seq: event.seq,
+      parent_call_id: event.parent_call_id,
       title: String(event.payload.tool ?? 'tool_call'),
       tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
       scope: event.scope as ProcessEvent['scope'],
@@ -221,6 +236,7 @@ function applyRunningToolEvent(
     timestamp: formatTimestamp(),
     round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
     message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+    parent_call_id: typeof payload.parent_call_id === 'string' ? payload.parent_call_id : null,
     title: String(payload.tool ?? 'tool_call'),
     tool: typeof payload.tool === 'string' ? payload.tool : undefined,
     scope: payload.scope as ProcessEvent['scope'],
@@ -283,10 +299,6 @@ function applyAssistantDelta(
   return next;
 }
 
-function normalizeMessageText(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
-}
-
 function finalizeRoundEvents(
   current: ChatEvent[],
   reply: string,
@@ -298,29 +310,8 @@ function finalizeRoundEvents(
     return current;
   }
 
-  const normalizedReply = normalizeMessageText(reply);
-  let lastUserMessageIndex = -1;
-  for (let index = current.length - 1; index >= 0; index -= 1) {
-    const item = current[index];
-    if (item.kind === 'message' && item.role === 'user') {
-      lastUserMessageIndex = index;
-      break;
-    }
-  }
-
   const roundMatches = (item: ChatEvent) => (roundId ? item.round_id === roundId : true);
-  const boundary = roundId ? 0 : lastUserMessageIndex + 1;
-  const tail = current.slice(boundary).filter(roundMatches);
-  const duplicateAssistantIndex = tail.findIndex(
-    (item) =>
-      item.kind === 'message' &&
-      item.role === 'assistant' &&
-      normalizeMessageText(item.text) === normalizedReply,
-  );
-
-  if (duplicateAssistantIndex !== -1) {
-    return current;
-  }
+  const tail = current.filter(roundMatches);
 
   const streamMessageIndex = tail.findIndex(
     (item) =>
@@ -347,34 +338,6 @@ function finalizeRoundEvents(
       };
     }
     return next;
-  }
-
-  const duplicateAgentOutputIndex = tail.findIndex(
-    (item) =>
-      item.kind === 'agent_output' &&
-      normalizeMessageText(item.summary ?? '') === normalizedReply,
-  );
-
-  if (duplicateAgentOutputIndex !== -1) {
-    const agentOutputId = tail[duplicateAgentOutputIndex].id;
-    const actualIndex = current.findIndex((item) => item.id === agentOutputId);
-    if (actualIndex === -1) {
-      return current;
-    }
-    const agentOutput = current[actualIndex];
-    return [
-      ...current.slice(0, actualIndex),
-      ...current.slice(actualIndex + 1),
-      {
-        id: agentOutput.id,
-        kind: 'message',
-        role: 'assistant',
-        text: reply,
-        timestamp: agentOutput.timestamp ?? timestamp,
-        round_id: agentOutput.round_id ?? roundId,
-        message_id: agentOutput.message_id ?? sourceMessageId,
-      },
-    ];
   }
 
   return [
@@ -460,29 +423,22 @@ export function useWorkspace() {
   }, []);
 
   const ensureProject = useCallback(async () => {
-    const savedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY);
-    if (savedProjectId) {
-      try {
-        const existingProject = await refreshProject(savedProjectId);
-        await refreshRenderAst(existingProject.project_id);
-        const knownSessions = await refreshSessions(existingProject.project_id, existingProject.active_session_id);
-        const targetSessionId = existingProject.active_session_id || knownSessions[0]?.session_id;
-        if (targetSessionId) {
-          await loadSessionEvents(existingProject.project_id, targetSessionId);
-        }
-        return;
-      } catch {
-        window.localStorage.removeItem(PROJECT_STORAGE_KEY);
-      }
+    window.localStorage.removeItem('patent_creator_project_id');
+    const response = await apiClient.listProjects();
+    const currentProject = response.projects[0];
+    if (!currentProject) {
+      throw new Error('后端未返回可用 project。');
     }
-
-    const nextProject = await apiClient.createProject(DEFAULT_PROJECT_TITLE);
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, nextProject.project_id);
-    setProject(nextProject);
-    await refreshRenderAst(nextProject.project_id);
-    await refreshSessions(nextProject.project_id, nextProject.active_session_id);
+    setProject(currentProject);
+    await refreshRenderAst(currentProject.project_id);
+    const knownSessions = await refreshSessions(currentProject.project_id, currentProject.active_session_id);
+    const targetSessionId = currentProject.active_session_id || knownSessions[0]?.session_id;
+    if (targetSessionId) {
+      await loadSessionEvents(currentProject.project_id, targetSessionId);
+      return;
+    }
     setEvents([]);
-  }, [loadSessionEvents, refreshProject, refreshRenderAst, refreshSessions]);
+  }, [loadSessionEvents, refreshRenderAst, refreshSessions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -528,11 +484,32 @@ export function useWorkspace() {
     [closeStream, loadSessionEvents, project, resetRecent, selectedSessionId],
   );
 
+  const handleNewSession = useCallback(() => {
+    if (!project || project.is_busy) {
+      return;
+    }
+    closeStream();
+    setSelectedSessionId(null);
+    resetRecent();
+    setEvents([]);
+    optimisticUserMessageIdRef.current = null;
+    setProject((current) =>
+      current
+        ? {
+            ...current,
+            active_session_id: null,
+          }
+        : current,
+    );
+  }, [closeStream, project, resetRecent]);
+
   const consumeStreamEvent = useCallback(
     async (project_id: string, eventName: string, payload: Record<string, unknown>) => {
       if (eventName === 'round_started') {
         const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
         const messageId = typeof payload.message_id === 'string' ? payload.message_id : undefined;
+        const sessionId = typeof payload.session_id === 'string' ? payload.session_id : undefined;
+        const firstUserText = typeof payload.first_user_text === 'string' ? payload.first_user_text : null;
         setProject((current) =>
           current
             ? {
@@ -544,8 +521,9 @@ export function useWorkspace() {
               }
             : current,
         );
-        if (payload.session_id) {
-          setSelectedSessionId(String(payload.session_id));
+        if (sessionId) {
+          setSelectedSessionId(sessionId);
+          setSessions((current) => upsertActiveSessionSummary(current, sessionId, firstUserText, roundId));
         }
         if (roundId) {
           streamingAssistantIdRef.current = `assistant_stream_${roundId}`;
@@ -583,24 +561,6 @@ export function useWorkspace() {
             typeof payload.message_id === 'string' ? payload.message_id : undefined,
           ),
         );
-        return;
-      }
-
-      if (eventName === 'agent_output') {
-        setEvents((current) => [
-          ...current,
-          {
-            id: `agent_note_${Date.now()}_${current.length}`,
-            kind: 'agent_output',
-            timestamp: formatTimestamp(),
-            round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
-            message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
-            title: '主 agent',
-            summary: String(payload.text ?? ''),
-            status: 'done',
-            scope: 'main',
-          },
-        ]);
         return;
       }
 
@@ -779,12 +739,22 @@ export function useWorkspace() {
     () => buildSessionTabs(sessions, selectedSessionId),
     [selectedSessionId, sessions],
   );
+  const contextUsage = useMemo(
+    () =>
+      selectedSessionId
+        ? sessions.find((session) => session.session_id === selectedSessionId)?.context_usage ??
+          project?.active_session_context ??
+          null
+        : null,
+    [project?.active_session_context, selectedSessionId, sessions],
+  );
 
   return {
     renderAst,
     events,
     composer,
     isBusy: project?.is_busy ?? isLoading,
+    contextUsage,
     sessionTabs,
     activeSectionId,
     activeBlockId,
@@ -796,5 +766,6 @@ export function useWorkspace() {
     selectSection,
     submitMessage,
     handleSessionSelect,
+    handleNewSession,
   };
 }

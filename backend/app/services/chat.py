@@ -71,6 +71,12 @@ class ChatService:
                 raise ApiError(404, "session_not_found", f"session_id 不存在：{payload.session_id}")
 
             session_id = payload.session_id or generate_id("sess")
+            first_user_text = payload.message
+            if payload.session_id:
+                existing_events = self.store.read_session_events(project_id, payload.session_id)
+                first_user_event = next((event for event in existing_events if event.type == "user_input"), None)
+                if first_user_event:
+                    first_user_text = str(first_user_event.payload.get("text") or payload.message)
             message_id = generate_id("msg")
             round_id = generate_id("round")
 
@@ -99,6 +105,7 @@ class ChatService:
             session_id=session_id,
             message_id=message_id,
             round_id=round_id,
+            first_user_text=first_user_text,
         )
         return response, RoundState(session_id, message_id, round_id)
 
@@ -113,12 +120,15 @@ class ChatService:
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
         system_prompt = build_main_agent_system_prompt()
-        messages = self.context_manager.build_main_agent_messages(
+        messages = await self.context_manager.prepare_main_agent_messages(
             project_id,
             state.session_id,
             user_message=payload.message,
             active_section_id=payload.active_section_id,
             active_block_id=payload.active_block_id,
+            current_message_id=state.message_id,
+            round_id=state.round_id,
+            llm_client=self.llm_client,
         )
         changed_payload: dict[str, Any] = dict(DEFAULT_CHANGED_PAYLOAD)
         changed_payload["active_section_id"] = payload.active_section_id
@@ -176,12 +186,7 @@ class ChatService:
                         len(final_reply),
                     )
                     messages.append(action.assistant_message)
-                    await self._emit_agent_output(
-                        project_id,
-                        state,
-                        final_reply,
-                        publish=not bool(streamed_reply_parts),
-                    )
+                    await self._emit_agent_output(project_id, state, final_reply)
                     break
 
                 # tool_calls 分支：DeepSeek 要求 assistant(tool_calls) 后紧跟每个 tool_call_id 的 tool 结果。
@@ -343,7 +348,7 @@ class ChatService:
         )
         return result
 
-    async def _emit_agent_output(self, project_id: str, state: RoundState, text: str, publish: bool = True) -> None:
+    async def _emit_agent_output(self, project_id: str, state: RoundState, text: str) -> None:
         self.store.append_session_event(
             project_id,
             state.session_id,
@@ -353,16 +358,6 @@ class ChatService:
             message_id=state.message_id,
             payload={"text": text},
         )
-        if publish:
-            await self.bus.publish(
-                (project_id, state.session_id),
-                "agent_output",
-                {
-                    "text": text,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
-            )
 
     async def _emit_tool(
         self,

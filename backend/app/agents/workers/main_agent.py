@@ -14,6 +14,7 @@ class SupportsGenerateWithTools(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any,
+        response_format_json: bool = False,
     ) -> dict[str, Any]:
         ...
 

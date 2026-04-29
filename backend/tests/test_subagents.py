@@ -1,33 +1,25 @@
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
-
-from app.agents.registry import SUBAGENTS
 from app.agents.workers import (
+    build_consistency_reviewer_result,
     build_consistency_reviewer_context,
+    build_material_analyst_result,
     build_material_analyst_context,
+    build_solution_refiner_result,
     build_solution_refiner_context,
-    run_consistency_reviewer,
-    run_material_analyst,
-    run_solution_refiner,
 )
 
 
-class StubJsonLLM:
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self.payload = payload
-        self.calls: list[tuple[str, str]] = []
-
-    async def generate_json(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> dict[str, Any]:
-        self.calls.append((system_prompt, user_prompt))
-        return self.payload
-
-
-@pytest.mark.anyio
-async def test_material_analyst_envelope() -> None:
-    llm = StubJsonLLM(
+def test_material_analyst_context_and_envelope() -> None:
+    context = build_material_analyst_context(
+        goal="整理当前聊天材料",
+        user_message="我们在低算力设备上做图像识别",
+        outline=[],
+        target_section=None,
+        recent_user_inputs=[],
+    )
+    assert context["task"]["goal"] == "整理当前聊天材料"
+    result = build_material_analyst_result(
         {
             "summary": "已整理事实。",
             "reply": "已整理事实。",
@@ -45,14 +37,6 @@ async def test_material_analyst_envelope() -> None:
             "warnings": [],
         }
     )
-    context = build_material_analyst_context(
-        goal="整理当前聊天材料",
-        user_message="我们在低算力设备上做图像识别",
-        outline=[],
-        target_section=None,
-        recent_user_inputs=[],
-    )
-    result = await run_material_analyst(SUBAGENTS["material_analyst"], llm, context)
     assert result["status"] == "success"
     assert result["proposal"]["type"] == "analysis_result"
     # 字段过滤：kind 为 missing 但 text 空的被剔除
@@ -63,9 +47,16 @@ async def test_material_analyst_envelope() -> None:
     assert result["questions"] == ["需要明确硬件型号吗？"]
 
 
-@pytest.mark.anyio
-async def test_solution_refiner_envelope() -> None:
-    llm = StubJsonLLM(
+def test_solution_refiner_context_and_envelope() -> None:
+    context = build_solution_refiner_context(
+        goal="收敛方案",
+        user_message="请整理技术方案",
+        outline=[],
+        target_section=None,
+        recent_user_inputs=[],
+    )
+    assert context["task"]["user_message"] == "请整理技术方案"
+    result = build_solution_refiner_result(
         {
             "summary": "方案骨架。",
             "reply": "方案骨架。",
@@ -82,14 +73,6 @@ async def test_solution_refiner_envelope() -> None:
             "warnings": ["部分性能数据未验证"],
         }
     )
-    context = build_solution_refiner_context(
-        goal="收敛方案",
-        user_message="请整理技术方案",
-        outline=[],
-        target_section=None,
-        recent_user_inputs=[],
-    )
-    result = await run_solution_refiner(SUBAGENTS["solution_refiner"], llm, context)
     assert result["status"] == "success"
     proposal = result["proposal"]
     assert proposal["type"] == "analysis_result"
@@ -100,9 +83,17 @@ async def test_solution_refiner_envelope() -> None:
     assert proposal["open_questions"] == ["是否需要离线模型？"]
 
 
-@pytest.mark.anyio
-async def test_consistency_reviewer_envelope() -> None:
-    llm = StubJsonLLM(
+def test_consistency_reviewer_context_and_envelope() -> None:
+    context = build_consistency_reviewer_context(
+        goal="审查一致性",
+        user_message="请检查",
+        outline=[],
+        target_section=None,
+        target_section_id="technical_effects",
+        recent_user_inputs=[],
+    )
+    assert context["task"]["target_section_id"] == "technical_effects"
+    result = build_consistency_reviewer_result(
         {
             "summary": "已审查。",
             "reply": "已审查。",
@@ -122,15 +113,6 @@ async def test_consistency_reviewer_envelope() -> None:
             "warnings": [],
         }
     )
-    context = build_consistency_reviewer_context(
-        goal="审查一致性",
-        user_message="请检查",
-        outline=[],
-        target_section=None,
-        target_section_id="technical_effects",
-        recent_user_inputs=[],
-    )
-    result = await run_consistency_reviewer(SUBAGENTS["consistency_reviewer"], llm, context)
     assert result["status"] == "success"
     proposal = result["proposal"]
     assert proposal["type"] == "review_report"

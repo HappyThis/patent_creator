@@ -5,10 +5,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-class CreateProjectRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-
-
 class ProjectRecord(BaseModel):
     project_id: str
     title: str
@@ -30,6 +26,20 @@ class ProjectSummary(BaseModel):
     running_session_id: str | None = None
     running_round_id: str | None = None
     is_busy: bool = False
+    active_session_context: "ContextUsageSummary | None" = None
+
+
+class ContextUsageSummary(BaseModel):
+    max_tokens: int
+    used_tokens: int
+    used_ratio: float
+    threshold_tokens: int
+    reserved_output_tokens: int
+    status: str
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectSummary]
 
 
 class OutlineItem(BaseModel):
@@ -63,12 +73,13 @@ class ChatMessageResponse(BaseModel):
     session_id: str
     message_id: str
     round_id: str
+    first_user_text: str
 
 
 class SessionEvent(BaseModel):
     id: str
     ts: str
-    type: Literal["user_input", "agent_output", "tool_call", "tool_result"]
+    type: Literal["user_input", "agent_output", "tool_call", "tool_result", "context_summary", "context_pruned"]
     seq: int
     scope: str
     round_id: str
@@ -87,8 +98,9 @@ class SessionSummary(BaseModel):
     updated_at: str
     event_count: int
     last_round_id: str | None = None
-    latest_user_text: str | None = None
+    first_user_text: str | None = None
     is_active: bool = False
+    context_usage: ContextUsageSummary | None = None
 
 
 class SessionListResponse(BaseModel):
@@ -109,3 +121,4 @@ class ErrorEnvelope(BaseModel):
 
 
 OutlineItem.model_rebuild()
+ProjectSummary.model_rebuild()

@@ -81,7 +81,7 @@ user_input
          -> sse(document_changed)
       -> context update
       -> continue main loop
--> final agent_output
+-> 记录 final agent_output
 -> if changed ids exist: git commit
 -> sse(round_finished)
 ```
@@ -339,9 +339,9 @@ user_input
 
 ## 十四、回合中的多次 agent 输出
 
-主 agent 在一轮中可以多次向前端输出 `agent_output`。
+主 agent 在一轮中可以通过 `assistant_delta` 多次向前端输出自然语言片段。
 
-最终仍应有一个 `round_finished.reply` 作为本轮收束。
+最终必须有一个 `round_finished.reply` 作为本轮收束；`agent_output` 只写入 session log，用于历史恢复与回放。
 
 这样可以兼顾：
 

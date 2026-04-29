@@ -20,6 +20,11 @@ class Settings:
     round_finish_delay: float = 0.1
     main_agent_max_steps: int = 10
     subagent_max_steps: int = 5
+    context_max_tokens: int = 128000
+    context_compress_threshold_ratio: float = 0.8
+    context_target_ratio: float = 0.65
+    context_reserved_output_tokens: int = 8000
+    context_recent_full_rounds: int = 8
     log_dir: Path = Path("logs")
     log_level: str = "INFO"
     log_backup_days: int = 30
@@ -28,9 +33,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         _load_repo_env()
-        backend_dir = Path(__file__).resolve().parents[2]
         repo_dir = Path(__file__).resolve().parents[3]
-        data_dir = Path(_env_or("PATENT_CREATOR_DATA_DIR", str(backend_dir / "data")))
+        data_dir = Path(_env_or("PATENT_CREATOR_DATA_DIR", str(Path.home() / ".patent_creator")))
         log_dir = Path(_env_or("PATENT_CREATOR_LOG_DIR", str(repo_dir / "logs")))
         return cls(
             data_dir=data_dir,
@@ -49,6 +53,13 @@ class Settings:
             round_finish_delay=float(os.getenv("PATENT_CREATOR_ROUND_FINISH_DELAY", "0.1")),
             main_agent_max_steps=int(os.getenv("PATENT_CREATOR_MAIN_AGENT_MAX_STEPS", "10")),
             subagent_max_steps=int(os.getenv("PATENT_CREATOR_SUBAGENT_MAX_STEPS", "5")),
+            context_max_tokens=int(os.getenv("PATENT_CREATOR_CONTEXT_MAX_TOKENS", "128000")),
+            context_compress_threshold_ratio=float(
+                os.getenv("PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO", "0.8")
+            ),
+            context_target_ratio=float(os.getenv("PATENT_CREATOR_CONTEXT_TARGET_RATIO", "0.65")),
+            context_reserved_output_tokens=int(os.getenv("PATENT_CREATOR_CONTEXT_RESERVED_OUTPUT_TOKENS", "8000")),
+            context_recent_full_rounds=int(os.getenv("PATENT_CREATOR_CONTEXT_RECENT_FULL_ROUNDS", "8")),
             log_dir=log_dir,
             log_level=os.getenv("PATENT_CREATOR_LOG_LEVEL", "INFO"),
             log_backup_days=int(os.getenv("PATENT_CREATOR_LOG_BACKUP_DAYS", "30")),

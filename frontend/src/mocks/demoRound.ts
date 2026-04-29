@@ -25,10 +25,10 @@ export function buildSessionTabs(project: ProjectState): SessionTab[] {
       updated_at: project.updated_at ?? project.created_at,
       event_count: 0,
       last_round_id: project.running_round_id,
-      latest_user_text: null,
+      first_user_text: '帮我完善技术方案',
       is_active: true,
-      title: '当前会话',
-      subtitle: project.project_id,
+      title: '帮我完善技术方案',
+      subtitle: `更新于 ${formatTimestamp()}`,
       active: true,
     },
     {
@@ -36,9 +36,9 @@ export function buildSessionTabs(project: ProjectState): SessionTab[] {
       updated_at: project.updated_at ?? project.created_at,
       event_count: 0,
       last_round_id: null,
-      latest_user_text: null,
+      first_user_text: '补充背景技术',
       is_active: false,
-      title: 'sess_003',
+      title: '补充背景技术',
       active: false,
     },
     {
@@ -46,9 +46,9 @@ export function buildSessionTabs(project: ProjectState): SessionTab[] {
       updated_at: project.updated_at ?? project.created_at,
       event_count: 0,
       last_round_id: null,
-      latest_user_text: null,
+      first_user_text: '整理权利要求建议',
       is_active: false,
-      title: 'sess_002',
+      title: '整理权利要求建议',
       active: false,
     },
   ];
@@ -77,16 +77,6 @@ export function createRoundStartEvents(composer: string): ChatEvent[] {
 
 export function createRoundProcessSteps(): Array<{ delayMs: number; event: ProcessEvent }> {
   return [
-    {
-      delayMs: 500,
-      event: {
-        id: `evt_agent_${Date.now()}`,
-        kind: 'agent_output',
-        title: '主 agent',
-        summary: '开始处理本轮需求。',
-        detail: '本轮将默认采纳 section_writer proposal，并更新 technical_solution。',
-      },
-    },
     {
       delayMs: 500,
       event: {

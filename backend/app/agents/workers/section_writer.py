@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 from ...core import ApiError
-from ..prompts import build_section_writer_system_prompt, build_section_writer_user_prompt
-from ..types import SubagentDeclaration
-
-
-class SupportsGenerateJson(Protocol):
-    async def generate_json(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> dict[str, Any]:
-        ...
 
 
 def build_section_writer_context(
@@ -44,19 +37,6 @@ def build_section_writer_context(
         "current_section": section,
         "recent_user_inputs": recent_user_inputs,
     }
-
-
-async def run_section_writer(
-    declaration: SubagentDeclaration,
-    llm_client: SupportsGenerateJson,
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    payload = await llm_client.generate_json(
-        system_prompt=build_section_writer_system_prompt(declaration),
-        user_prompt=build_section_writer_user_prompt(context),
-        temperature=0.0,
-    )
-    return build_section_writer_result(payload, context["task"]["target_section_id"], context["task"]["target_block_id"])
 
 
 def build_section_writer_result(

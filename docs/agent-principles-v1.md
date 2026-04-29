@@ -260,6 +260,10 @@ v1 建议的轻量字段如下：
 4. 维护本轮运行时上下文
 5. 在需要时进行上下文压缩
 
+上下文窗口、session cursor、压缩、兜底裁剪和 agent scope 投影规则见：
+
+- [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+
 换句话说：
 
 - agent 负责决定“要不要读”

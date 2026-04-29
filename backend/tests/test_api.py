@@ -114,6 +114,7 @@ class StubLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
+        response_format_json: bool = False,
     ) -> dict[str, Any]:
         """模拟主 agent loop：execute_subagent -> document_edit -> respond。"""
         if "子 agent：section_writer" in system_prompt:
@@ -218,13 +219,18 @@ class StubLLMClient:
             }
 
         tool_results = [msg for msg in messages if msg.get("role") == "tool"]
-        user_payload = json.loads(messages[0]["content"]) if messages else {}
 
         if not tool_results:
-            user_message = user_payload.get("user_message", "")
-            target_section_id = user_payload.get("active_section_id")
-            if not target_section_id:
-                target_section_id = "technical_effects" if "技术效果" in user_message else "technical_solution"
+            user_messages = [
+                str(message.get("content") or "")
+                for message in messages
+                if message.get("role") == "user"
+            ]
+            user_message = user_messages[-1] if user_messages else ""
+            context_message = user_messages[0] if user_messages else ""
+            target_section_id = "technical_effects" if "技术效果" in user_message else "technical_solution"
+            if "技术效果" not in user_message and '"active_section_id": "technical_effects"' in context_message:
+                target_section_id = "technical_effects"
             arguments = {
                 "agent_id": "section_writer",
                 "call_type": "rich_context_specialist",
@@ -338,9 +344,18 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         create_response = await client.post("/api/projects", json={"title": "一种图像检测方法"})
-        assert create_response.status_code == 200
-        project = create_response.json()
+        assert create_response.status_code == 405
+
+        projects_response = await client.get("/api/projects")
+        assert projects_response.status_code == 200
+        projects = projects_response.json()["projects"]
+        assert len(projects) == 1
+        project = projects[0]
         project_id = project["project_id"]
+
+        second_projects_response = await client.get("/api/projects")
+        assert second_projects_response.status_code == 200
+        assert second_projects_response.json()["projects"][0]["project_id"] == project_id
 
         outline_response = await client.get(f"/api/projects/{project_id}/outline")
         assert outline_response.status_code == 200

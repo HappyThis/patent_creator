@@ -11,6 +11,7 @@ function App() {
     events,
     composer,
     isBusy,
+    contextUsage,
     sessionTabs,
     activeSectionId,
     previewFocusTarget,
@@ -21,6 +22,7 @@ function App() {
     selectSection,
     submitMessage,
     handleSessionSelect,
+    handleNewSession,
   } = useWorkspace();
 
   return (
@@ -49,9 +51,11 @@ function App() {
           events={events}
           composer={composer}
           isBusy={isBusy}
+          contextUsage={contextUsage}
           onComposerChange={setComposer}
           onSubmit={submitMessage}
           onSessionSelect={handleSessionSelect}
+          onNewSession={handleNewSession}
         />
       </main>
     </div>

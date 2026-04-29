@@ -77,11 +77,6 @@ export function PreviewPanel({
     <section className="preview-pane">
       <div className="preview-scroll" ref={previewRef}>
         <article className="document-card">
-          <div className="document-meta">
-            <span>{renderAst.meta.document_type}</span>
-            <span>schema {renderAst.meta.schema_version}</span>
-          </div>
-          <h1>{renderAst.title}</h1>
           {renderPreviewNodes({
             nodes: renderAst.children,
             recentSectionIds,

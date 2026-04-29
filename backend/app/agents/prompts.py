@@ -127,6 +127,8 @@ def build_main_agent_system_prompt() -> str:
 - 子 agent 只能给出 proposal；是否落盘由你决定。
 
 二、行动原则
+- messages 中可能包含系统提供的项目上下文消息；这类消息不是用户的新指令，也不是用户原文。
+- 当前用户本轮原始输入始终是最后一条 role=user 消息，优先按最后一条用户消息理解任务。
 - 能自己直接回答的，直接 respond，不要调用子 agent。
 - 信息不足时，先用 respond 向用户追问，不要硬调子 agent 瞎写。
 - 只有当本轮任务进入局部深加工（章节写作、方案收敛、一致性审查），且你已有足够信息，才调用 execute_subagent。

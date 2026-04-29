@@ -2,21 +2,22 @@
 
 ## 当前文档
 
-当前 `docs` 目录包含 13 份核心设计/状态文档：
+当前 `docs` 目录包含 14 份核心设计/状态文档：
 
 1. [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
 2. [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
 3. [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-4. [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
-5. [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
-6. [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
-7. [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
-8. [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
-9. [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
-10. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
-11. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
-12. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
-13. [后端实现状态 v1](/Users/yangchaoqun/myProj/patent_creator/docs/backend-implementation-status-v1.md)
+4. [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+5. [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
+6. [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
+7. [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
+8. [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
+9. [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
+10. [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
+11. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
+12. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
+13. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
+14. [后端实现状态 v1](/Users/yangchaoqun/myProj/patent_creator/docs/backend-implementation-status-v1.md)
 
 ## 是否需要合并
 
@@ -27,15 +28,16 @@
 1. `专利交底书结构方案` 是文档 schema，本身就是独立主题
 2. `Agent 基本设计原则` 是系统架构与职责边界，也应独立
 3. `Agent Prompt 与上下文规范` 同时覆盖上下文装配、prompt 分层与 prefix cache
-4. `子 Agent 定义 v1` 负责收敛业务子 agent 清单与能力边界
-5. `Tools 设计 v1` 负责收敛工具集合与当前取舍
-6. `Session 事件日志 Schema v1` 负责收敛会话过程记录格式
-7. `工作区初始化规范 v1` 负责定义内部项目工作区的初始化方式
-8. `技术栈规范 v1` 负责定义前后端实现栈、运行时和包管理
-9. `API 设计规范 v1` 负责定义前端与后端之间的接口协议
-10. `render_ast Schema v1` 负责定义后端生成、前端消费的统一展示模型
-11. `前端交互规范 v1` 负责定义三栏页面的具体交互方式
-12. `一轮内部时序 v1` 负责定义一次用户请求在系统内部如何运行和收束
+4. `上下文管理规范 v1` 负责定义 session 恢复、上下文窗口、cursor、压缩和兜底裁剪策略
+5. `子 Agent 定义 v1` 负责收敛业务子 agent 清单与能力边界
+6. `Tools 设计 v1` 负责收敛工具集合与当前取舍
+7. `Session 事件日志 Schema v1` 负责收敛会话过程记录格式
+8. `工作区初始化规范 v1` 负责定义内部项目工作区的初始化方式
+9. `技术栈规范 v1` 负责定义前后端实现栈、运行时和包管理
+10. `API 设计规范 v1` 负责定义前端与后端之间的接口协议
+11. `render_ast Schema v1` 负责定义后端生成、前端消费的统一展示模型
+12. `前端交互规范 v1` 负责定义三栏页面的具体交互方式
+13. `一轮内部时序 v1` 负责定义一次用户请求在系统内部如何运行和收束
 
 它们虽然相关，但关注点仍然不同。全部继续合并成一份总文档后，后续修改会变得笨重。
 
@@ -46,6 +48,7 @@
 - 保留 `专利交底书结构方案 v1` 独立
 - 保留 `Agent 基本设计原则 v1` 独立
 - 将 `上下文说明` 与 `prompt 模板原则` 合并为一份 `Agent Prompt 与上下文规范 v1`
+- 保留 `上下文管理规范 v1` 独立
 - 保留 `子 Agent 定义 v1` 独立
 - 保留 `Tools 设计 v1` 独立
 - 保留 `Session 事件日志 Schema v1` 独立
@@ -56,7 +59,7 @@
 - 保留 `前端交互规范 v1` 独立
 - 保留 `一轮内部时序 v1` 独立
 
-当前阶段保持 12 份核心文档更利于迭代。
+当前阶段保持这些核心文档独立更利于迭代。
 
 ## 文档依赖关系
 
@@ -65,15 +68,16 @@
 1. [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
 2. [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
 3. [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-4. [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
-5. [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
-6. [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
-7. [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
-8. [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
-9. [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
-10. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
-11. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
-12. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
+4. [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+5. [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
+6. [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
+7. [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
+8. [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
+9. [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
+10. [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
+11. [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
+12. [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
+13. [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
 
 依赖关系可以理解为：
 
@@ -83,8 +87,10 @@
   - 依赖交底书结构边界
 - `Agent Prompt 与上下文规范 v1`
   - 依赖交底书结构和 agent 基本原则
+- `上下文管理规范 v1`
+  - 依赖 agent 基本原则、prompt/context 规范、session 日志规范和一轮内部时序
 - `子 Agent 定义 v1`
-  - 依赖 agent 基本原则和 prompt/context 规范
+  - 依赖 agent 基本原则、prompt/context 规范和上下文管理规范
 - `Tools 设计 v1`
   - 依赖 agent 基本原则、prompt/context 规范和子 agent 定义
 - `Session 事件日志 Schema v1`

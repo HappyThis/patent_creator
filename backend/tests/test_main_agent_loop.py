@@ -19,9 +19,15 @@ class ScriptedLLMClient:
     - generate_json 给 section_writer 用，直接返回可解析的 operations。
     """
 
-    def __init__(self, script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]],
+        *,
+        script_subagents: bool = False,
+    ) -> None:
         self._script = list(script)
         self._cursor = 0
+        self._script_subagents = script_subagents
 
     async def generate_with_tools_stream(
         self,
@@ -30,8 +36,9 @@ class ScriptedLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
+        response_format_json: bool = False,
     ) -> dict[str, Any]:
-        if "子 agent：" in system_prompt:
+        if "子 agent：" in system_prompt and not self._script_subagents:
             context = json.loads(messages[0]["content"])
             target_section_id = context["task"]["target_section_id"]
             text = json.dumps(
@@ -98,6 +105,13 @@ class ScriptedLLMClient:
         return {"role": "assistant", "content": ""}
 
     async def generate_json(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> dict[str, Any]:
+        if "上下文压缩 agent" in system_prompt:
+            context = json.loads(user_prompt)
+            event_count = len(context.get("events") or [])
+            return {
+                "summary": f"系统压缩摘要：此前共有 {event_count} 条主 agent 历史消息，用户正在延续同一任务。",
+                "warnings": [],
+            }
         context = json.loads(user_prompt)
         target_section_id = context["task"]["target_section_id"]
         return {
@@ -335,3 +349,116 @@ async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path)
     assert "tool_call_finished" in names
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "没有找到对应章节，我需要换一个有效章节。"
+
+
+@pytest.mark.anyio
+async def test_main_agent_restores_session_history_between_rounds(tmp_path: Path) -> None:
+    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1] == {"role": "user", "content": "第一轮问题"}
+        return {"type": "respond", "text": "第一轮回答"}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert {"role": "user", "content": "第一轮问题"} in messages
+        assert {"role": "assistant", "content": "第一轮回答"} in messages
+        assert messages[-1] == {"role": "user", "content": "继续"}
+        return {"type": "respond", "text": "第二轮回答"}
+
+    llm = ScriptedLLMClient([first_round, second_round])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message="第一轮问题"))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, first.session_id)
+    assistant_outputs = [event.payload.get("text") for event in events if event.type == "agent_output"]
+    assert assistant_outputs == ["第一轮回答", "第二轮回答"]
+
+
+@pytest.mark.anyio
+async def test_context_manager_compresses_old_session_history(tmp_path: Path) -> None:
+    long_text = "历史技术细节" * 80
+
+    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1]["content"] == long_text
+        return {"type": "respond", "text": "已记录历史技术细节。" + long_text}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [message["content"] for message in messages]
+        assert any("系统压缩摘要" in content for content in contents)
+        assert not any(content == long_text for content in contents[:-1])
+        assert messages[-1] == {"role": "user", "content": "继续完善"}
+        return {"type": "respond", "text": "继续处理。"}
+
+    llm = ScriptedLLMClient([first_round, second_round])
+    settings = make_settings(tmp_path)
+    settings.context_max_tokens = 900
+    settings.context_reserved_output_tokens = 100
+    settings.context_compress_threshold_ratio = 0.5
+    settings.context_recent_full_rounds = 1
+    services = AppServices(settings, llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message=long_text))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(session_id=first.session_id, message="继续完善"),
+    )
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, first.session_id)
+    assert any(event.type == "context_summary" for event in events)
+    usage = services.context_manager.context_usage(project_id, first.session_id)
+    assert usage is not None
+    assert usage.used_tokens > 0
+
+
+@pytest.mark.anyio
+async def test_subagent_invalid_json_returns_tool_failure_to_main_agent(tmp_path: Path) -> None:
+    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {
+                        "agent_id": "section_writer",
+                        "call_type": "rich_context_specialist",
+                        "goal": "补充背景技术",
+                        "target_section_id": "background_technology",
+                        "user_message": "补充背景技术",
+                    },
+                    "call_bad_json",
+                )
+            ],
+        }
+
+    def step_subagent_bad_json(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages
+        return {"type": "respond", "text": "这不是 JSON"}
+
+    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "subagent_invalid_json"
+        return {"type": "respond", "text": "子 agent 输出格式异常，我没有修改文档。"}
+
+    llm = ScriptedLLMClient([step_call_subagent, step_subagent_bad_json, step_main_recover], script_subagents=True)
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="补充背景技术"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    main_tool_results = [
+        event for event in events if event.type == "tool_result" and event.scope == "main" and event.payload.get("tool") == "execute_subagent"
+    ]
+    assert main_tool_results[-1].payload["status"] == "failed"
+    assert [event.payload.get("text") for event in events if event.type == "agent_output"][-1] == "子 agent 输出格式异常，我没有修改文档。"

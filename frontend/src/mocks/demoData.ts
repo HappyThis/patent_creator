@@ -234,13 +234,6 @@ export const initialEvents: ChatEvent[] = [
     timestamp: '21:10',
   },
   {
-    id: 'evt_note_001',
-    kind: 'agent_output',
-    title: '主 agent',
-    summary: '准备补写技术方案与有益效果。',
-    detail: '目标章节：technical_solution、technical_effects',
-  },
-  {
     id: 'evt_tool_001',
     kind: 'tool_call',
     title: 'document_read',

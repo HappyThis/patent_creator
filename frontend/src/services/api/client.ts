@@ -1,7 +1,7 @@
 import { OutlineItem, ProjectState, RenderAst, SessionSummary } from '../../types';
 
 export type ApiClient = {
-  createProject: (title: string) => Promise<ProjectState>;
+  listProjects: () => Promise<{ projects: ProjectState[] }>;
   getProject: (project_id: string) => Promise<ProjectState>;
   getOutline: (project_id: string) => Promise<{ sections: OutlineItem[] }>;
   getRenderAst: (
@@ -52,11 +52,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiClient: ApiClient = {
-  async createProject(title) {
-    return request<ProjectState>('/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ title }),
-    });
+  async listProjects() {
+    return request<{ projects: ProjectState[] }>('/api/projects');
   },
   async getProject(project_id) {
     return request<ProjectState>(`/api/projects/${project_id}`);

@@ -10,6 +10,9 @@ from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..schemas import ProjectRecord, SessionEvent, SessionSummary
 
+DEFAULT_PROJECT_TITLE = "一种图像检测方法"
+CURRENT_PROJECT_POINTER = "current_project_id"
+
 
 class WorkspaceStore:
     def __init__(self, root_dir: Path, git_user_name: str, git_user_email: str) -> None:
@@ -21,6 +24,9 @@ class WorkspaceStore:
 
     def create_project(self, title: str) -> ProjectRecord:
         project_id = generate_id("proj")
+        return self.create_project_with_id(project_id, title)
+
+    def create_project_with_id(self, project_id: str, title: str) -> ProjectRecord:
         workspace = self.project_dir(project_id)
         workspace.mkdir(parents=True, exist_ok=False)
         for name in ("sessions", "assets", "exports", "runtime"):
@@ -40,6 +46,36 @@ class WorkspaceStore:
         (workspace / ".gitignore").write_text("runtime/\nexports/\n", encoding="utf-8")
         self._init_workspace_git(workspace)
         return project
+
+    def list_projects(self) -> list[ProjectRecord]:
+        projects: list[ProjectRecord] = []
+        for path in self.projects_dir.glob("*/project.json"):
+            try:
+                projects.append(ProjectRecord.model_validate(self.read_json(path)))
+            except Exception:
+                continue
+        projects.sort(key=lambda project: project.updated_at, reverse=True)
+        return projects
+
+    def list_projects_with_current_first(self) -> list[ProjectRecord]:
+        current = self.ensure_current_project()
+        projects = self.list_projects()
+        return [current, *(project for project in projects if project.project_id != current.project_id)]
+
+    def ensure_current_project(self) -> ProjectRecord:
+        pointer_path = self.root_dir / CURRENT_PROJECT_POINTER
+        if pointer_path.exists():
+            project_id = pointer_path.read_text(encoding="utf-8").strip()
+            if project_id:
+                try:
+                    return self.get_project(project_id)
+                except ApiError:
+                    pass
+
+        projects = self.list_projects()
+        current = projects[0] if projects else self.create_project(DEFAULT_PROJECT_TITLE)
+        pointer_path.write_text(current.project_id + "\n", encoding="utf-8")
+        return current
 
     def get_project(self, project_id: str) -> ProjectRecord:
         path = self.project_file(project_id)
@@ -119,14 +155,14 @@ class WorkspaceStore:
             session_id = path.stem
             events = self.read_session_events(project_id, session_id)
             last_event = events[-1] if events else None
-            latest_user_event = next((event for event in reversed(events) if event.type == "user_input"), None)
+            first_user_event = next((event for event in events if event.type == "user_input"), None)
             summaries.append(
                 SessionSummary(
                     session_id=session_id,
                     updated_at=last_event.ts if last_event else now_iso(),
                     event_count=len(events),
                     last_round_id=last_event.round_id if last_event else None,
-                    latest_user_text=latest_user_event.payload.get("text") if latest_user_event else None,
+                    first_user_text=first_user_event.payload.get("text") if first_user_event else None,
                     is_active=session_id == active_session_id,
                 )
             )

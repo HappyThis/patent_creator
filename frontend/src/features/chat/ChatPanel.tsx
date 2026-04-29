@@ -1,7 +1,7 @@
 import { CompositionEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatEvent, ChatMessageEvent, ProcessEvent, SessionTab } from '../../types';
+import { ChatEvent, ChatMessageEvent, ContextUsageSummary, ProcessEvent, SessionTab } from '../../types';
 import { TimelineList } from '../timeline/TimelineList';
 
 type ChatPanelProps = {
@@ -9,9 +9,11 @@ type ChatPanelProps = {
   events: ChatEvent[];
   composer: string;
   isBusy: boolean;
+  contextUsage?: ContextUsageSummary | null;
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
   onSessionSelect: (session_id: string) => void;
+  onNewSession: () => void;
 };
 
 type RenderBlock =
@@ -19,119 +21,34 @@ type RenderBlock =
   | { kind: 'process'; items: ProcessEvent[] }
   | { kind: 'round_status'; event: Extract<ChatEvent, { kind: 'round_status' }> };
 
-type ChatRound = {
-  id: string;
-  user?: ChatMessageEvent;
-  processItems: ProcessEvent[];
-  assistantMessages: ChatMessageEvent[];
-  statuses: Extract<ChatEvent, { kind: 'round_status' }>[];
-};
-
 function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
   const blocks: RenderBlock[] = [];
-  const rounds = new Map<string, ChatRound>();
-  const roundOrder: string[] = [];
-  const looseEvents: ChatEvent[] = [];
+  let pendingProcess: ProcessEvent[] = [];
+
+  const flushProcess = () => {
+    if (pendingProcess.length === 0) {
+      return;
+    }
+    blocks.push({ kind: 'process', items: pendingProcess });
+    pendingProcess = [];
+  };
 
   for (const event of events) {
-    if (!event.round_id) {
-      looseEvents.push(event);
-      continue;
-    }
-
-    if (!rounds.has(event.round_id)) {
-      rounds.set(event.round_id, {
-        id: event.round_id,
-        processItems: [],
-        assistantMessages: [],
-        statuses: [],
-      });
-      roundOrder.push(event.round_id);
-    }
-
-    const round = rounds.get(event.round_id);
-    if (!round) {
-      continue;
-    }
-
-    if (event.kind === 'message' && event.role === 'user') {
-      round.user = event;
-      continue;
-    }
-
-    if (event.kind === 'message' && event.role === 'assistant') {
-      round.assistantMessages.push(event);
-      continue;
-    }
-
-    if (event.kind === 'agent_output' || event.kind === 'tool_call') {
-      round.processItems.push(event);
-      continue;
-    }
-
-    if (event.kind === 'round_status') {
-      round.statuses.push(event);
-    }
-  }
-
-  for (const event of looseEvents) {
     if (event.kind === 'message') {
+      flushProcess();
       blocks.push({ kind: 'message', event });
-    } else if (event.kind === 'round_status') {
-      blocks.push({ kind: 'round_status', event });
-    } else if (event.kind === 'tool_call') {
-      blocks.push({ kind: 'process', items: [event] });
-    } else if (event.summary) {
-      blocks.push({
-        kind: 'message',
-        event: {
-          id: event.id,
-          kind: 'message',
-          role: 'assistant',
-          text: event.summary,
-          timestamp: event.timestamp ?? '',
-        },
-      });
-    }
-  }
-
-  for (const roundId of roundOrder) {
-    const round = rounds.get(roundId);
-    if (!round) {
       continue;
     }
-
-    if (round.user) {
-      blocks.push({ kind: 'message', event: round.user });
+    if (event.kind === 'tool_call') {
+      pendingProcess.push(event);
+      continue;
     }
-
-    const toolCalls = round.processItems.filter((item) => item.kind === 'tool_call');
-    if (toolCalls.length > 0) {
-      blocks.push({ kind: 'process', items: round.processItems });
-    } else {
-      for (const item of round.processItems) {
-        blocks.push({
-          kind: 'message',
-          event: {
-            id: item.id,
-            kind: 'message',
-            role: 'assistant',
-            text: item.summary ?? '',
-            timestamp: item.timestamp ?? '',
-            round_id: round.id,
-          },
-        });
-      }
-    }
-
-    for (const message of round.assistantMessages) {
-      blocks.push({ kind: 'message', event: message });
-    }
-
-    for (const status of round.statuses) {
-      blocks.push({ kind: 'round_status', event: status });
+    if (event.kind === 'round_status') {
+      flushProcess();
+      blocks.push({ kind: 'round_status', event });
     }
   }
+  flushProcess();
 
   return blocks;
 }
@@ -141,12 +58,16 @@ export function ChatPanel({
   events,
   composer,
   isBusy,
+  contextUsage,
   onComposerChange,
   onSubmit,
   onSessionSelect,
+  onNewSession,
 }: ChatPanelProps) {
   const [isComposing, setIsComposing] = useState(false);
+  const [isSessionMenuOpen, setIsSessionMenuOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sessionSwitcherRef = useRef<HTMLDivElement | null>(null);
 
   const handleCompositionStart = (_event: CompositionEvent<HTMLTextAreaElement>) => {
     setIsComposing(true);
@@ -170,6 +91,18 @@ export function ChatPanel({
   };
 
   const blocks = buildRenderBlocks(events);
+  const activeSession = sessionTabs.find((tab) => tab.active) ?? null;
+  const currentSessionTitle = activeSession?.title ?? '新会话';
+
+  const handleSessionSelect = (sessionId: string) => {
+    setIsSessionMenuOpen(false);
+    onSessionSelect(sessionId);
+  };
+
+  const handleNewSession = () => {
+    setIsSessionMenuOpen(false);
+    onNewSession();
+  };
 
   useEffect(() => {
     // 每次事件更新后滚动到底部，确保最新消息可见。
@@ -178,23 +111,78 @@ export function ChatPanel({
     container.scrollTop = container.scrollHeight;
   }, [events, sessionTabs]);
 
+  useEffect(() => {
+    if (!isSessionMenuOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!sessionSwitcherRef.current?.contains(event.target as Node)) {
+        setIsSessionMenuOpen(false);
+      }
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsSessionMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isSessionMenuOpen]);
+
   return (
     <aside className="chat-panel">
       <div className="chat-header">
-        <div className="session-tab-strip" role="tablist" aria-label="Sessions">
-          {sessionTabs.map((tab) => (
-            <button
-              key={tab.session_id}
-              className={`session-card-tab ${tab.active ? 'active' : ''}`}
-              role="tab"
-              aria-selected={tab.active}
-              onClick={() => onSessionSelect(tab.session_id)}
-              disabled={isBusy && !tab.active}
-            >
-              <span className="session-card-title">{tab.title}</span>
-              {tab.subtitle ? <span className="session-card-subtitle">{tab.subtitle}</span> : null}
-            </button>
-          ))}
+        <div className="session-switcher" ref={sessionSwitcherRef}>
+          <button
+            className="session-current-button"
+            type="button"
+            onClick={() => setIsSessionMenuOpen((current) => !current)}
+            aria-expanded={isSessionMenuOpen}
+            aria-haspopup="menu"
+          >
+            <span className="session-current-label">当前会话</span>
+            <span className="session-current-title">{currentSessionTitle}</span>
+            <span className="session-current-chevron" aria-hidden="true">
+              ⌄
+            </span>
+          </button>
+          <button
+            className="session-new-button"
+            type="button"
+            onClick={handleNewSession}
+            disabled={isBusy}
+            aria-label="新建会话"
+            title="新建会话"
+          >
+            +
+          </button>
+
+          {isSessionMenuOpen ? (
+            <div className="session-menu" role="menu">
+              {sessionTabs.length > 0 ? (
+                sessionTabs.map((tab) => (
+                  <button
+                    key={tab.session_id}
+                    className={`session-menu-item ${tab.active ? 'active' : ''}`}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => handleSessionSelect(tab.session_id)}
+                    disabled={isBusy && !tab.active}
+                  >
+                    <span className="session-menu-title">{tab.title}</span>
+                    {tab.subtitle ? <span className="session-menu-subtitle">{tab.subtitle}</span> : null}
+                  </button>
+                ))
+              ) : (
+                <div className="session-menu-empty">暂无历史会话</div>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -250,17 +238,48 @@ export function ChatPanel({
             rows={3}
             disabled={isBusy}
           />
-          <button
-            className="composer-send-inline"
-            onClick={onSubmit}
-            disabled={isBusy || composer.trim().length === 0}
-            aria-label="发送"
-            title="发送"
-          >
-            ↑
-          </button>
+          <div className="composer-toolbar">
+            <div className="composer-toolbar-left" />
+            <div className="composer-toolbar-right">
+              {contextUsage ? (
+                <div className={`composer-context ${contextUsage.status}`} tabIndex={0}>
+                  <span className="context-ring" aria-hidden="true" />
+                  <span>{Math.round(contextUsage.used_ratio * 100)}%</span>
+                  <div className="context-popover" role="tooltip">
+                    <span>上下文窗口：</span>
+                    <strong>{Math.round(contextUsage.used_ratio * 100)}% 已用</strong>
+                    <span>
+                      已用 {formatCompactTokens(contextUsage.used_tokens)} 标记，共{' '}
+                      {formatCompactTokens(contextUsage.max_tokens)}
+                    </span>
+                    <b>
+                      {contextUsage.status === 'over_limit'
+                        ? '系统将压缩或裁剪早期上下文'
+                        : '系统会自动压缩早期上下文'}
+                    </b>
+                  </div>
+                </div>
+              ) : null}
+              <button
+                className="composer-send-inline"
+                onClick={onSubmit}
+                disabled={isBusy || composer.trim().length === 0}
+                aria-label="发送"
+                title="发送"
+              >
+                ↑
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </aside>
   );
+}
+
+function formatCompactTokens(value: number): string {
+  if (value >= 1000) {
+    return `${Math.round(value / 1000)}k`;
+  }
+  return String(value);
 }

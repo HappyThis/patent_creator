@@ -197,19 +197,9 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 前端行为：
 
 - 累加到当前 assistant 流式消息中
-- 等 `round_finished` 到达后，以最终 reply 做一次收束去重
+- 等 `round_finished` 到达后，以最终 reply 收束当前流式消息
 
-### 1. `agent_output`
-
-用途：
-
-- 展示主 agent 面向用户的自然语言输出
-
-前端行为：
-
-- 追加一条聊天消息
-
-### 2. `tool_call_started`
+### 1. `tool_call_started`
 
 用途：
 
@@ -220,7 +210,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 在 Chat 区追加一条执行节点
 - 节点处于进行中状态
 
-### 3. `tool_call_finished`
+### 2. `tool_call_finished`
 
 用途：
 
@@ -232,7 +222,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 默认折叠结果摘要
 - 允许用户展开查看详细结果
 
-### 4. `document_changed`
+### 3. `document_changed`
 
 用途：
 
@@ -257,7 +247,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 }
 ```
 
-### 5. `round_finished`
+### 4. `round_finished`
 
 用途：
 
