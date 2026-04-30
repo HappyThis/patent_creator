@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { ChatPanel } from '../features/chat/ChatPanel';
 import { OutlinePanel } from '../features/outline/OutlinePanel';
+import { buildDocumentStats } from '../features/preview/documentStats';
 import { PreviewPanel } from '../features/preview/PreviewPanel';
 import { useWorkspace } from '../hooks/useWorkspace';
 
@@ -24,6 +25,7 @@ function App() {
     handleSessionSelect,
     handleNewSession,
   } = useWorkspace();
+  const documentStats = buildDocumentStats(renderAst);
 
   return (
     <div className="app-shell">
@@ -33,6 +35,7 @@ function App() {
             outline={renderAst.outline}
             activeSectionId={activeSectionId}
             recentSectionIds={recentSectionIds}
+            sectionStatusById={documentStats.sectionStatusById}
             onSelect={selectSection}
           />
 
@@ -41,6 +44,7 @@ function App() {
             previewFocusTarget={previewFocusTarget}
             recentSectionIds={recentSectionIds}
             recentBlockIds={recentBlockIds}
+            stats={documentStats}
             previewRef={previewRef}
             onActiveSectionChange={setActiveSectionId}
           />

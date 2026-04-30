@@ -91,8 +91,6 @@ export function ChatPanel({
   };
 
   const blocks = buildRenderBlocks(events);
-  const activeSession = sessionTabs.find((tab) => tab.active) ?? null;
-  const currentSessionTitle = activeSession?.title ?? '新会话';
 
   const handleSessionSelect = (sessionId: string) => {
     setIsSessionMenuOpen(false);
@@ -137,30 +135,37 @@ export function ChatPanel({
   return (
     <aside className="chat-panel">
       <div className="chat-header">
-        <div className="session-switcher" ref={sessionSwitcherRef}>
-          <button
-            className="session-current-button"
-            type="button"
-            onClick={() => setIsSessionMenuOpen((current) => !current)}
-            aria-expanded={isSessionMenuOpen}
-            aria-haspopup="menu"
-          >
-            <span className="session-current-label">当前会话</span>
-            <span className="session-current-title">{currentSessionTitle}</span>
-            <span className="session-current-chevron" aria-hidden="true">
-              ⌄
+        <div className="chat-header-top" ref={sessionSwitcherRef}>
+          <div className="chat-agent-heading">
+            <span className="chat-agent-title">AI 协作助手</span>
+            <span className={`chat-agent-status ${isBusy ? 'running' : 'idle'}`}>
+              <span className="chat-agent-status-dot" aria-hidden="true" />
+              {isBusy ? '运行中' : '就绪'}
             </span>
-          </button>
-          <button
-            className="session-new-button"
-            type="button"
-            onClick={handleNewSession}
-            disabled={isBusy}
-            aria-label="新建会话"
-            title="新建会话"
-          >
-            +
-          </button>
+          </div>
+          <div className="chat-header-actions">
+            <button
+              className="session-history-button"
+              type="button"
+              onClick={() => setIsSessionMenuOpen((current) => !current)}
+              aria-expanded={isSessionMenuOpen}
+              aria-haspopup="menu"
+              aria-label="历史会话"
+              title="历史会话"
+            >
+              ↺
+            </button>
+            <button
+              className="session-new-button"
+              type="button"
+              onClick={handleNewSession}
+              disabled={isBusy}
+              aria-label="新建会话"
+              title="新建会话"
+            >
+              +
+            </button>
+          </div>
 
           {isSessionMenuOpen ? (
             <div className="session-menu" role="menu">
@@ -234,7 +239,7 @@ export function ChatPanel({
             onKeyDown={handleKeyDown}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
-            placeholder="请输入需求"
+            placeholder="描述你的发明想法，或说明要补充的章节"
             rows={3}
             disabled={isBusy}
           />
@@ -246,16 +251,13 @@ export function ChatPanel({
                   <span className="context-ring" aria-hidden="true" />
                   <span>{Math.round(contextUsage.used_ratio * 100)}%</span>
                   <div className="context-popover" role="tooltip">
-                    <span>上下文窗口：</span>
+                    <span className="context-popover-label">上下文</span>
                     <strong>{Math.round(contextUsage.used_ratio * 100)}% 已用</strong>
-                    <span>
-                      已用 {formatCompactTokens(contextUsage.used_tokens)} 标记，共{' '}
-                      {formatCompactTokens(contextUsage.max_tokens)}
-                    </span>
+                    <span>{formatCompactTokens(contextUsage.used_tokens)} / {formatCompactTokens(contextUsage.max_tokens)} 标记</span>
                     <b>
                       {contextUsage.status === 'over_limit'
-                        ? '系统将压缩或裁剪早期上下文'
-                        : '系统会自动压缩早期上下文'}
+                        ? '接近上限，系统将压缩早期上下文'
+                        : '接近上限时会自动压缩'}
                     </b>
                   </div>
                 </div>

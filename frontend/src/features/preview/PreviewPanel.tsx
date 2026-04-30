@@ -1,6 +1,7 @@
 import { RefObject, useEffect } from 'react';
 import { RenderAst } from '../../types';
 import { PreviewFocusTarget } from '../../hooks/useWorkspaceSelection';
+import { DocumentStats } from './documentStats';
 import { renderPreviewNodes } from './renderPreviewNodes';
 
 type PreviewPanelProps = {
@@ -8,6 +9,7 @@ type PreviewPanelProps = {
   previewFocusTarget: PreviewFocusTarget | null;
   recentSectionIds: string[];
   recentBlockIds: string[];
+  stats: DocumentStats;
   previewRef: RefObject<HTMLDivElement>;
   onActiveSectionChange: (sectionId: string) => void;
 };
@@ -17,6 +19,7 @@ export function PreviewPanel({
   previewFocusTarget,
   recentSectionIds,
   recentBlockIds,
+  stats,
   previewRef,
   onActiveSectionChange,
 }: PreviewPanelProps) {
@@ -81,7 +84,13 @@ export function PreviewPanel({
             nodes: renderAst.children,
             recentSectionIds,
             recentBlockIds,
+            sectionStatusById: stats.sectionStatusById,
           })}
+          <footer className="document-status-bar" aria-label="文档状态">
+            <span>字数：{stats.characters.toLocaleString('zh-CN')}</span>
+            <span>章节：{stats.filledSections}/{stats.totalSections}</span>
+            <span>{stats.filledSections === stats.totalSections ? '结构完整' : '待补充'}</span>
+          </footer>
         </article>
       </div>
     </section>

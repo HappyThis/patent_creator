@@ -61,12 +61,15 @@ function renderToolNode(node: ToolNode) {
   return (
     <details
       key={item.id}
-      className={`command-item ${item.status ?? 'plain'} ${hasChildren ? 'has-children' : ''}`}
+      className={`command-item ${item.status ?? 'plain'} ${toolToneClass(item.tool ?? item.title)} ${hasChildren ? 'has-children' : ''}`}
       open={item.status === 'running'}
     >
       <summary className="command-item-summary">
         <span className={`status-dot ${item.status ?? 'plain'}`} />
-        <span>{item.tool ?? item.title}</span>
+        <span className="command-label">
+          <span className="command-title">{item.tool ?? item.title}</span>
+          <span className="command-description">{describeTool(item.tool ?? item.title)}</span>
+        </span>
         {hasChildren ? <span className="command-child-count">{node.children.length} 个子调用</span> : null}
       </summary>
       {hasChildren ? <div className="command-children">{node.children.map((child) => renderToolNode(child))}</div> : null}
@@ -82,6 +85,31 @@ function renderToolNode(node: ToolNode) {
       </div>
     </details>
   );
+}
+
+function describeTool(toolName: string): string {
+  const descriptions: Record<string, string> = {
+    document_read: '读取参考文档与章节内容',
+    document_edit: '写回并优化交底书正文',
+    execute_subagent: '调度专业子任务',
+    exec_command: '执行本地或网络检索命令',
+    analysis: '结构化关键信息',
+    section_writer: '生成章节草稿',
+  };
+  return descriptions[toolName] ?? '执行工具调用';
+}
+
+function toolToneClass(toolName: string): string {
+  const tones: Record<string, string> = {
+    document_read: 'tool-tone-read',
+    document_edit: 'tool-tone-edit',
+    execute_subagent: 'tool-tone-agent',
+    exec_command: 'tool-tone-search',
+    web_search: 'tool-tone-search',
+    analysis: 'tool-tone-analysis',
+    section_writer: 'tool-tone-write',
+  };
+  return tones[toolName] ?? 'tool-tone-default';
 }
 
 function formatToolScope(item: ToolCallEvent): string {

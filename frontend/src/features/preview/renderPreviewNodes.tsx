@@ -1,31 +1,53 @@
 import { RenderNode } from '../../types';
+import { isSectionDirectlyEmpty, SectionStatus } from './documentStats';
 
 type RenderPreviewNodesProps = {
   nodes: RenderNode[];
   recentSectionIds: string[];
   recentBlockIds: string[];
+  sectionStatusById: Record<string, SectionStatus>;
+  parentIndexPath?: number[];
 };
 
 export function renderPreviewNodes({
   nodes,
   recentSectionIds,
   recentBlockIds,
+  sectionStatusById,
+  parentIndexPath = [],
 }: RenderPreviewNodesProps): JSX.Element[] {
+  let sectionIndex = 0;
   return nodes.map((node) => {
     if (node.type === 'section') {
+      sectionIndex += 1;
+      const indexPath = [...parentIndexPath, sectionIndex];
       const sectionChanged = recentSectionIds.includes(node.id);
+      const isEmpty = isSectionDirectlyEmpty(node);
+      const heading = (
+        <>
+          <span className="preview-heading-index">{indexPath.join('.')}.</span>
+          <span>{node.title}</span>
+        </>
+      );
       return (
         <section
           key={node.id}
-          className={`preview-section level-${node.level} ${sectionChanged ? 'changed' : ''}`}
+          className={`preview-section level-${node.level} ${isEmpty ? 'empty' : 'filled'} ${sectionChanged ? 'changed' : ''}`}
           data-anchor={node.anchor}
         >
-          {node.level === 2 ? <h2>{node.title}</h2> : <h3>{node.title}</h3>}
+          {node.level === 2 ? <h2>{heading}</h2> : <h3>{heading}</h3>}
+          {isEmpty ? (
+            <p className="preview-empty-hint">
+              等待补充{node.title}内容
+            </p>
+          ) : null}
           <div className="preview-children">
             {renderPreviewNodes({
               nodes: node.children,
               recentSectionIds,
               recentBlockIds,
+              sectionStatusById,
+              parentIndexPath: indexPath,
             })}
           </div>
         </section>
