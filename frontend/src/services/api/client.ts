@@ -1,4 +1,5 @@
-import { OutlineItem, ProjectState, RenderAst, SessionSummary } from '../../types';
+import { OutlineItem, ProjectState, RenderAst, SessionEventRecord, SessionSummary } from '../../types';
+import { requestJson } from './http';
 
 export type ApiClient = {
   listProjects: () => Promise<{ projects: ProjectState[] }>;
@@ -14,52 +15,18 @@ export type ApiClient = {
     updated_at: string;
   }>;
   listSessions: (project_id: string) => Promise<{ sessions: SessionSummary[] }>;
-  getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: unknown[] }>;
+  getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: SessionEventRecord[] }>;
 };
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
-
-type ApiErrorResponse = {
-  error?: {
-    code?: string;
-    message?: string;
-  };
-};
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-    try {
-      const payload = (await response.json()) as ApiErrorResponse;
-      if (payload.error?.message) {
-        message = payload.error.message;
-      }
-    } catch {
-      // ignore json parsing failure
-    }
-    throw new Error(message);
-  }
-
-  return (await response.json()) as T;
-}
 
 export const apiClient: ApiClient = {
   async listProjects() {
-    return request<{ projects: ProjectState[] }>('/api/projects');
+    return requestJson<{ projects: ProjectState[] }>('/api/projects');
   },
   async getProject(project_id) {
-    return request<ProjectState>(`/api/projects/${project_id}`);
+    return requestJson<ProjectState>(`/api/projects/${project_id}`);
   },
   async getOutline(project_id) {
-    return request<{ sections: OutlineItem[] }>(`/api/projects/${project_id}/outline`);
+    return requestJson<{ sections: OutlineItem[] }>(`/api/projects/${project_id}/outline`);
   },
   async getRenderAst(project_id, focus) {
     const search = new URLSearchParams();
@@ -70,7 +37,7 @@ export const apiClient: ApiClient = {
       search.set('focus_block_id', focus.focus_block_id);
     }
     const query = search.toString();
-    return request<{
+    return requestJson<{
       render_ast: RenderAst;
       active_section_id: string | null;
       active_block_id: string | null;
@@ -78,9 +45,9 @@ export const apiClient: ApiClient = {
     }>(`/api/projects/${project_id}/render${query ? `?${query}` : ''}`);
   },
   async listSessions(project_id) {
-    return request<{ sessions: SessionSummary[] }>(`/api/projects/${project_id}/sessions`);
+    return requestJson<{ sessions: SessionSummary[] }>(`/api/projects/${project_id}/sessions`);
   },
   async getSessionEvents(project_id, session_id) {
-    return request<{ events: unknown[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);
+    return requestJson<{ events: SessionEventRecord[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);
   },
 };

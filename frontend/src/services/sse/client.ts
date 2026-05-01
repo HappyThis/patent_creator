@@ -1,3 +1,5 @@
+import { API_BASE_URL, readApiErrorMessage } from '../api/http';
+
 export type ChatStreamPayload = {
   session_id?: string | null;
   message: string;
@@ -18,8 +20,6 @@ export type SseClient = {
   ) => Promise<ChatStreamHandle>;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
-
 export const sseClient: SseClient = {
   async streamChatMessage(project_id, payload, onEvent) {
     const controller = new AbortController();
@@ -33,16 +33,7 @@ export const sseClient: SseClient = {
     });
 
     if (!response.ok) {
-      let message = `Request failed with status ${response.status}`;
-      try {
-        const errorPayload = (await response.json()) as { error?: { message?: string } };
-        if (errorPayload.error?.message) {
-          message = errorPayload.error.message;
-        }
-      } catch {
-        // ignore parse failures
-      }
-      throw new Error(message);
+      throw new Error(await readApiErrorMessage(response));
     }
 
     if (!response.body) {

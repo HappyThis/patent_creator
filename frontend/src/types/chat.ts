@@ -42,3 +42,16 @@ export type RoundStatusEvent = {
 
 export type ProcessEvent = ToolCallEvent;
 export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent;
+
+export type SessionEventRecord = {
+  id: string;
+  ts: string;
+  type: 'user_input' | 'agent_output' | 'tool_call' | 'tool_result' | 'context_summary' | 'context_pruned';
+  seq: number;
+  scope: string;
+  round_id: string;
+  message_id: string;
+  call_id?: string | null;
+  parent_call_id?: string | null;
+  payload: Record<string, unknown>;
+};

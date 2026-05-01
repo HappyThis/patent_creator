@@ -132,6 +132,9 @@ export function ChatPanel({
     };
   }, [isSessionMenuOpen]);
 
+  const contextPercent = contextUsage ? Math.round(contextUsage.used_ratio * 100) : 0;
+  const contextBarWidth = Math.min(100, Math.max(0, contextPercent));
+
   return (
     <aside className="chat-panel">
       <div className="chat-header">
@@ -153,7 +156,10 @@ export function ChatPanel({
               aria-label="历史会话"
               title="历史会话"
             >
-              ↺
+              <svg className="session-history-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="7" />
+                <path d="M12 8.2v4.05l2.75 1.65" />
+              </svg>
             </button>
             <button
               className="session-new-button"
@@ -163,7 +169,10 @@ export function ChatPanel({
               aria-label="新建会话"
               title="新建会话"
             >
-              +
+              <svg className="session-new-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
             </button>
           </div>
 
@@ -247,18 +256,39 @@ export function ChatPanel({
             <div className="composer-toolbar-left" />
             <div className="composer-toolbar-right">
               {contextUsage ? (
-                <div className={`composer-context ${contextUsage.status}`} tabIndex={0}>
+                <div
+                  className={`composer-context ${contextUsage.status}`}
+                  tabIndex={0}
+                  aria-label={`上下文已用 ${contextPercent}%`}
+                >
                   <span className="context-ring" aria-hidden="true" />
-                  <span>{Math.round(contextUsage.used_ratio * 100)}%</span>
+                  <span className="context-pill-value">{contextPercent}%</span>
                   <div className="context-popover" role="tooltip">
-                    <span className="context-popover-label">上下文</span>
-                    <strong>{Math.round(contextUsage.used_ratio * 100)}% 已用</strong>
-                    <span>{formatCompactTokens(contextUsage.used_tokens)} / {formatCompactTokens(contextUsage.max_tokens)} 标记</span>
-                    <b>
+                    <div className="context-popover-header">
+                      <span>
+                        <span className="context-popover-label">上下文</span>
+                        <strong>用量详情</strong>
+                      </span>
+                      <b>{contextPercent}%</b>
+                    </div>
+                    <div className="context-popover-bar" aria-hidden="true">
+                      <span style={{ width: `${contextBarWidth}%` }} />
+                    </div>
+                    <dl className="context-popover-stats">
+                      <div>
+                        <dt>已用</dt>
+                        <dd>{formatCompactTokens(contextUsage.used_tokens)} 标记</dd>
+                      </div>
+                      <div>
+                        <dt>上限</dt>
+                        <dd>{formatCompactTokens(contextUsage.max_tokens)} 标记</dd>
+                      </div>
+                    </dl>
+                    <p>
                       {contextUsage.status === 'over_limit'
                         ? '接近上限，系统将压缩早期上下文'
                         : '接近上限时会自动压缩'}
-                    </b>
+                    </p>
                   </div>
                 </div>
               ) : null}

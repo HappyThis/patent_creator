@@ -7,6 +7,7 @@ import {
   ProcessEvent,
   ProjectState,
   RenderAst,
+  SessionEventRecord,
   SessionSummary,
   SessionTab,
 } from '../types';
@@ -23,19 +24,6 @@ const emptyRenderAst: RenderAst = {
   },
   outline: [],
   children: [],
-};
-
-type SessionEventResponse = {
-  id: string;
-  ts: string;
-  type: 'user_input' | 'agent_output' | 'tool_call' | 'tool_result' | 'context_summary' | 'context_pruned';
-  seq: number;
-  scope: string;
-  round_id: string;
-  message_id: string;
-  call_id?: string | null;
-  parent_call_id?: string | null;
-  payload: Record<string, unknown>;
 };
 
 type ToolState = {
@@ -126,7 +114,7 @@ function upsertActiveSessionSummary(
   return [activeSession, ...inactiveSessions];
 }
 
-function hydrateEvents(rawEvents: SessionEventResponse[]): ChatEvent[] {
+function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
   const events: ChatEvent[] = [];
   const toolIndex = new Map<string, number>();
 
@@ -419,11 +407,10 @@ export function useWorkspace() {
 
   const loadSessionEvents = useCallback(async (project_id: string, session_id: string) => {
     const response = await apiClient.getSessionEvents(project_id, session_id);
-    setEvents(hydrateEvents(response.events as SessionEventResponse[]));
+    setEvents(hydrateEvents(response.events));
   }, []);
 
   const ensureProject = useCallback(async () => {
-    window.localStorage.removeItem('patent_creator_project_id');
     const response = await apiClient.listProjects();
     const currentProject = response.projects[0];
     if (!currentProject) {
