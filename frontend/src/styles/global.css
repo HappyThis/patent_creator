@@ -937,48 +937,46 @@ textarea:focus-visible {
   margin-top: 7px;
   border-radius: 999px;
   flex: 0 0 auto;
-  background: #616161;
+  background: #9b958c;
 }
 
 .status-dot.running {
-  background: #65c6ff;
+  background: #d9a72e;
+  box-shadow: 0 0 0 0 rgba(217, 167, 46, 0.34);
+  animation: status-pulse 1.35s ease-in-out infinite;
 }
 
 .status-dot.done {
-  background: #7f7f7f;
+  background: #4f9d62;
 }
 
 .status-dot.failed {
-  background: #e36f6f;
-}
-
-.command-item.tool-tone-read .status-dot {
-  background: #6d7480;
-}
-
-.command-item.tool-tone-edit .status-dot,
-.command-item.tool-tone-write .status-dot {
-  background: #df735f;
-}
-
-.command-item.tool-tone-agent .status-dot {
-  background: #c28b32;
-}
-
-.command-item.tool-tone-search .status-dot {
-  background: #4d7bb7;
-}
-
-.command-item.tool-tone-analysis .status-dot {
-  background: #6277c7;
+  background: #dc5f57;
 }
 
 .command-item.running .status-dot {
-  background: #65c6ff;
+  background: #d9a72e;
 }
 
 .command-item.failed .status-dot {
-  background: #e36f6f;
+  background: #dc5f57;
+}
+
+@keyframes status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 167, 46, 0.34);
+    opacity: 0.72;
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(217, 167, 46, 0);
+    opacity: 1;
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 167, 46, 0);
+    opacity: 0.72;
+  }
 }
 
 .command-group-body {

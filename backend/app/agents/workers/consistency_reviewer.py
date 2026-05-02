@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...core import ApiError
+
 _ALLOWED_SEVERITIES = {"low", "medium", "high"}
 
 
@@ -27,7 +29,13 @@ def build_consistency_reviewer_context(
 
 
 def build_consistency_reviewer_result(payload: dict[str, Any]) -> dict[str, Any]:
-    issues = _normalize_issues(payload.get("issues"))
+    if payload.get("proposal_type") != "review_report":
+        raise ApiError(502, "subagent_invalid_submit_result", "consistency_reviewer 必须提交 review_report。")
+    proposal_payload = payload.get("proposal")
+    if not isinstance(proposal_payload, dict):
+        raise ApiError(502, "subagent_invalid_submit_result", "consistency_reviewer.proposal 必须是对象。")
+
+    issues = _normalize_issues(proposal_payload.get("issues"))
 
     summary = str(payload.get("summary") or "已完成一致性审查。").strip()
     reply = str(payload.get("reply") or summary).strip()

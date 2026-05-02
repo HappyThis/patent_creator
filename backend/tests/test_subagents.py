@@ -24,15 +24,18 @@ def test_material_analyst_context_and_envelope() -> None:
             "summary": "已整理事实。",
             "reply": "已整理事实。",
             "rationale": "基于用户聊天提炼。",
-            "facts": [
-                {"kind": "technical_problem", "text": "低算力下推理延迟高。"},
-                {"kind": "missing", "text": ""},
-            ],
-            "candidate_terms": ["低算力", "", "特征提取"],
-            "recommended_next_actions": [
-                {"action": "write_section", "section_id": "technical_problem"},
-                {"action": ""},
-            ],
+            "proposal_type": "analysis_result",
+            "proposal": {
+                "facts": [
+                    {"kind": "technical_problem", "text": "低算力下推理延迟高。"},
+                    {"kind": "missing", "text": ""},
+                ],
+                "candidate_terms": ["低算力", "", "特征提取"],
+                "recommended_next_actions": [
+                    {"action": "write_section", "section_id": "technical_problem"},
+                    {"action": ""},
+                ],
+            },
             "questions": ["需要明确硬件型号吗？"],
             "warnings": [],
         }
@@ -61,14 +64,17 @@ def test_solution_refiner_context_and_envelope() -> None:
             "summary": "方案骨架。",
             "reply": "方案骨架。",
             "rationale": "据事实收敛。",
-            "solution_outline": "分三段处理：采集、推理、反馈。",
-            "modules": [
-                {"name": "采集模块", "responsibility": "摄像头数据接入"},
-                {"name": "", "responsibility": "缺名"},
-            ],
-            "key_constraints": ["端侧算力有限"],
-            "innovations": ["轻量化特征网络"],
-            "open_questions": ["是否需要离线模型？"],
+            "proposal_type": "analysis_result",
+            "proposal": {
+                "solution_outline": "分三段处理：采集、推理、反馈。",
+                "modules": [
+                    {"name": "采集模块", "responsibility": "摄像头数据接入"},
+                    {"name": "", "responsibility": "缺名"},
+                ],
+                "key_constraints": ["端侧算力有限"],
+                "innovations": ["轻量化特征网络"],
+                "open_questions": ["是否需要离线模型？"],
+            },
             "questions": [],
             "warnings": ["部分性能数据未验证"],
         }
@@ -98,17 +104,20 @@ def test_consistency_reviewer_context_and_envelope() -> None:
             "summary": "已审查。",
             "reply": "已审查。",
             "rationale": "对比章节。",
-            "issues": [
-                {
-                    "severity": "high",
-                    "section_id": "technical_effects",
-                    "block_id": None,
-                    "message": "效果未呼应问题中的实时性。",
-                    "suggested_fix": "补充低延迟描述。",
-                },
-                {"severity": "unknown", "section_id": "", "block_id": "", "message": "术语不统一。", "suggested_fix": ""},
-                {"severity": "low", "section_id": None, "block_id": None, "message": "", "suggested_fix": ""},
-            ],
+            "proposal_type": "review_report",
+            "proposal": {
+                "issues": [
+                    {
+                        "severity": "high",
+                        "section_id": "technical_effects",
+                        "block_id": None,
+                        "message": "效果未呼应问题中的实时性。",
+                        "suggested_fix": "补充低延迟描述。",
+                    },
+                    {"severity": "unknown", "section_id": "", "block_id": "", "message": "术语不统一。", "suggested_fix": ""},
+                    {"severity": "low", "section_id": None, "block_id": None, "message": "", "suggested_fix": ""},
+                ],
+            },
             "questions": [],
             "warnings": [],
         }

@@ -211,11 +211,32 @@ class StubLLMClient:
                     "questions": [],
                     "warnings": [],
                 }
-            text = json.dumps(payload, ensure_ascii=False)
+            arguments = {
+                "summary": payload["summary"],
+                "reply": payload["reply"],
+                "rationale": payload["rationale"],
+                "proposal_type": "document_edit_proposal",
+                "proposal": {"operations": payload["operations"]},
+                "questions": payload["questions"],
+                "warnings": payload["warnings"],
+            }
             return {
-                "type": "respond",
-                "text": text,
-                "assistant_message": {"role": "assistant", "content": text},
+                "type": "tool_calls",
+                "tool_calls": [{"tool": "submit_result", "arguments": arguments, "tool_call_id": "stub_sub_submit_1"}],
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "stub_sub_submit_1",
+                            "type": "function",
+                            "function": {
+                                "name": "submit_result",
+                                "arguments": json.dumps(arguments, ensure_ascii=False),
+                            },
+                        }
+                    ],
+                },
             }
 
         tool_results = [msg for msg in messages if msg.get("role") == "tool"]

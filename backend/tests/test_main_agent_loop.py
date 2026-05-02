@@ -16,7 +16,7 @@ class ScriptedLLMClient:
     """驱动主 agent loop 的脚本化 stub。
 
     - generate_with_tools_stream 按外部提供的 script 顺序返回 action。
-    - generate_json 给 section_writer 用，直接返回可解析的 operations。
+    - 未脚本化子 agent 时，默认通过 submit_result 提交 section_writer 结果。
     """
 
     def __init__(
@@ -41,11 +41,12 @@ class ScriptedLLMClient:
         if "子 agent：" in system_prompt and not self._script_subagents:
             context = json.loads(messages[0]["content"])
             target_section_id = context["task"]["target_section_id"]
-            text = json.dumps(
-                {
-                    "summary": "已生成候选正文。",
-                    "reply": "已补充目标章节。",
-                    "rationale": "根据用户输入生成候选。",
+            arguments = {
+                "summary": "已生成候选正文。",
+                "reply": "已补充目标章节。",
+                "rationale": "根据用户输入生成候选。",
+                "proposal_type": "document_edit_proposal",
+                "proposal": {
                     "operations": [
                         {
                             "op": "replace_section_blocks",
@@ -53,15 +54,16 @@ class ScriptedLLMClient:
                             "blocks": [{"type": "paragraph", "text": "正文占位。"}],
                         }
                     ],
-                    "questions": [],
-                    "warnings": [],
                 },
-                ensure_ascii=False,
-            )
+                "questions": [],
+                "warnings": [],
+            }
             return {
-                "type": "respond",
-                "text": text,
-                "assistant_message": {"role": "assistant", "content": text},
+                "type": "tool_calls",
+                "tool_calls": [tool_call("submit_result", arguments, "sub_submit_1")],
+                "assistant_message": self._build_assistant_message(
+                    {"type": "tool_calls", "tool_calls": [tool_call("submit_result", arguments, "sub_submit_1")]}
+                ),
             }
         if self._cursor >= len(self._script):
             raise AssertionError("ScriptedLLMClient script exhausted")
@@ -287,6 +289,122 @@ async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_mess
 
 
 @pytest.mark.anyio
+async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Path) -> None:
+    error_message = "document_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+
+    def step_invalid_tool_arguments_json(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                {
+                    "tool": "document_edit",
+                    "arguments": {},
+                    "tool_call_id": "bad_call",
+                    "arguments_error": error_message,
+                }
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert last_tool["tool_call_id"] == "bad_call"
+        assert result == {
+            "status": "failed",
+            "code": "invalid_tool_arguments_json",
+            "message": error_message,
+        }
+        return {"type": "respond", "text": "已识别参数格式错误并重新规划。"}
+
+    llm = ScriptedLLMClient([step_invalid_tool_arguments_json, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(message="请修改技术方案。"),
+    )
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    failed_tool_result = next(
+        event
+        for event in events
+        if event.type == "tool_result" and event.call_id == "bad_call"
+    )
+    assert failed_tool_result.payload == {
+        "tool": "document_edit",
+        "status": "failed",
+        "code": "invalid_tool_arguments_json",
+        "message": error_message,
+    }
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    names = [name for name, _ in bus_events]
+    assert "round_failed" not in names
+    finished_payload = next(payload for name, payload in bus_events if name == "tool_call_finished")
+    assert finished_payload["call_id"] == "bad_call"
+    assert finished_payload["summary"] == "执行失败"
+    assert finished_payload["result"] == {
+        "status": "failed",
+        "code": "invalid_tool_arguments_json",
+        "message": error_message,
+    }
+    assert names[-1] == "round_finished"
+    assert bus_events[-1][1]["reply"] == "已识别参数格式错误并重新规划。"
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_calls(tmp_path: Path) -> None:
+    error_message = "document_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+
+    def step_mixed_calls(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call("document_read", {"action": "get_section", "section_id": "technical_field"}, "valid_call_1"),
+                {
+                    "tool": "document_edit",
+                    "arguments": {},
+                    "tool_call_id": "bad_call",
+                    "arguments_error": error_message,
+                },
+                tool_call("document_read", {"action": "get_section", "section_id": "background_technology"}, "valid_call_2"),
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [message["tool_call_id"] for message in tool_messages[-3:]] == [
+            "valid_call_1",
+            "bad_call",
+            "valid_call_2",
+        ]
+        tool_results = [json.loads(message["content"]) for message in tool_messages[-3:]]
+        assert tool_results[0]["status"] == "success"
+        assert tool_results[1] == {
+            "status": "failed",
+            "code": "invalid_tool_arguments_json",
+            "message": error_message,
+        }
+        assert tool_results[2]["status"] == "success"
+        return {"type": "respond", "text": "已收到完整工具结果。"}
+
+    llm = ScriptedLLMClient([step_mixed_calls, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="测试混合工具调用。"))
+    await wait_until_idle(services, project_id)
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    names = [name for name, _ in bus_events]
+    assert "round_failed" not in names
+    assert names[-1] == "round_finished"
+    assert bus_events[-1][1]["reply"] == "已收到完整工具结果。"
+
+
+@pytest.mark.anyio
 async def test_main_agent_loop_max_steps_limit_response(tmp_path: Path) -> None:
     """主 agent 持续 read 不 respond，达到 max_steps 后用兜底回复结束。"""
 
@@ -419,7 +537,7 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
 
 
 @pytest.mark.anyio
-async def test_subagent_invalid_json_returns_tool_failure_to_main_agent(tmp_path: Path) -> None:
+async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: Path) -> None:
     def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
@@ -442,14 +560,42 @@ async def test_subagent_invalid_json_returns_tool_failure_to_main_agent(tmp_path
         assert messages
         return {"type": "respond", "text": "这不是 JSON"}
 
+    def step_subagent_submit_result(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1]["role"] == "user"
+        assert "submit_result" in messages[-1]["content"]
+        arguments = {
+            "summary": "已生成候选正文。",
+            "reply": "已补充背景技术。",
+            "rationale": "根据用户输入生成候选。",
+            "proposal_type": "document_edit_proposal",
+            "proposal": {
+                "operations": [
+                    {
+                        "op": "replace_section_blocks",
+                        "section_id": "background_technology",
+                        "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
+                    }
+                ],
+            },
+            "questions": [],
+            "warnings": [],
+        }
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_retry")],
+        }
+
     def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
         last_tool = [message for message in messages if message.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
-        assert result["status"] == "failed"
-        assert result["output"]["code"] == "subagent_invalid_json"
-        return {"type": "respond", "text": "子 agent 输出格式异常，我没有修改文档。"}
+        assert result["status"] == "success"
+        assert result["output"]["result"]["proposal"]["operations"][0]["section_id"] == "background_technology"
+        return {"type": "respond", "text": "子 agent 已按 submit_result 重新提交。"}
 
-    llm = ScriptedLLMClient([step_call_subagent, step_subagent_bad_json, step_main_recover], script_subagents=True)
+    llm = ScriptedLLMClient(
+        [step_call_subagent, step_subagent_bad_json, step_subagent_submit_result, step_main_recover],
+        script_subagents=True,
+    )
     services = AppServices(make_settings(tmp_path), llm_client=llm)
     project_id = await create_project(services)
 
@@ -460,5 +606,184 @@ async def test_subagent_invalid_json_returns_tool_failure_to_main_agent(tmp_path
     main_tool_results = [
         event for event in events if event.type == "tool_result" and event.scope == "main" and event.payload.get("tool") == "execute_subagent"
     ]
-    assert main_tool_results[-1].payload["status"] == "failed"
-    assert [event.payload.get("text") for event in events if event.type == "agent_output"][-1] == "子 agent 输出格式异常，我没有修改文档。"
+    assert main_tool_results[-1].payload["status"] == "success"
+    assert [event.payload.get("text") for event in events if event.type == "agent_output"][-1] == "子 agent 已按 submit_result 重新提交。"
+
+
+@pytest.mark.anyio
+async def test_subagent_submit_result_validation_failure_can_retry(tmp_path: Path) -> None:
+    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {
+                        "agent_id": "section_writer",
+                        "call_type": "rich_context_specialist",
+                        "goal": "补充背景技术",
+                        "target_section_id": "background_technology",
+                        "user_message": "补充背景技术",
+                    },
+                    "call_bad_submit",
+                )
+            ],
+        }
+
+    def step_subagent_bad_submit(_: list[dict[str, Any]]) -> dict[str, Any]:
+        arguments = {
+            "summary": "缺少 proposal。",
+            "reply": "缺少 proposal。",
+            "rationale": "测试校验失败。",
+            "proposal_type": "document_edit_proposal",
+            "proposal": {},
+            "questions": [],
+            "warnings": [],
+        }
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_bad")],
+        }
+
+    def step_subagent_retry(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        assert last_tool["tool_call_id"] == "sub_submit_bad"
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "subagent_invalid_submit_result"
+        arguments = {
+            "summary": "已生成候选正文。",
+            "reply": "已补充背景技术。",
+            "rationale": "根据校验反馈补齐 operations。",
+            "proposal_type": "document_edit_proposal",
+            "proposal": {
+                "operations": [
+                    {
+                        "op": "replace_section_blocks",
+                        "section_id": "background_technology",
+                        "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
+                    }
+                ],
+            },
+            "questions": [],
+            "warnings": [],
+        }
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_ok")],
+        }
+
+    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "success"
+        return {"type": "respond", "text": "子 agent 校验失败后已重试成功。"}
+
+    llm = ScriptedLLMClient(
+        [step_call_subagent, step_subagent_bad_submit, step_subagent_retry, step_main_recover],
+        script_subagents=True,
+    )
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="补充背景技术"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    sub_submit_results = [
+        event
+        for event in events
+        if event.type == "tool_result" and event.scope == "subagent:section_writer" and event.payload.get("tool") == "submit_result"
+    ]
+    assert [event.payload["status"] for event in sub_submit_results] == ["failed", "success"]
+
+
+@pytest.mark.anyio
+async def test_subagent_submit_result_invalid_arguments_json_can_retry(tmp_path: Path) -> None:
+    error_message = "submit_result 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+
+    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {
+                        "agent_id": "section_writer",
+                        "call_type": "rich_context_specialist",
+                        "goal": "补充背景技术",
+                        "target_section_id": "background_technology",
+                        "user_message": "补充背景技术",
+                    },
+                    "call_bad_submit_json",
+                )
+            ],
+        }
+
+    def step_subagent_bad_arguments(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                {
+                    "tool": "submit_result",
+                    "arguments": {},
+                    "tool_call_id": "sub_submit_invalid_json",
+                    "arguments_error": error_message,
+                }
+            ],
+        }
+
+    def step_subagent_retry(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        assert last_tool["tool_call_id"] == "sub_submit_invalid_json"
+        result = json.loads(last_tool["content"])
+        assert result == {
+            "status": "failed",
+            "code": "invalid_tool_arguments_json",
+            "message": error_message,
+        }
+        arguments = {
+            "summary": "已生成候选正文。",
+            "reply": "已补充背景技术。",
+            "rationale": "根据参数错误反馈重交合法 JSON。",
+            "proposal_type": "document_edit_proposal",
+            "proposal": {
+                "operations": [
+                    {
+                        "op": "replace_section_blocks",
+                        "section_id": "background_technology",
+                        "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
+                    }
+                ],
+            },
+            "questions": [],
+            "warnings": [],
+        }
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_json_retry")],
+        }
+
+    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "success"
+        return {"type": "respond", "text": "子 agent 参数 JSON 错误后已重试成功。"}
+
+    llm = ScriptedLLMClient(
+        [step_call_subagent, step_subagent_bad_arguments, step_subagent_retry, step_main_recover],
+        script_subagents=True,
+    )
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="补充背景技术"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    sub_submit_results = [
+        event
+        for event in events
+        if event.type == "tool_result" and event.scope == "subagent:section_writer" and event.payload.get("tool") == "submit_result"
+    ]
+    assert [event.payload["status"] for event in sub_submit_results] == ["failed", "success"]

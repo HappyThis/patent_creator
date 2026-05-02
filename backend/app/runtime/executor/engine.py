@@ -77,7 +77,45 @@ SUBAGENT_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_result",
+            "description": "提交子 agent 的最终结构化结果。调用成功后子 agent 本轮结束。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reply": {"type": "string"},
+                    "rationale": {"type": "string"},
+                    "proposal_type": {
+                        "type": "string",
+                        "enum": ["analysis_result", "document_edit_proposal", "review_report"],
+                    },
+                    "proposal": {"type": "object"},
+                    "questions": {"type": "array", "items": {"type": "string"}},
+                    "warnings": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "summary",
+                    "reply",
+                    "rationale",
+                    "proposal_type",
+                    "proposal",
+                    "questions",
+                    "warnings",
+                ],
+            },
+        },
+    },
 ]
+
+_SUBAGENT_ALLOWED_PROPOSAL_TYPES: dict[str, set[str]] = {
+    "section_writer": {"document_edit_proposal"},
+    "material_analyst": {"analysis_result"},
+    "solution_refiner": {"analysis_result", "document_edit_proposal"},
+    "consistency_reviewer": {"review_report"},
+}
 
 
 class ExecutorEngine:
@@ -241,7 +279,7 @@ class ExecutorEngine:
             raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
 
         context["call_type"] = call_type
-        context["available_tools"] = ["document_read", "exec_command"]
+        context["available_tools"] = ["document_read", "exec_command", "submit_result"]
         if call_type == "forked_context":
             context["caller_context"] = {
                 "recent_session_events": self._recent_session_events(project_id, session_id),
@@ -279,8 +317,16 @@ class ExecutorEngine:
             messages.append(assistant_message)
 
             if action.get("type") == "respond":
-                payload = self._parse_subagent_json(agent_id, str(action.get("text") or ""))
-                return self._build_subagent_result(agent_id, payload, context)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "你不能直接回复文本或 JSON。请调用 submit_result 工具提交最终结果；"
+                            "如果你还缺少信息，先调用 document_read 或 exec_command。"
+                        ),
+                    }
+                )
+                continue
 
             if action.get("type") != "tool_calls":
                 raise ApiError(502, "subagent_invalid_action", f"{agent_id} 返回未知动作：{action.get('type')}")
@@ -288,16 +334,21 @@ class ExecutorEngine:
             raw_calls = action.get("tool_calls")
             if not isinstance(raw_calls, list) or not raw_calls:
                 raise ApiError(502, "subagent_invalid_action", f"{agent_id} tool_calls 为空。")
+            completed_result: dict[str, Any] | None = None
             for raw_call in raw_calls:
                 tool_call = MainAgentToolCall(
                     tool=str(raw_call.get("tool") or ""),
                     arguments=raw_call.get("arguments") if isinstance(raw_call.get("arguments"), dict) else {},
                     tool_call_id=str(raw_call.get("tool_call_id") or ""),
+                    arguments_error=(
+                        raw_call.get("arguments_error") if isinstance(raw_call.get("arguments_error"), str) else None
+                    ),
                 )
                 result = await self._execute_subagent_tool(
                     project_id=project_id,
                     agent_id=agent_id,
                     tool_call=tool_call,
+                    context=context,
                     session_id=session_id,
                     round_id=round_id,
                     message_id=message_id,
@@ -311,8 +362,22 @@ class ExecutorEngine:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
+                if tool_call.tool == "submit_result" and result.get("status") == "success":
+                    output = result.get("output")
+                    if isinstance(output, dict) and isinstance(output.get("result"), dict):
+                        completed_result = output["result"]
+            if completed_result is not None:
+                return completed_result
 
         raise ApiError(502, "subagent_max_steps_reached", f"{agent_id} 未在步数上限内完成。")
+
+    @staticmethod
+    def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "code": "invalid_tool_arguments_json",
+            "message": message,
+        }
 
     async def _execute_subagent_tool(
         self,
@@ -320,6 +385,7 @@ class ExecutorEngine:
         project_id: str,
         agent_id: str,
         tool_call: MainAgentToolCall,
+        context: dict[str, Any],
         session_id: str | None,
         round_id: str | None,
         message_id: str | None,
@@ -354,10 +420,14 @@ class ExecutorEngine:
                 },
             )
 
-        if tool_call.tool == "document_read":
+        if tool_call.arguments_error:
+            result = self._invalid_tool_arguments_json_result(tool_call.arguments_error)
+        elif tool_call.tool == "document_read":
             result = self.document_read(project_id, tool_call.arguments, scope="subagent")
         elif tool_call.tool == "exec_command":
             result = self.exec_command(project_id, tool_call.arguments, scope="subagent")
+        elif tool_call.tool == "submit_result":
+            result = self._submit_subagent_result(agent_id, tool_call.arguments, context)
         else:
             result = tool_failed("permission_denied", f"子 agent 不允许调用 {tool_call.tool}。")
 
@@ -381,7 +451,7 @@ class ExecutorEngine:
                     "parent_call_id": parent_call_id,
                     "scope": scope_label,
                     "tool": tool_call.tool,
-                    "summary": f"{agent_id} 完成 {tool_call.tool}",
+                    "summary": self._subagent_tool_summary(agent_id, tool_call.tool, result),
                     "result": result,
                 },
             )
@@ -410,6 +480,7 @@ class ExecutorEngine:
                 arguments=arguments,
                 tool_call_id=generate_id("call"),
             ),
+            context={},
             session_id=session_id,
             round_id=round_id,
             message_id=message_id,
@@ -436,6 +507,7 @@ class ExecutorEngine:
         raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
 
     def _build_subagent_result(self, agent_id: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        self._validate_submit_result_envelope(agent_id, payload)
         if agent_id == "section_writer":
             task = context["task"]
             return build_section_writer_result(payload, task["target_section_id"], task.get("target_block_id"))
@@ -447,15 +519,53 @@ class ExecutorEngine:
             return build_consistency_reviewer_result(payload)
         raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
 
-    @staticmethod
-    def _parse_subagent_json(agent_id: str, content: str) -> dict[str, Any]:
+    def _submit_subagent_result(self, agent_id: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         try:
-            payload = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ApiError(502, "subagent_invalid_json", f"{agent_id} 未返回合法 JSON。") from exc
-        if not isinstance(payload, dict):
-            raise ApiError(502, "subagent_invalid_json", f"{agent_id} 返回 JSON 必须是对象。")
-        return payload
+            result = self._build_subagent_result(agent_id, payload, context)
+        except ApiError as exc:
+            return tool_failed(exc.code, exc.message)
+        return tool_success({"result": result})
+
+    @staticmethod
+    def _validate_submit_result_envelope(agent_id: str, payload: dict[str, Any]) -> None:
+        string_fields = ("summary", "reply", "rationale")
+        for field in string_fields:
+            if not isinstance(payload.get(field), str) or not payload[field].strip():
+                raise ApiError(502, "subagent_invalid_submit_result", f"submit_result.{field} 必须是非空字符串。")
+
+        proposal_type = payload.get("proposal_type")
+        allowed_types = _SUBAGENT_ALLOWED_PROPOSAL_TYPES.get(agent_id)
+        if not allowed_types:
+            raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
+        if proposal_type not in {"analysis_result", "document_edit_proposal", "review_report"}:
+            raise ApiError(
+                502,
+                "subagent_invalid_submit_result",
+                "submit_result.proposal_type 必须是 analysis_result、document_edit_proposal 或 review_report。",
+            )
+        if proposal_type not in allowed_types:
+            allowed = "、".join(sorted(allowed_types))
+            raise ApiError(
+                502,
+                "subagent_invalid_submit_result",
+                f"{agent_id} 只能提交 proposal_type：{allowed}。",
+            )
+        if not isinstance(payload.get("proposal"), dict):
+            raise ApiError(502, "subagent_invalid_submit_result", "submit_result.proposal 必须是对象。")
+        for field in ("questions", "warnings"):
+            value = payload.get(field)
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise ApiError(502, "subagent_invalid_submit_result", f"submit_result.{field} 必须是字符串数组。")
+
+    @staticmethod
+    def _subagent_tool_summary(agent_id: str, tool: str, result: dict[str, Any]) -> str:
+        if tool == "submit_result":
+            if result.get("status") == "success":
+                return f"{agent_id} 提交结果"
+            return f"{agent_id} 提交结果失败"
+        if result.get("status") == "failed":
+            return f"{agent_id} 执行 {tool} 失败"
+        return f"{agent_id} 完成 {tool}"
 
     def _recent_session_events(self, project_id: str, session_id: str | None, limit: int = 8) -> list[dict[str, Any]]:
         if not session_id or not self.store.session_exists(project_id, session_id):

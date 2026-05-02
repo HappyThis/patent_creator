@@ -154,12 +154,9 @@ class ChatService:
                     project_id,
                     state.session_id,
                 )
-                streamed_reply_parts: list[str] = []
-
                 async def on_text_delta(delta: str) -> None:
                     if not delta:
                         return
-                    streamed_reply_parts.append(delta)
                     await self.bus.publish(
                         key,
                         "assistant_delta",
@@ -339,6 +336,22 @@ class ChatService:
             tool_call.tool,
             tool_call.arguments,
         )
+        if tool_call.arguments_error:
+            result = self._invalid_tool_arguments_json_result(tool_call.arguments_error)
+            await self._emit_failed_tool_result(
+                project_id,
+                state,
+                tool=tool_call.tool,
+                call_id=tool_call.tool_call_id,
+                result=result,
+            )
+            logger.info(
+                "round tool_call id=%s tool=%s status=%s",
+                tool_call.tool_call_id,
+                tool_call.tool,
+                result.get("status"),
+            )
+            return result
         result = await self._dispatch_tool(project_id, state, tool_call.tool, tool_call.arguments)
         logger.info(
             "round tool_call id=%s tool=%s status=%s",
@@ -357,6 +370,71 @@ class ChatService:
             round_id=state.round_id,
             message_id=state.message_id,
             payload={"text": text},
+        )
+
+    @staticmethod
+    def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "code": "invalid_tool_arguments_json",
+            "message": message,
+        }
+
+    async def _emit_failed_tool_result(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        tool: str,
+        call_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="tool_call",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            call_id=call_id,
+            payload={"tool": tool, "arguments": {}},
+        )
+        await self.bus.publish(
+            (project_id, state.session_id),
+            "tool_call_started",
+            {
+                "call_id": call_id,
+                "parent_call_id": None,
+                "scope": "main",
+                "tool": tool,
+                "summary": f"开始执行 {tool}",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="tool_result",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            call_id=call_id,
+            payload={"tool": tool, **result},
+        )
+        await self.bus.publish(
+            (project_id, state.session_id),
+            "tool_call_finished",
+            {
+                "call_id": call_id,
+                "parent_call_id": None,
+                "scope": "main",
+                "tool": tool,
+                "summary": "执行失败",
+                "result": result,
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
         )
 
     async def _emit_tool(

@@ -6,6 +6,72 @@ from typing import Any
 from .types import SubagentDeclaration
 
 
+SUBAGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
+- document_read 读取目录：
+  {"action":"get_outline"}
+- document_read 读取章节：
+  {"action":"get_section","section_id":"technical_solution","include_children":true}
+- document_read 读取 block：
+  {"action":"get_block","block_id":"blk_000001"}
+- document_read 搜索正文：
+  {"action":"search_blocks","query":"消息平台"}
+- exec_command 执行诊断命令：
+  {"command":"ls -la","timeout":30}
+- submit_result 提交最终结果：
+  {"summary":"已完成任务。","reply":"已整理结果。","rationale":"基于当前上下文整理。","proposal_type":"analysis_result","proposal":{},"questions":[],"warnings":[]}
+
+工具调用要求：
+- 调用工具时，arguments 必须是严格 JSON 对象。
+- JSON 字符串必须使用双引号；不能使用单引号、注释、尾随逗号或未转义换行。
+- 中文正文中的双引号、反斜杠和换行必须正确转义。
+- 最终结果必须通过 submit_result 工具提交，不要直接回复 JSON 或正文。
+"""
+
+
+SECTION_WRITER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
+{"summary":"已生成候选正文。","reply":"已补充目标章节候选内容。","rationale":"根据用户诉求和当前章节内容生成。","proposal_type":"document_edit_proposal","proposal":{"intent":"replace_section_content","confidence":0.75,"operations":[{"op":"replace_section_blocks","section_id":"technical_solution","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]},"questions":[],"warnings":[]}
+"""
+
+
+MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
+{"summary":"已完成材料分析。","reply":"已提炼技术事实和待确认项。","rationale":"依据用户材料和当前文档提炼。","proposal_type":"analysis_result","proposal":{"facts":[{"kind":"technical_problem","text":"低算力设备上推理延迟高。"}],"candidate_terms":["低算力设备"],"recommended_next_actions":[{"action":"write_section","section_id":"technical_problem"}]},"questions":[],"warnings":[]}
+"""
+
+
+SOLUTION_REFINER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
+{"summary":"已整理技术方案骨架。","reply":"已收敛方案模块和关键约束。","rationale":"根据现有事实归纳方案结构。","proposal_type":"analysis_result","proposal":{"solution_outline":"整体方案包括采集、筛选、推理和反馈。","modules":[{"name":"筛选模块","responsibility":"筛出高价值候选区域。"}],"key_constraints":["端侧算力有限"],"innovations":["复用时序信息降低重复推理"],"open_questions":[]},"questions":[],"warnings":[]}
+"""
+
+
+CONSISTENCY_REVIEWER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
+{"summary":"已完成一致性审查。","reply":"已列出术语和逻辑问题。","rationale":"对照目标章节与上下游章节检查。","proposal_type":"review_report","proposal":{"issues":[{"severity":"medium","section_id":"technical_effects","block_id":null,"message":"技术效果未呼应实时性问题。","suggested_fix":"补充低延迟收益描述。"}]},"questions":[],"warnings":[]}
+"""
+
+
+MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
+- document_read 读取章节：
+  {"action":"get_section","section_id":"existing_solution","include_children":true}
+- document_read 读取 block：
+  {"action":"get_block","block_id":"blk_000001"}
+- document_edit 替换章节正文：
+  {"operations":[{"op":"replace_section_blocks","section_id":"existing_solution","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]}
+- document_edit 追加段落：
+  {"operations":[{"op":"append_block","section_id":"technical_solution","block":{"type":"paragraph","text":"这里写入追加段落。"}}]}
+- execute_subagent 调度章节写作：
+  {"agent_id":"section_writer","call_type":"rich_context_specialist","goal":"补充技术方案章节","target_section_id":"technical_solution","user_message":"请补充技术方案。"}
+- execute_subagent 调度资料分析：
+  {"agent_id":"material_analyst","call_type":"task_only_specialist","goal":"提炼用户材料中的技术问题、技术方案和技术效果","user_message":"用户原始材料..."}
+- exec_command 执行诊断命令：
+  {"command":"ls -la","timeout":30}
+
+工具调用要求：
+- 调用工具时，arguments 必须是严格 JSON 对象。
+- JSON 字符串必须使用双引号；不能使用单引号、注释、尾随逗号或未转义换行。
+- 中文正文中的双引号、反斜杠和换行必须正确转义。
+- document_edit 的 blocks/block 正文只能放在 text 字段，不要使用 content 字段。
+"""
+
+
 def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
     return f"""你是本系统中的子 agent：{declaration.id}。
 
@@ -21,12 +87,14 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 - 正文尽量具体，避免“本发明能够有效提升性能”这种空话，除非同时说明为什么。
 
 输出要求：
-- 只输出一个 JSON 对象，不要输出 markdown 代码块。
-- JSON 必须包含：summary, reply, rationale, operations, questions, warnings。
+- 需要提交最终结果时，必须调用 submit_result 工具；不要直接输出 JSON 或 markdown 代码块。
+- submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
+- proposal_type 必须是 document_edit_proposal。
+- proposal.operations 必须是 document_edit 支持的操作数组。
 - 你必须严格使用以下字段名，不能自创别名：
   - operation 中只能使用 `section_id`、`block_id`、`blocks`、`block`、`section`、`child_section`
   - 不能使用 `target_id`、`target_section_id`、`target_block_id`
-- operations 必须是 document_edit 支持的操作，允许的 op 只有：
+- 允许的 op 只有：
   - update_meta
   - replace_section_blocks
   - append_block
@@ -40,6 +108,10 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 - list block 必须严格写成：{{"type":"list","ordered":false,"items":["..."]}} 或 `ordered:true`。
 - 不允许使用 `type:"text"`。
 - 不允许把正文写在 `content` 字段，正文只能写在 `text` 字段。
+
+{SECTION_WRITER_SUBMIT_RESULT_EXAMPLE}
+
+{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """
 
 
@@ -56,13 +128,18 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 - 你不能直接修改 disclosure.json，只输出 analysis_result。
 
 输出要求：
-- 只输出一个 JSON 对象，不要输出 markdown 代码块。
-- JSON 必须包含：summary, reply, rationale, facts, candidate_terms, recommended_next_actions, questions, warnings。
-- facts 每一项为 {{"kind": "...", "text": "..."}}，kind 推荐取值：technical_problem / technical_solution / technical_effect / application_scenario / module / process / risk / assumption。
-- candidate_terms 为字符串数组，是值得统一的术语候选。
-- recommended_next_actions 每一项为 {{"action": "write_section" 或 "refine_solution" 或 "review_consistency" 或 "ask_user", "section_id": "..."?, "question": "..."?}}。
+- 需要提交最终结果时，必须调用 submit_result 工具；不要直接输出 JSON 或 markdown 代码块。
+- submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
+- proposal_type 必须是 analysis_result。
+- proposal.facts 每一项为 {{"kind": "...", "text": "..."}}，kind 推荐取值：technical_problem / technical_solution / technical_effect / application_scenario / module / process / risk / assumption。
+- proposal.candidate_terms 为字符串数组，是值得统一的术语候选。
+- proposal.recommended_next_actions 每一项为 {{"action": "write_section" 或 "refine_solution" 或 "review_consistency" 或 "ask_user", "section_id": "..."?, "question": "..."?}}。
 - questions / warnings 为字符串数组。
 - 不要编造具体性能数字、实验数据。
+
+{MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE}
+
+{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """
 
 
@@ -79,16 +156,19 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 - 你不能直接修改 disclosure.json，只能输出 analysis_result 或 document_edit_proposal。
 
 输出要求：
-- 只输出一个 JSON 对象，不要输出 markdown 代码块。
-- JSON 必须包含：summary, reply, rationale, proposal_type, solution_outline, modules, key_constraints, innovations, open_questions, operations, questions, warnings。
+- 需要提交最终结果时，必须调用 submit_result 工具；不要直接输出 JSON 或 markdown 代码块。
+- submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
 - proposal_type 只能是 analysis_result 或 document_edit_proposal。
-- solution_outline 为一段文字，概述整体技术方案走向。
-- modules 每一项为 {{"name": "...", "responsibility": "..."}}。
-- key_constraints / innovations / open_questions / questions / warnings 为字符串数组。
-- 当 proposal_type=document_edit_proposal 时，operations 必须是 document_edit 支持的 operations；新增 block 不要手写 id。
-- 当 proposal_type=analysis_result 时，operations 使用空数组。
+- 当 proposal_type=analysis_result 时，proposal.solution_outline 为一段文字，概述整体技术方案走向。
+- proposal.modules 每一项为 {{"name": "...", "responsibility": "..."}}。
+- proposal.key_constraints / proposal.innovations / proposal.open_questions / questions / warnings 为字符串数组。
+- 当 proposal_type=document_edit_proposal 时，proposal.operations 必须是 document_edit 支持的 operations；新增 block 不要手写 id。
 - 不要编造具体性能数字、实验数据。
 - 信息不足时，将缺口放到 open_questions 或 questions，不要硬套空洞描述。
+
+{SOLUTION_REFINER_SUBMIT_RESULT_EXAMPLE}
+
+{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """
 
 
@@ -105,11 +185,16 @@ def build_consistency_reviewer_system_prompt(declaration: SubagentDeclaration) -
 - 你不能直接修改 disclosure.json，只提问题清单和建议。
 
 输出要求：
-- 只输出一个 JSON 对象，不要输出 markdown 代码块。
-- JSON 必须包含：summary, reply, rationale, issues, questions, warnings。
-- issues 每一项为 {{"severity": "low"|"medium"|"high", "section_id": "..."|null, "block_id": "..."|null, "message": "...", "suggested_fix": "..."}}。
+- 需要提交最终结果时，必须调用 submit_result 工具；不要直接输出 JSON 或 markdown 代码块。
+- submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
+- proposal_type 必须是 review_report。
+- proposal.issues 每一项为 {{"severity": "low"|"medium"|"high", "section_id": "..."|null, "block_id": "..."|null, "message": "...", "suggested_fix": "..."}}。
 - questions / warnings 为字符串数组。
 - 找不到问题时 issues 为空数组，不要强行凑问题。
+
+{CONSISTENCY_REVIEWER_SUBMIT_RESULT_EXAMPLE}
+
+{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """
 
 
@@ -153,4 +238,7 @@ def build_main_agent_system_prompt() -> str:
 - 如果本步是工具调用，就不要额外输出解释性正文。
 - 如果你决定结束本轮，就直接输出最终中文回复，不要再包一层 JSON。
 - 最终回复应简洁，说明你本轮做了什么、必要时带追问。
+
+五、工具参数示例与格式要求
+{MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES}
 """

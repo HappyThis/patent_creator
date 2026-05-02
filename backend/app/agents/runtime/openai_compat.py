@@ -200,7 +200,14 @@ class OpenAICompatibleClient:
         reasoning_content = "".join(reasoning_parts)
         if tool_calls:
             ordered_tool_calls = [tool_calls[index] for index in sorted(tool_calls)]
-            parsed_tool_calls = [self._parse_tool_call(item, index) for index, item in enumerate(ordered_tool_calls)]
+            assistant_message = self._assistant_message(
+                content=content,
+                reasoning_content=reasoning_content,
+                tool_calls=ordered_tool_calls,
+            )
+            parsed_tool_calls = [
+                self._parse_tool_call(item, index) for index, item in enumerate(ordered_tool_calls)
+            ]
             logger.info(
                 "generate_with_tools_stream done elapsed=%.2fs usage=%s decision=tool_calls count=%d",
                 elapsed,
@@ -210,11 +217,7 @@ class OpenAICompatibleClient:
             return {
                 "type": "tool_calls",
                 "tool_calls": parsed_tool_calls,
-                "assistant_message": self._assistant_message(
-                    content=content,
-                    reasoning_content=reasoning_content,
-                    tool_calls=ordered_tool_calls,
-                ),
+                "assistant_message": assistant_message,
             }
 
         logger.info(
@@ -262,8 +265,17 @@ class OpenAICompatibleClient:
         name = str(function.get("name") or "").strip()
         if not name:
             raise ApiError(502, "llm_invalid_tool_call", f"模型返回的 tool_calls[{index}] 缺少 function.name。")
-        arguments = cls._parse_tool_arguments(function.get("arguments"))
-        return {"tool": name, "arguments": arguments, "tool_call_id": tool_call_id}
+        arguments, arguments_error = cls._parse_tool_arguments(
+            function.get("arguments"),
+            tool_call_id=tool_call_id,
+            tool_name=name,
+        )
+        return {
+            "tool": name,
+            "arguments": arguments,
+            "tool_call_id": tool_call_id,
+            "arguments_error": arguments_error,
+        }
 
     @staticmethod
     def _extract_text(completion: Any) -> str:
@@ -292,20 +304,27 @@ class OpenAICompatibleClient:
         raise ApiError(502, "llm_invalid_response", "模型返回的 message.content 格式不支持。")
 
     @staticmethod
-    def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+    def _parse_tool_arguments(raw_arguments: Any, *, tool_call_id: str, tool_name: str) -> tuple[dict[str, Any], str | None]:
         if isinstance(raw_arguments, dict):
-            return raw_arguments
+            return raw_arguments, None
         if raw_arguments is None or raw_arguments == "":
-            return {}
+            return {}, None
         if not isinstance(raw_arguments, str):
-            raise ApiError(502, "llm_invalid_tool_call", "tool_call.arguments 格式不支持。")
+            return {}, f"{tool_name} 的 arguments 格式不支持。"
         try:
             parsed = json.loads(raw_arguments)
         except json.JSONDecodeError as exc:
-            raise ApiError(502, "llm_invalid_tool_call", "tool_call.arguments 不是合法 JSON。") from exc
+            message = f"{tool_name} 的 arguments 不是合法 JSON：{exc}"
+            logger.warning(
+                "tool_call invalid_json id=%s tool=%s error=%s",
+                tool_call_id,
+                tool_name,
+                exc,
+            )
+            return {}, message
         if not isinstance(parsed, dict):
-            raise ApiError(502, "llm_invalid_tool_call", "tool_call.arguments 必须为对象。")
-        return parsed
+            return {}, f"{tool_name} 的 arguments 必须为对象。"
+        return parsed, None
 
 
 def _describe_api_error(exc: APIStatusError) -> str:

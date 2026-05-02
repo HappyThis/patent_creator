@@ -24,6 +24,7 @@ class MainAgentToolCall:
     tool: str
     arguments: dict[str, Any]
     tool_call_id: str
+    arguments_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -217,7 +218,17 @@ def _tool_calls(result: dict[str, Any]) -> list[MainAgentToolCall]:
         arguments = raw_call.get("arguments") or {}
         if not isinstance(arguments, dict):
             raise ApiError(502, "main_agent_invalid_action", f"tool_calls[{index}].arguments 必须为对象。")
-        calls.append(MainAgentToolCall(tool=tool, arguments=arguments, tool_call_id=tool_call_id))
+        arguments_error = raw_call.get("arguments_error")
+        if arguments_error is not None and not isinstance(arguments_error, str):
+            raise ApiError(502, "main_agent_invalid_action", f"tool_calls[{index}].arguments_error 必须为字符串。")
+        calls.append(
+            MainAgentToolCall(
+                tool=tool,
+                arguments=arguments,
+                tool_call_id=tool_call_id,
+                arguments_error=arguments_error,
+            )
+        )
     return calls
 
 

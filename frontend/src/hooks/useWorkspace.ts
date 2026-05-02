@@ -299,25 +299,34 @@ function finalizeRoundEvents(
   }
 
   const roundMatches = (item: ChatEvent) => (roundId ? item.round_id === roundId : true);
-  const tail = current.filter(roundMatches);
 
-  const streamMessageIndex = tail.findIndex(
-    (item) =>
+  let lastToolIndex = -1;
+  let latestStreamIndexAfterTools = -1;
+  for (let index = 0; index < current.length; index += 1) {
+    const item = current[index];
+    if (!roundMatches(item)) {
+      continue;
+    }
+    if (item.kind === 'tool_call') {
+      lastToolIndex = index;
+      latestStreamIndexAfterTools = -1;
+      continue;
+    }
+    if (
       item.kind === 'message' &&
       item.role === 'assistant' &&
-      item.id.startsWith('assistant_stream_'),
-  );
-
-  if (streamMessageIndex !== -1) {
-    const streamMessageId = tail[streamMessageIndex].id;
-    const actualIndex = current.findIndex((item) => item.id === streamMessageId);
-    if (actualIndex === -1) {
-      return current;
+      item.id.startsWith('assistant_stream_') &&
+      index > lastToolIndex
+    ) {
+      latestStreamIndexAfterTools = index;
     }
+  }
+
+  if (latestStreamIndexAfterTools !== -1) {
     const next = [...current];
-    const streamMessage = next[actualIndex];
+    const streamMessage = next[latestStreamIndexAfterTools];
     if (streamMessage.kind === 'message') {
-      next[actualIndex] = {
+      next[latestStreamIndexAfterTools] = {
         ...streamMessage,
         text: reply,
         timestamp: streamMessage.timestamp || timestamp,
@@ -552,6 +561,7 @@ export function useWorkspace() {
       }
 
       if (eventName === 'tool_call_started') {
+        streamingAssistantIdRef.current = null;
         setEvents((current) => applyRunningToolEvent(current, payload, 'running'));
         return;
       }

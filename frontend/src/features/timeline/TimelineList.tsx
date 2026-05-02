@@ -31,10 +31,16 @@ export function TimelineList({ items }: TimelineListProps) {
 
 function buildToolTree(toolCalls: ToolCallEvent[]): ToolNode[] {
   const nodeById = new Map<string, ToolNode>();
+  const subagentParentById = new Map<string, ToolNode>();
   const roots: ToolNode[] = [];
 
   for (const item of toolCalls) {
-    nodeById.set(item.id, { item, children: [] });
+    const node = { item, children: [] };
+    nodeById.set(item.id, node);
+    const launchedSubagentId = getLaunchedSubagentId(item);
+    if (launchedSubagentId) {
+      subagentParentById.set(launchedSubagentId, node);
+    }
   }
 
   for (const item of toolCalls) {
@@ -46,6 +52,13 @@ function buildToolTree(toolCalls: ToolCallEvent[]): ToolNode[] {
     const parent = parentId ? nodeById.get(parentId) : undefined;
     if (parent) {
       parent.children.push(node);
+      continue;
+    }
+
+    const subagentId = getScopeSubagentId(item);
+    const subagentParent = subagentId ? subagentParentById.get(subagentId) : undefined;
+    if (subagentParent && subagentParent !== node) {
+      subagentParent.children.push(node);
     } else {
       roots.push(node);
     }
@@ -61,7 +74,7 @@ function renderToolNode(node: ToolNode) {
   return (
     <details
       key={item.id}
-      className={`command-item ${item.status ?? 'plain'} ${toolToneClass(item.tool ?? item.title)} ${hasChildren ? 'has-children' : ''}`}
+      className={`command-item ${item.status ?? 'plain'} ${hasChildren ? 'has-children' : ''}`}
       open={item.status === 'running'}
     >
       <summary className="command-item-summary">
@@ -99,22 +112,46 @@ function describeTool(toolName: string): string {
   return descriptions[toolName] ?? '执行工具调用';
 }
 
-function toolToneClass(toolName: string): string {
-  const tones: Record<string, string> = {
-    document_read: 'tool-tone-read',
-    document_edit: 'tool-tone-edit',
-    execute_subagent: 'tool-tone-agent',
-    exec_command: 'tool-tone-search',
-    web_search: 'tool-tone-search',
-    analysis: 'tool-tone-analysis',
-    section_writer: 'tool-tone-write',
-  };
-  return tones[toolName] ?? 'tool-tone-default';
-}
-
 function formatToolScope(item: ToolCallEvent): string {
   if (item.scope?.startsWith('subagent:')) {
     return `${item.scope.replace('subagent:', '')} / ${item.tool ?? item.title}`;
   }
   return item.tool ?? item.title;
+}
+
+function getScopeSubagentId(item: ToolCallEvent): string | null {
+  if (!item.scope?.startsWith('subagent:')) {
+    return null;
+  }
+  return item.scope.replace('subagent:', '') || null;
+}
+
+function getLaunchedSubagentId(item: ToolCallEvent): string | null {
+  if (item.tool !== 'execute_subagent') {
+    return null;
+  }
+  const detail = parseToolDetail(item.detail);
+  return findAgentId(detail);
+}
+
+function parseToolDetail(detail?: string): unknown {
+  if (!detail) {
+    return null;
+  }
+  try {
+    return JSON.parse(detail);
+  } catch {
+    return null;
+  }
+}
+
+function findAgentId(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.agent_id === 'string') {
+    return record.agent_id;
+  }
+  return findAgentId(record.arguments) ?? findAgentId(record.output) ?? findAgentId(record.result);
 }
