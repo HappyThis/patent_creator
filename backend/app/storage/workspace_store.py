@@ -62,6 +62,50 @@ class WorkspaceStore:
         projects = self.list_projects()
         return [current, *(project for project in projects if project.project_id != current.project_id)]
 
+    def recover_interrupted_projects(self) -> list[ProjectRecord]:
+        recovered: list[ProjectRecord] = []
+        for project in self.list_projects():
+            if not project.is_busy and not project.running_session_id and not project.running_round_id:
+                continue
+
+            session_id = project.running_session_id
+            round_id = project.running_round_id
+            message_id: str | None = None
+            if session_id and round_id and self.session_exists(project.project_id, session_id):
+                events = self.read_session_events(project.project_id, session_id)
+                round_events = [event for event in events if event.round_id == round_id]
+                user_event = next((event for event in round_events if event.type == "user_input"), None)
+                anchor_event = user_event or (round_events[-1] if round_events else None)
+                message_id = anchor_event.message_id if anchor_event else None
+                already_marked = any(
+                    event.type == "agent_output"
+                    and event.round_id == round_id
+                    and event.payload.get("code") == "round_interrupted_by_restart"
+                    for event in events
+                )
+                if not already_marked:
+                    self.append_session_event(
+                        project.project_id,
+                        session_id,
+                        event_type="agent_output",
+                        scope="main",
+                        round_id=round_id,
+                        message_id=message_id or generate_id("msg"),
+                        payload={
+                            "text": "上一次任务因后端重启而中断，已标记为失败。你可以继续发送消息或重新发起任务。",
+                            "status": "failed",
+                            "code": "round_interrupted_by_restart",
+                        },
+                    )
+
+            project.running_session_id = None
+            project.running_round_id = None
+            project.is_busy = False
+            project.updated_at = now_iso()
+            self.save_project(project)
+            recovered.append(project)
+        return recovered
+
     def ensure_current_project(self) -> ProjectRecord:
         pointer_path = self.root_dir / CURRENT_PROJECT_POINTER
         if pointer_path.exists():

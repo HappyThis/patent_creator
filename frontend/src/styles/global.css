@@ -528,6 +528,7 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+.session-export-button,
 .session-history-button,
 .session-new-button {
   width: 32px;
@@ -545,6 +546,7 @@ textarea:focus-visible {
   line-height: 1;
 }
 
+.session-export-icon,
 .session-history-icon,
 .session-new-icon {
   width: 20px;
@@ -557,6 +559,7 @@ textarea:focus-visible {
   stroke-linejoin: round;
 }
 
+.session-export-button:hover:not(:disabled),
 .session-history-button:hover:not(:disabled),
 .session-new-button:hover:not(:disabled) {
   color: #293640;
@@ -568,6 +571,7 @@ textarea:focus-visible {
   background: rgba(127, 153, 184, 0.14);
 }
 
+.session-export-button:disabled,
 .session-history-button:disabled,
 .session-new-button:disabled {
   opacity: 0.45;
@@ -954,11 +958,11 @@ textarea:focus-visible {
   background: #dc5f57;
 }
 
-.command-item.running .status-dot {
+.command-item.running > .command-item-summary > .status-dot {
   background: #d9a72e;
 }
 
-.command-item.failed .status-dot {
+.command-item.failed > .command-item-summary > .status-dot {
   background: #dc5f57;
 }
 
@@ -1157,6 +1161,23 @@ textarea:focus-visible {
 .composer-send-inline:enabled:hover {
   background: #747d84;
   transform: translateY(-1px);
+}
+
+.composer-send-inline.cancel:enabled {
+  background: #9f5f57;
+  color: #ffffff;
+}
+
+.composer-send-inline.cancel:enabled:hover {
+  background: #884d46;
+}
+
+.composer-stop-icon {
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  box-sizing: border-box;
 }
 
 .composer-context {

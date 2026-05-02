@@ -133,7 +133,8 @@ API 中涉及文档定位时统一使用：
   "active_session_id": "sess_003",
   "running_session_id": null,
   "running_round_id": null,
-  "is_busy": false
+  "is_busy": false,
+  "active_session_context": null
 }
 ```
 
@@ -304,7 +305,8 @@ data: {
   "accepted": true,
   "session_id": "sess_001",
   "message_id": "msg_001",
-  "round_id": "round_001"
+  "round_id": "round_001",
+  "first_user_text": "请把技术方案这一章写得更具体一点，并强调低算力实时性约束。"
 }
 ```
 
@@ -339,7 +341,7 @@ HTTP 错误协议：
 }
 ```
 
-同一条 `POST /api/projects/{project_id}/chat/messages` 连接中，服务端继续输出以下流式事件：
+同一条 `POST /api/projects/{project_id}/chat/messages` 连接中，服务端继续输出以下流式事件。除特别说明外，运行中事件会携带 `round_id` 和 `message_id`，便于前端把流式消息、工具节点和最终收束归并到同一轮。
 
 #### `assistant_delta`
 
@@ -353,7 +355,7 @@ data: {"text":"我已经"}
 - 当模型正在输出面向用户的自然语言时，后端直接按文本 delta 转发给前端。
 - `assistant_delta` 只用于文本流式展示，不代表本轮已经完成。
 - 如果当前 delta 是工具调用片段，后端不会把它作为文本发送，而是累计完整 tool call 后再进入工具执行。
-- 本轮最终仍由 `round_finished.reply` 收束。
+- 正常完成时由 `round_finished.reply` 收束；取消或失败时分别由 `round_cancelled.reply`、`round_failed.reply` 收束。
 
 #### `tool_call_started`
 
@@ -364,7 +366,9 @@ data: {
   "parent_call_id": null,
   "scope": "main",
   "tool": "execute_subagent",
-  "summary": "已启动 section_writer"
+  "summary": "已启动 section_writer",
+  "round_id": "round_001",
+  "message_id": "msg_001"
 }
 ```
 
@@ -393,7 +397,9 @@ data: {
         "warnings": []
       }
     }
-  }
+  },
+  "round_id": "round_001",
+  "message_id": "msg_001"
 }
 ```
 
@@ -409,7 +415,9 @@ data: {
   "primary_block_id": "blk_000014",
   "change_scope": "block_appended",
   "active_section_id": "technical_solution",
-  "active_block_id": "blk_000014"
+  "active_block_id": "blk_000014",
+  "round_id": "round_001",
+  "message_id": "msg_001"
 }
 ```
 
@@ -420,9 +428,30 @@ event: round_failed
 data: {
   "code": "subagent_runtime_error",
   "message": "section_writer 执行失败。",
-  "reply": "本轮未完成，请重试或补充信息。"
+  "reply": "本轮未完成，请重试或补充信息。",
+  "round_id": "round_001",
+  "message_id": "msg_001"
 }
 ```
+
+#### `round_cancelled`
+
+```text
+event: round_cancelled
+data: {
+  "cancelled": true,
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "round_id": "round_001",
+  "message_id": "msg_001",
+  "reply": "本轮任务已取消。"
+}
+```
+
+说明：
+
+- 用户取消运行中的 round 后，后端会将 project 恢复为空闲状态。
+- session log 会写入一条 `agent_output`，payload 中包含 `status=cancelled` 和 `code=round_cancelled`。
 
 #### `round_finished`
 
@@ -442,7 +471,9 @@ data: {
   "commit_error": {
     "code": "git_commit_failed",
     "message": "git commit 执行失败。"
-  }
+  },
+  "round_id": "round_001",
+  "message_id": "msg_001"
 }
 ```
 
@@ -453,7 +484,64 @@ data: {
 - 收到 `tool_call_finished` 后，将执行节点切换为已完成，并默认折叠结果详情
 - 收到 `document_changed` 后，刷新目录区与渲染区
 - 收到 `round_failed` 后，结束本轮加载状态并展示失败信息
+- 收到 `round_cancelled` 后，结束本轮加载状态并展示取消提示
 - 收到 `round_finished` 后，更新 chat 区回合状态
+
+### 2. `POST /api/projects/{project_id}/sessions/{session_id}/rounds/{round_id}/cancel`
+
+取消当前运行中的 round。
+
+说明：
+
+- 只有当 project 正在运行，且 `running_session_id` / `running_round_id` 与路径参数完全匹配时才会成功。
+- 成功后后端会发布 `round_cancelled` SSE，并将 project 的运行态字段清空。
+- 如果当前没有匹配的运行中任务，返回 `409 round_not_running`。
+
+响应：
+
+```json
+{
+  "cancelled": true,
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "round_id": "round_001",
+  "message_id": "msg_001",
+  "reply": "本轮任务已取消。"
+}
+```
+
+### 3. `GET /api/projects/{project_id}/sessions/{session_id}/stream`
+
+恢复订阅某个运行中 session 的 SSE 流，主要用于前端刷新页面、重新进入页面或运行中重建连接。
+
+首个事件：
+
+- 如果该 session 正在运行，返回 `stream_attached`。
+- 如果该 session 未在运行，返回 `stream_closed` 并结束连接。
+
+`stream_attached` 示例：
+
+```text
+event: stream_attached
+data: {
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "round_id": "round_001"
+}
+```
+
+`stream_closed` 示例：
+
+```text
+event: stream_closed
+data: {
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "reason": "not_running"
+}
+```
+
+恢复连接建立后，后续事件与 `POST /chat/messages` 的 SSE 事件格式一致。
 
 ## 八、Session 日志接口
 
@@ -546,13 +634,15 @@ V1 前端最小依赖如下接口：
 3. `GET /api/projects/{project_id}/outline`
 4. `GET /api/projects/{project_id}/render`
 5. `POST /api/projects/{project_id}/chat/messages`
-6. `POST /api/projects/{project_id}/export/markdown`
+6. `GET /api/projects/{project_id}/sessions`
+7. `GET /api/projects/{project_id}/sessions/{session_id}/events`
+8. `GET /api/projects/{project_id}/sessions/{session_id}/stream`
+9. `POST /api/projects/{project_id}/sessions/{session_id}/rounds/{round_id}/cancel`
+10. `POST /api/projects/{project_id}/export/markdown`
 
 以下接口可作为调试或增强接口：
 
 - `GET /api/projects/{project_id}/document`
-- `GET /api/projects/{project_id}/sessions`
-- `GET /api/projects/{project_id}/sessions/{session_id}/events`
 
 ## 十一、一轮交互的最小链路
 

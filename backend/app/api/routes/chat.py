@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from ...schemas import ChatMessageRequest, ContextUsageSummary, SessionEventsResponse, SessionListResponse
 from ...services.app_services import AppServices
-from ...services.chat import format_sse_event
+from ...services.chat_protocol import format_sse_event
 
 
 def create_chat_router(services: AppServices) -> APIRouter:
@@ -34,7 +34,57 @@ def create_chat_router(services: AppServices) -> APIRouter:
                         yield ": ping\n\n"
                         continue
                     yield format_sse_event(event_name, payload)
-                    if event_name in {"round_finished", "round_failed"}:
+                    if event_name in {"round_finished", "round_failed", "round_cancelled"}:
+                        break
+            finally:
+                await services.bus.unsubscribe(key, queue)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    @router.post("/sessions/{session_id}/rounds/{round_id}/cancel")
+    async def cancel_round(project_id: str, session_id: str, round_id: str) -> dict:
+        services.store.get_project(project_id)
+        return await services.chat.cancel_round(project_id, session_id, round_id)
+
+    @router.get("/sessions/{session_id}/stream")
+    async def stream_session_events(project_id: str, session_id: str, request: Request) -> StreamingResponse:
+        services.store.get_project(project_id)
+        services.store.read_session_events(project_id, session_id)
+        key = (project_id, session_id)
+        queue = await services.bus.subscribe_live(key)
+
+        async def event_generator() -> AsyncIterator[str]:
+            try:
+                latest_project = services.store.get_project(project_id)
+                if not latest_project.is_busy or latest_project.running_session_id != session_id:
+                    yield format_sse_event(
+                        "stream_closed",
+                        {
+                            "project_id": project_id,
+                            "session_id": session_id,
+                            "reason": "not_running",
+                        },
+                    )
+                    return
+
+                yield format_sse_event(
+                    "stream_attached",
+                    {
+                        "project_id": project_id,
+                        "session_id": session_id,
+                        "round_id": latest_project.running_round_id,
+                    },
+                )
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event_name, payload = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield ": ping\n\n"
+                        continue
+                    yield format_sse_event(event_name, payload)
+                    if event_name in {"round_finished", "round_failed", "round_cancelled"}:
                         break
             finally:
                 await services.bus.unsubscribe(key, queue)

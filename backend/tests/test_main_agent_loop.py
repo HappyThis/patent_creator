@@ -164,6 +164,82 @@ def tool_call(tool: str, arguments: dict[str, Any], tool_call_id: str) -> dict[s
     return {"tool": tool, "arguments": arguments, "tool_call_id": tool_call_id}
 
 
+def test_recover_interrupted_project_marks_round_failed_and_unlocks_project(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
+    project_id = services.store.create_project("测试项目").project_id
+    session_id = "sess_interrupted"
+    round_id = "round_interrupted"
+    message_id = "msg_interrupted"
+    services.store.append_session_event(
+        project_id,
+        session_id,
+        event_type="user_input",
+        scope="main",
+        round_id=round_id,
+        message_id=message_id,
+        payload={"text": "开始长任务"},
+    )
+    project = services.store.get_project(project_id)
+    project.active_session_id = session_id
+    project.running_session_id = session_id
+    project.running_round_id = round_id
+    project.is_busy = True
+    services.store.save_project(project)
+
+    recovered = services.store.recover_interrupted_projects()
+
+    assert [item.project_id for item in recovered] == [project_id]
+    unlocked = services.store.get_project(project_id)
+    assert unlocked.is_busy is False
+    assert unlocked.running_session_id is None
+    assert unlocked.running_round_id is None
+
+    events = services.store.read_session_events(project_id, session_id)
+    failure_event = events[-1]
+    assert failure_event.type == "agent_output"
+    assert failure_event.round_id == round_id
+    assert failure_event.message_id == message_id
+    assert failure_event.payload["code"] == "round_interrupted_by_restart"
+    assert "后端重启" in failure_event.payload["text"]
+
+    recovered_again = services.store.recover_interrupted_projects()
+    assert recovered_again == []
+    assert len(services.store.read_session_events(project_id, session_id)) == len(events)
+
+
+def test_recover_interrupted_project_does_not_infer_missing_running_round(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
+    project_id = services.store.create_project("测试项目").project_id
+    session_id = "sess_stale"
+    services.store.append_session_event(
+        project_id,
+        session_id,
+        event_type="user_input",
+        scope="main",
+        round_id="round_stale",
+        message_id="msg_stale",
+        payload={"text": "开始长任务"},
+    )
+    project = services.store.get_project(project_id)
+    project.active_session_id = session_id
+    project.running_session_id = None
+    project.running_round_id = None
+    project.is_busy = True
+    services.store.save_project(project)
+
+    recovered = services.store.recover_interrupted_projects()
+
+    assert [item.project_id for item in recovered] == [project_id]
+    unlocked = services.store.get_project(project_id)
+    assert unlocked.is_busy is False
+    assert unlocked.running_session_id is None
+    assert unlocked.running_round_id is None
+    events = services.store.read_session_events(project_id, session_id)
+    assert len(events) == 1
+
+
 @pytest.mark.anyio
 async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     """覆盖 read -> execute_subagent -> document_edit -> respond 的完整链路。"""
@@ -289,6 +365,104 @@ async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_mess
 
 
 @pytest.mark.anyio
+async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> None:
+    def step_read_with_preamble(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call("document_read", {"action": "get_section", "section_id": "technical_field"}, "call_preamble")
+            ],
+            "assistant_message": {
+                "role": "assistant",
+                "content": "我先读取技术领域，然后继续判断。",
+                "tool_calls": [
+                    {
+                        "id": "call_preamble",
+                        "type": "function",
+                        "function": {
+                            "name": "document_read",
+                            "arguments": json.dumps(
+                                {"action": "get_section", "section_id": "technical_field"},
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            },
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert any(message.get("role") == "tool" and message.get("tool_call_id") == "call_preamble" for message in messages)
+        return {"type": "respond", "text": "读取完成。"}
+
+    llm = ScriptedLLMClient([step_read_with_preamble, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="先看技术领域。"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    round_events = [event for event in events if event.round_id == response.round_id]
+    assert [event.type for event in round_events] == [
+        "user_input",
+        "agent_output",
+        "tool_call",
+        "tool_result",
+        "agent_output",
+    ]
+    assert round_events[1].payload["text"] == "我先读取技术领域，然后继续判断。"
+    assert round_events[-1].payload["text"] == "读取完成。"
+
+
+@pytest.mark.anyio
+async def test_execute_subagent_unknown_agent_returns_tool_failure(tmp_path: Path) -> None:
+    def step_unknown_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {
+                        "agent_id": "missing_writer",
+                        "call_type": "rich_context_specialist",
+                        "goal": "测试不存在的子 agent。",
+                    },
+                    "call_missing_subagent",
+                )
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert last_tool["tool_call_id"] == "call_missing_subagent"
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "subagent_not_found"
+        return {"type": "respond", "text": "已识别不存在的子 agent。"}
+
+    llm = ScriptedLLMClient([step_unknown_subagent, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="调用不存在的子 agent。"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    failed_tool_result = next(
+        event
+        for event in events
+        if event.type == "tool_result" and event.call_id == "call_missing_subagent"
+    )
+    assert failed_tool_result.payload["status"] == "failed"
+    assert failed_tool_result.payload["output"]["code"] == "subagent_not_found"
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    assert "round_failed" not in [name for name, _ in bus_events]
+    assert bus_events[-1][0] == "round_finished"
+
+
+@pytest.mark.anyio
 async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Path) -> None:
     error_message = "document_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
 
@@ -311,8 +485,10 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
         assert last_tool["tool_call_id"] == "bad_call"
         assert result == {
             "status": "failed",
-            "code": "invalid_tool_arguments_json",
-            "message": error_message,
+            "output": {
+                "code": "invalid_tool_arguments_json",
+                "message": error_message,
+            },
         }
         return {"type": "respond", "text": "已识别参数格式错误并重新规划。"}
 
@@ -335,8 +511,10 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
     assert failed_tool_result.payload == {
         "tool": "document_edit",
         "status": "failed",
-        "code": "invalid_tool_arguments_json",
-        "message": error_message,
+        "output": {
+            "code": "invalid_tool_arguments_json",
+            "message": error_message,
+        },
     }
 
     bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
@@ -347,8 +525,10 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
     assert finished_payload["summary"] == "执行失败"
     assert finished_payload["result"] == {
         "status": "failed",
-        "code": "invalid_tool_arguments_json",
-        "message": error_message,
+        "output": {
+            "code": "invalid_tool_arguments_json",
+            "message": error_message,
+        },
     }
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "已识别参数格式错误并重新规划。"
@@ -384,8 +564,10 @@ async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_ca
         assert tool_results[0]["status"] == "success"
         assert tool_results[1] == {
             "status": "failed",
-            "code": "invalid_tool_arguments_json",
-            "message": error_message,
+            "output": {
+                "code": "invalid_tool_arguments_json",
+                "message": error_message,
+            },
         }
         assert tool_results[2]["status"] == "success"
         return {"type": "respond", "text": "已收到完整工具结果。"}
@@ -739,8 +921,10 @@ async def test_subagent_submit_result_invalid_arguments_json_can_retry(tmp_path:
         result = json.loads(last_tool["content"])
         assert result == {
             "status": "failed",
-            "code": "invalid_tool_arguments_json",
-            "message": error_message,
+            "output": {
+                "code": "invalid_tool_arguments_json",
+                "message": error_message,
+            },
         }
         arguments = {
             "summary": "已生成候选正文。",

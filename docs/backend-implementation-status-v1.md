@@ -29,7 +29,9 @@
 - session log：按 `user_input`、`agent_output`、`tool_call`、`tool_result` 记录 jsonl
 - ContextManager：主 agent 可从当前 session log 恢复多轮 `user` / `assistant` messages，并输出上下文用量统计
 - 上下文压缩：超阈值时会压缩当前用户输入之前的主 agent 历史，写入 `context_summary`；压缩失败或仍超限时写入 `context_pruned` 并按 cursor 兜底裁剪
-- SSE：支持 `assistant_delta`、`tool_call_started`、`tool_call_finished`、`document_changed`、`round_finished`、`round_failed`
+- SSE：支持 `assistant_delta`、`tool_call_started`、`tool_call_finished`、`document_changed`、`round_finished`、`round_failed`、`round_cancelled`
+- 运行中恢复：支持通过 `GET /sessions/{session_id}/stream` 重新订阅运行中 session 的 SSE
+- 运行中取消：支持通过 `POST /sessions/{session_id}/rounds/{round_id}/cancel` 取消当前 round
 - 工具体系：实现 `document_read`、`document_edit`、`execute_subagent`、`exec_command` 的 v1 协议骨架
 - 权限边界：子 agent 可读文档，但不能调用 `document_edit` 和 `execute_subagent`
 - 文档写入：`document_edit` 成为 `disclosure.json` 的唯一业务写入口，支持原子校验后写入
@@ -47,7 +49,8 @@
 - `solution_refiner`：支持 `analysis_result`，也支持在必要时返回 `document_edit_proposal`
 - `call_type`：已区分 `task_only_specialist`、`rich_context_specialist`、`forked_context` 的上下文装配策略
 - `exec_command`：已接入主 agent 与子 agent，以项目工作区为 cwd 执行命令字符串，不做命令白名单限制
-- 前端上下文用量展示：当前 session tab 区显示上下文窗口估算用量
+- 前端上下文用量展示：当前 chat composer 区显示上下文窗口估算用量
+- 前端 Markdown 导出：可从 Chat 区触发导出，并回显导出文件路径
 - `disclosure.json` 写入：已使用临时文件替换方式落盘，避免半写入文件
 - 目录结构：已拆出 `app/agents` 与 `app/runtime`，将 agent 能力、上下文管理和执行器职责分开
 

@@ -336,12 +336,13 @@ user_input
 - 不是所有日志内容都需要原样推给前端。
 - 所有影响用户体验的重要状态变化，都应有对应 SSE 事件。
 - 请求已被接受但本轮中途失败时，应推送 `round_failed`。
+- 用户主动取消运行中的 round 时，应推送 `round_cancelled`，并将 project 恢复为空闲状态。
 
 ## 十四、回合中的多次 agent 输出
 
 主 agent 在一轮中可以通过 `assistant_delta` 多次向前端输出自然语言片段。
 
-最终必须有一个 `round_finished.reply` 作为本轮收束；`agent_output` 只写入 session log，用于历史恢复与回放。
+正常完成时必须有一个 `round_finished.reply` 作为本轮收束；用户主动取消时通过 `round_cancelled.reply` 收束，运行时失败时通过 `round_failed.reply` 收束。`agent_output` 只写入 session log，用于历史恢复与回放。
 
 这样可以兼顾：
 
@@ -360,4 +361,4 @@ V1 的一轮内部时序采用以下原则：
 6. 文档一旦修改，立即刷新渲染区。
 7. git commit 只在本轮结束时执行一次。
 8. session 日志追求完整，SSE 追求可感知。
-9. 回合最终必须通过 `round_finished` 收束。
+9. 回合正常完成通过 `round_finished` 收束；取消和失败分别通过 `round_cancelled`、`round_failed` 收束。

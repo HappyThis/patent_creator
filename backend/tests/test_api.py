@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -344,7 +345,33 @@ async def collect_stream_events(
             if line.startswith("data: ") and current_event:
                 payload = json.loads(line.removeprefix("data: ").strip())
                 events.append((current_event, payload))
-                if current_event in {"round_finished", "round_failed"}:
+                if current_event in {"round_finished", "round_failed", "round_cancelled"}:
+                    break
+    return events
+
+
+async def collect_session_stream_events(
+    client: httpx.AsyncClient,
+    project_id: str,
+    session_id: str,
+) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    current_event: str | None = None
+    async with client.stream(
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/stream",
+    ) as response:
+        assert response.status_code == 200
+        async for line in response.aiter_lines():
+            if not line:
+                continue
+            if line.startswith("event: "):
+                current_event = line.removeprefix("event: ").strip()
+                continue
+            if line.startswith("data: ") and current_event:
+                payload = json.loads(line.removeprefix("data: ").strip())
+                events.append((current_event, payload))
+                if current_event in {"round_finished", "round_failed", "round_cancelled", "stream_closed"}:
                     break
     return events
 
@@ -457,3 +484,116 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
             json={"session_id": "sess_missing", "message": "继续写。"},
         )
         assert missing_session_response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_session_stream_can_attach_to_running_round(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    project = services.store.ensure_current_project()
+    project_id = project.project_id
+    session_id = "sess_resume"
+    round_id = "round_resume"
+    message_id = "msg_resume"
+    services.store.append_session_event(
+        project_id,
+        session_id,
+        event_type="user_input",
+        scope="main",
+        round_id=round_id,
+        message_id=message_id,
+        payload={"text": "继续写。"},
+    )
+    project.active_session_id = session_id
+    project.running_session_id = session_id
+    project.running_round_id = round_id
+    project.is_busy = True
+    services.store.save_project(project)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        stream_task = asyncio.create_task(collect_session_stream_events(client, project_id, session_id))
+        await asyncio.sleep(0.05)
+        await services.bus.publish(
+            (project_id, session_id),
+            "assistant_delta",
+            {
+                "round_id": round_id,
+                "message_id": message_id,
+                "text": "恢复后的流式文本",
+            },
+        )
+        await services.bus.publish(
+            (project_id, session_id),
+            "round_failed",
+            {
+                "round_id": round_id,
+                "message_id": message_id,
+                "reply": "测试结束。",
+            },
+        )
+
+        events = await asyncio.wait_for(stream_task, timeout=2.0)
+
+    assert events[0][0] == "stream_attached"
+    assert ("assistant_delta", {"round_id": round_id, "message_id": message_id, "text": "恢复后的流式文本"}) in events
+    assert events[-1][0] == "round_failed"
+
+
+@pytest.mark.anyio
+async def test_running_round_can_be_cancelled(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+        round_step_delay=1.0,
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    project = services.store.ensure_current_project()
+    project_id = project.project_id
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        stream_task = asyncio.create_task(
+            collect_stream_events(client, project_id, {"message": "请补充技术效果章节。"})
+        )
+
+        running_project = services.store.get_project(project_id)
+        for _ in range(100):
+            running_project = services.store.get_project(project_id)
+            if running_project.running_session_id and running_project.running_round_id:
+                break
+            await asyncio.sleep(0.01)
+        assert running_project.running_session_id is not None
+        assert running_project.running_round_id is not None
+
+        cancel_response = await client.post(
+            f"/api/projects/{project_id}/sessions/{running_project.running_session_id}/rounds/{running_project.running_round_id}/cancel"
+        )
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["cancelled"] is True
+        events = await asyncio.wait_for(stream_task, timeout=2.0)
+
+    assert events[0][0] == "round_started"
+    assert events[-1][0] == "round_cancelled"
+    cancelled_payload = events[-1][1]
+    assert cancelled_payload["reply"] == "本轮任务已取消。"
+
+    unlocked_project = services.store.get_project(project_id)
+    assert unlocked_project.is_busy is False
+    assert unlocked_project.running_session_id is None
+    assert unlocked_project.running_round_id is None
+
+    session_id = events[0][1]["session_id"]
+    session_events = services.store.read_session_events(project_id, session_id)
+    assert session_events[-1].payload["code"] == "round_cancelled"

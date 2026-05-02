@@ -216,7 +216,7 @@ v1 建议取值：
 说明：
 
 - `agent_output` 用于记录主 agent 最终回复，供历史恢复与 session 回放使用。
-- 本轮最终回复也会在 SSE 的 `round_finished.reply` 中收束。
+- 正常完成时，本轮最终回复也会在 SSE 的 `round_finished.reply` 中收束；取消或失败时分别通过 `round_cancelled.reply`、`round_failed.reply` 收束。
 
 ### 3. tool_call
 

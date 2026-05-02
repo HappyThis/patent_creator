@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
@@ -17,6 +18,8 @@ from .routes import (
     create_project_router,
 )
 
+logger = logging.getLogger("patent_creator.api")
+
 
 def create_app(settings: Settings | None = None, services: AppServices | None = None) -> FastAPI:
     active_settings = settings or Settings.from_env()
@@ -30,6 +33,13 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         active_services.settings.data_dir.mkdir(parents=True, exist_ok=True)
+        recovered_projects = active_services.store.recover_interrupted_projects()
+        if recovered_projects:
+            logger.warning(
+                "recovered interrupted projects count=%d ids=%s",
+                len(recovered_projects),
+                ",".join(project.project_id for project in recovered_projects),
+            )
         yield
 
     app = FastAPI(title="Patent Creator Backend", version="0.1.0", lifespan=lifespan)

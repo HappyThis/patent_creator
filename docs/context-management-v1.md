@@ -349,15 +349,15 @@ call_type: forked_context
 
 ## 十、子 Agent 的上下文压缩
 
-子 agent 也具备上下文压缩能力。
+子 agent run-local 压缩是目标能力，当前实现尚未接入。
 
 区别：
 
 - 主 agent 有 session cursor，可跨 round 恢复。
 - 子 agent 只有 run-local cursor，不跨调用恢复。
 - 子 agent 每次被主 agent 调用时都是全新上下文。
-- 子 agent 内部压缩结果只服务于本次 run。
-- 子 agent 压缩过程仍写入 session log，便于 debug。
+- 接入后，子 agent 内部压缩结果只服务于本次 run。
+- 接入后，子 agent 压缩过程仍写入 session log，便于 debug。
 
 ## 十一、Context State
 
@@ -408,7 +408,7 @@ session log 继续保持 append-only，是上下文恢复的唯一权威来源�
 4. 压缩摘要不能伪装成用户原话。
 5. 当前用户输入永远作为最后一条真实 user message。
 6. 主 agent 不接收子 agent 内部过程。
-7. 子 agent 可压缩本次运行上下文，但不跨次恢复。
+7. 子 agent run-local 压缩是后续能力，接入后不跨次恢复。
 8. 压缩失败不能阻塞主流程，必须有 cursor 移动兜底。
 9. 兜底窗口第一条业务消息必须是 user。
 10. 工具结果压缩时先编码，再由压缩 agent 输出保留策略。

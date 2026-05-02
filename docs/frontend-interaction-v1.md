@@ -98,13 +98,17 @@ Agent Chat 区不应只是普通聊天窗口。
 Agent Chat 区至少支持以下能力：
 
 1. 用户发送文本消息
-2. 用户附带参考资料
+2. 用户在消息文本中附带参考资料
    - URL
    - 绝对路径
    - 粘贴文本
 3. 展示主 agent 的自然语言输出
 4. 展示执行过程
 5. 展示回合完成状态
+6. 运行中取消当前 round
+7. 切换历史 session 或新建 session
+8. 展示当前 session 的上下文用量
+9. 导出当前交底书 Markdown
 
 ## 三、执行轨迹展示规则
 
@@ -197,7 +201,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 前端行为：
 
 - 累加到当前 assistant 流式消息中
-- 等 `round_finished` 到达后，以最终 reply 收束当前流式消息
+- 等 `round_finished`、`round_failed` 或 `round_cancelled` 到达后，以最终 reply 收束当前流式消息
 
 ### 1. `tool_call_started`
 
@@ -261,6 +265,43 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 如有 commit，展示轻量提示
 - 如 `commit_error` 非空，展示“文档已修改但版本提交失败”的轻量状态
 
+### 5. `round_failed`
+
+用途：
+
+- 表示本轮请求已被接受，但执行过程中失败。
+
+前端行为：
+
+- 关闭当前 SSE 流
+- 结束运行中状态
+- 显示失败回复或兜底失败提示
+- 刷新 project 状态
+
+### 6. `round_cancelled`
+
+用途：
+
+- 表示用户取消了当前运行中的 round。
+
+前端行为：
+
+- 关闭当前 SSE 流
+- 结束运行中和取消中状态
+- 以最终取消提示收束当前 assistant 消息
+- 刷新 project 与 session 列表
+
+### 7. `stream_attached` / `stream_closed`
+
+用途：
+
+- 页面刷新、重新进入或运行中重建连接时，恢复订阅当前 session 的 SSE。
+
+前端行为：
+
+- `stream_attached`：记录当前 `round_id`，继续消费后续 SSE 事件。
+- `stream_closed`：关闭本地流并刷新 project 状态。
+
 ## 五、V1 必要交互细节
 
 ### 目录区域
@@ -281,8 +322,12 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 支持普通聊天消息
 - 支持执行轨迹节点
 - 支持等待状态
+- 支持运行中取消当前 round
 - 支持结果折叠/展开
 - 支持一轮完成后的状态收束
+- 支持历史 session 菜单和新建 session
+- 支持上下文用量展示
+- 支持导出 Markdown
 
 ## 六、V1 暂不做
 
@@ -291,7 +336,6 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 渲染区手动编辑正文
 - 目录区域拖拽重排
 - Chat 区多会话并行切换
-- 子 agent 过程的复杂树形可视化
 - block 级 diff 视图
 
 ## 七、当前结论

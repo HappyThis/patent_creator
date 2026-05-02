@@ -18,20 +18,14 @@ from ...agents.prompts import (
 from ...agents.runtime.openai_compat import OpenAICompatibleClient
 from ...agents.workers import (
     MainAgentToolCall,
-    build_consistency_reviewer_context,
-    build_material_analyst_context,
-    build_section_writer_context,
-    build_solution_refiner_context,
 )
-from ...agents.workers.consistency_reviewer import build_consistency_reviewer_result
-from ...agents.workers.material_analyst import build_material_analyst_result
-from ...agents.workers.section_writer import build_section_writer_result
-from ...agents.workers.solution_refiner import build_solution_refiner_result
 from ...core import ApiError, Settings, generate_id
 from ...domain.document_tools import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
 from ..context import ContextManager
 from .registry import can_use_tool
+from .subagent_context import SubagentContextBuilder
+from .submit_result import invalid_tool_arguments_json_result, submit_subagent_result, subagent_tool_summary
 from .tools.document import document_edit, document_read
 from .tools.shell import exec_command
 from .types import AgentScope
@@ -110,14 +104,6 @@ SUBAGENT_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-_SUBAGENT_ALLOWED_PROPOSAL_TYPES: dict[str, set[str]] = {
-    "section_writer": {"document_edit_proposal"},
-    "material_analyst": {"analysis_result"},
-    "solution_refiner": {"analysis_result", "document_edit_proposal"},
-    "consistency_reviewer": {"review_report"},
-}
-
-
 class ExecutorEngine:
     def __init__(
         self,
@@ -130,6 +116,11 @@ class ExecutorEngine:
         self.context_manager = context_manager
         self.llm_client = llm_client
         self.settings = settings
+        self.subagent_contexts = SubagentContextBuilder(
+            context_manager,
+            self._subagent_read_section,
+            self._recent_session_events,
+        )
 
     def document_read(self, project_id: str, arguments: dict[str, Any], scope: AgentScope = "main_agent") -> dict[str, Any]:
         return document_read(self.store, project_id, arguments, scope)
@@ -155,7 +146,11 @@ class ExecutorEngine:
         if not can_use_tool(scope, "execute_subagent"):
             return tool_failed("permission_denied", "子 agent 不允许调用 execute_subagent。")
 
-        declaration = get_subagent(str(arguments.get("agent_id")))
+        try:
+            declaration = get_subagent(str(arguments.get("agent_id")))
+        except ApiError as exc:
+            return tool_failed(exc.code, exc.message)
+
         call_type = arguments.get("call_type")
         if call_type not in declaration.allowed_types:
             return tool_failed("invalid_call_type", f"{declaration.id} 不支持 call_type：{call_type}")
@@ -164,7 +159,7 @@ class ExecutorEngine:
         if declaration.id == "section_writer" and not target_section_id:
             return tool_failed("missing_target_section_id", "section_writer 必须提供 target_section_id。")
 
-        context = await self._build_subagent_context(
+        context = await self.subagent_contexts.build(
             project_id=project_id,
             agent_id=declaration.id,
             call_type=str(call_type),
@@ -202,89 +197,6 @@ class ExecutorEngine:
                 "result": result,
             }
         )
-
-    async def _build_subagent_context(
-        self,
-        *,
-        project_id: str,
-        agent_id: str,
-        call_type: str,
-        arguments: dict[str, Any],
-        session_id: str | None,
-        round_id: str | None,
-        message_id: str | None,
-        parent_call_id: str | None,
-        on_tool_event: ToolEventSink | None,
-    ) -> dict[str, Any]:
-        goal = str(arguments.get("goal") or "")
-        user_message = str(arguments.get("user_message") or "")
-        target_section_id = arguments.get("target_section_id")
-        target_block_id = arguments.get("target_block_id")
-
-        outline: list[dict[str, Any]] = []
-        recent_inputs: list[str] = []
-        section_snapshot: dict[str, Any] | None = None
-
-        if call_type in {"rich_context_specialist", "forked_context"}:
-            outline = self.context_manager.build_outline_snapshot(project_id)
-            recent_inputs = self.context_manager.recent_user_inputs(project_id, session_id)
-            if target_section_id:
-                section_snapshot = await self._subagent_read_section(
-                    project_id=project_id,
-                    section_id=str(target_section_id),
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    round_id=round_id,
-                    message_id=message_id,
-                    parent_call_id=parent_call_id,
-                    on_tool_event=on_tool_event,
-                )
-
-        if agent_id == "section_writer":
-            context = build_section_writer_context(
-                target_section_id=str(target_section_id),
-                target_block_id=target_block_id,
-                goal=goal,
-                user_message=user_message,
-                outline=outline,
-                section=section_snapshot,
-                recent_user_inputs=recent_inputs,
-            )
-        elif agent_id == "material_analyst":
-            context = build_material_analyst_context(
-                goal=goal,
-                user_message=user_message,
-                outline=outline,
-                target_section=section_snapshot,
-                recent_user_inputs=recent_inputs,
-            )
-        elif agent_id == "solution_refiner":
-            context = build_solution_refiner_context(
-                goal=goal,
-                user_message=user_message,
-                outline=outline,
-                target_section=section_snapshot,
-                recent_user_inputs=recent_inputs,
-            )
-        elif agent_id == "consistency_reviewer":
-            context = build_consistency_reviewer_context(
-                goal=goal,
-                user_message=user_message,
-                outline=outline,
-                target_section=section_snapshot,
-                target_section_id=str(target_section_id) if target_section_id else None,
-                recent_user_inputs=recent_inputs,
-            )
-        else:
-            raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
-
-        context["call_type"] = call_type
-        context["available_tools"] = ["document_read", "exec_command", "submit_result"]
-        if call_type == "forked_context":
-            context["caller_context"] = {
-                "recent_session_events": self._recent_session_events(project_id, session_id),
-            }
-        return context
 
     async def _run_subagent_loop(
         self,
@@ -371,14 +283,6 @@ class ExecutorEngine:
 
         raise ApiError(502, "subagent_max_steps_reached", f"{agent_id} 未在步数上限内完成。")
 
-    @staticmethod
-    def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
-        return {
-            "status": "failed",
-            "code": "invalid_tool_arguments_json",
-            "message": message,
-        }
-
     async def _execute_subagent_tool(
         self,
         *,
@@ -421,13 +325,13 @@ class ExecutorEngine:
             )
 
         if tool_call.arguments_error:
-            result = self._invalid_tool_arguments_json_result(tool_call.arguments_error)
+            result = invalid_tool_arguments_json_result(tool_call.arguments_error)
         elif tool_call.tool == "document_read":
             result = self.document_read(project_id, tool_call.arguments, scope="subagent")
         elif tool_call.tool == "exec_command":
             result = self.exec_command(project_id, tool_call.arguments, scope="subagent")
         elif tool_call.tool == "submit_result":
-            result = self._submit_subagent_result(agent_id, tool_call.arguments, context)
+            result = submit_subagent_result(agent_id, tool_call.arguments, context)
         else:
             result = tool_failed("permission_denied", f"子 agent 不允许调用 {tool_call.tool}。")
 
@@ -451,7 +355,7 @@ class ExecutorEngine:
                     "parent_call_id": parent_call_id,
                     "scope": scope_label,
                     "tool": tool_call.tool,
-                    "summary": self._subagent_tool_summary(agent_id, tool_call.tool, result),
+                    "summary": subagent_tool_summary(agent_id, tool_call.tool, result),
                     "result": result,
                 },
             )
@@ -505,67 +409,6 @@ class ExecutorEngine:
         if agent_id == "consistency_reviewer":
             return build_consistency_reviewer_system_prompt(declaration), build_consistency_reviewer_user_prompt(context)
         raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
-
-    def _build_subagent_result(self, agent_id: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        self._validate_submit_result_envelope(agent_id, payload)
-        if agent_id == "section_writer":
-            task = context["task"]
-            return build_section_writer_result(payload, task["target_section_id"], task.get("target_block_id"))
-        if agent_id == "material_analyst":
-            return build_material_analyst_result(payload)
-        if agent_id == "solution_refiner":
-            return build_solution_refiner_result(payload)
-        if agent_id == "consistency_reviewer":
-            return build_consistency_reviewer_result(payload)
-        raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
-
-    def _submit_subagent_result(self, agent_id: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        try:
-            result = self._build_subagent_result(agent_id, payload, context)
-        except ApiError as exc:
-            return tool_failed(exc.code, exc.message)
-        return tool_success({"result": result})
-
-    @staticmethod
-    def _validate_submit_result_envelope(agent_id: str, payload: dict[str, Any]) -> None:
-        string_fields = ("summary", "reply", "rationale")
-        for field in string_fields:
-            if not isinstance(payload.get(field), str) or not payload[field].strip():
-                raise ApiError(502, "subagent_invalid_submit_result", f"submit_result.{field} 必须是非空字符串。")
-
-        proposal_type = payload.get("proposal_type")
-        allowed_types = _SUBAGENT_ALLOWED_PROPOSAL_TYPES.get(agent_id)
-        if not allowed_types:
-            raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
-        if proposal_type not in {"analysis_result", "document_edit_proposal", "review_report"}:
-            raise ApiError(
-                502,
-                "subagent_invalid_submit_result",
-                "submit_result.proposal_type 必须是 analysis_result、document_edit_proposal 或 review_report。",
-            )
-        if proposal_type not in allowed_types:
-            allowed = "、".join(sorted(allowed_types))
-            raise ApiError(
-                502,
-                "subagent_invalid_submit_result",
-                f"{agent_id} 只能提交 proposal_type：{allowed}。",
-            )
-        if not isinstance(payload.get("proposal"), dict):
-            raise ApiError(502, "subagent_invalid_submit_result", "submit_result.proposal 必须是对象。")
-        for field in ("questions", "warnings"):
-            value = payload.get(field)
-            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-                raise ApiError(502, "subagent_invalid_submit_result", f"submit_result.{field} 必须是字符串数组。")
-
-    @staticmethod
-    def _subagent_tool_summary(agent_id: str, tool: str, result: dict[str, Any]) -> str:
-        if tool == "submit_result":
-            if result.get("status") == "success":
-                return f"{agent_id} 提交结果"
-            return f"{agent_id} 提交结果失败"
-        if result.get("status") == "failed":
-            return f"{agent_id} 执行 {tool} 失败"
-        return f"{agent_id} 完成 {tool}"
 
     def _recent_session_events(self, project_id: str, session_id: str | None, limit: int = 8) -> list[dict[str, Any]]:
         if not session_id or not self.store.session_exists(project_id, session_id):

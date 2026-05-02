@@ -12,6 +12,8 @@ function App() {
     events,
     composer,
     isBusy,
+    isCancelling,
+    canCancelRound,
     contextUsage,
     sessionTabs,
     activeSectionId,
@@ -22,6 +24,8 @@ function App() {
     setActiveSectionId,
     selectSection,
     submitMessage,
+    cancelCurrentRound,
+    exportMarkdown,
     handleSessionSelect,
     handleNewSession,
   } = useWorkspace();
@@ -58,8 +62,12 @@ function App() {
           contextUsage={contextUsage}
           onComposerChange={setComposer}
           onSubmit={submitMessage}
+          onCancel={cancelCurrentRound}
+          onExport={exportMarkdown}
           onSessionSelect={handleSessionSelect}
           onNewSession={handleNewSession}
+          canCancel={canCancelRound}
+          isCancelling={isCancelling}
         />
       </main>
     </div>

@@ -4,39 +4,22 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Any
 
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.openai_compat import OpenAICompatibleClient
 from ..agents.workers import MainAgentAction, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
+from ..domain.document_tools import tool_failed
 from ..runtime.context import ContextManager
 from ..runtime.executor import ExecutorEngine
 from ..schemas import ChatMessageRequest, ChatMessageResponse
 from ..storage.workspace_store import WorkspaceStore
+from .chat_events import ChatEventEmitter
+from .chat_protocol import DEFAULT_CHANGED_PAYLOAD, RoundState, assistant_message_text, build_commit_message
 from .event_bus import SessionEventBus
 
 logger = logging.getLogger("patent_creator.chat")
-
-
-@dataclass(slots=True)
-class RoundState:
-    session_id: str
-    message_id: str
-    round_id: str
-
-
-DEFAULT_CHANGED_PAYLOAD: dict[str, Any] = {
-    "changed": False,
-    "changed_section_ids": [],
-    "changed_block_ids": [],
-    "primary_section_id": None,
-    "primary_block_id": None,
-    "change_scope": None,
-    "active_section_id": None,
-    "active_block_id": None,
-}
 
 
 class ChatService:
@@ -55,7 +38,9 @@ class ChatService:
         self.bus = bus
         self.settings = settings
         self.llm_client = llm_client
+        self.events = ChatEventEmitter(store, bus, executor)
         self._project_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._running_tasks: dict[tuple[str, str, str], asyncio.Task[None]] = {}
 
     async def prepare_round(
         self,
@@ -115,7 +100,35 @@ class ChatService:
         return response
 
     def launch_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
-        asyncio.create_task(self._run_round(project_id, payload, state))
+        key = (project_id, state.session_id, state.round_id)
+        task = asyncio.create_task(self._run_round(project_id, payload, state))
+        self._running_tasks[key] = task
+
+        def discard_finished_task(done_task: asyncio.Task[None]) -> None:
+            if self._running_tasks.get(key) is done_task:
+                self._running_tasks.pop(key, None)
+
+        task.add_done_callback(discard_finished_task)
+
+    async def cancel_round(self, project_id: str, session_id: str, round_id: str) -> dict[str, Any]:
+        task: asyncio.Task[None] | None
+        async with self._project_locks[project_id]:
+            project = self.store.get_project(project_id)
+            if (
+                not project.is_busy
+                or project.running_session_id != session_id
+                or project.running_round_id != round_id
+            ):
+                raise ApiError(409, "round_not_running", "当前没有匹配的运行中任务。")
+
+            task = self._running_tasks.get((project_id, session_id, round_id))
+            if task is not None:
+                task.cancel()
+
+        if task is not None:
+            await task
+
+        return await self._mark_round_cancelled(project_id, session_id, round_id)
 
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
@@ -183,13 +196,16 @@ class ChatService:
                         len(final_reply),
                     )
                     messages.append(action.assistant_message)
-                    await self._emit_agent_output(project_id, state, final_reply)
+                    await self.events.agent_output(project_id, state, final_reply)
                     break
 
                 # tool_calls 分支：DeepSeek 要求 assistant(tool_calls) 后紧跟每个 tool_call_id 的 tool 结果。
                 tool_calls = action.tool_calls or []
                 logger.info("round step=%d action=tool_calls count=%d", step_index + 1, len(tool_calls))
                 messages.append(action.assistant_message)
+                tool_preamble = assistant_message_text(action.assistant_message)
+                if tool_preamble:
+                    await self.events.agent_output(project_id, state, tool_preamble)
 
                 for tool_call in tool_calls:
                     result = await self._execute_tool_call(project_id, state, tool_call)
@@ -228,7 +244,7 @@ class ChatService:
                     state.session_id,
                     max_steps,
                 )
-                await self._emit_agent_output(project_id, state, final_reply)
+                await self.events.agent_output(project_id, state, final_reply)
 
             await self._sleep(self.settings.round_finish_delay)
             committed, commit_error = await self._commit(project_id, changed_payload)
@@ -252,6 +268,14 @@ class ChatService:
                     "message_id": state.message_id,
                 },
             )
+        except asyncio.CancelledError:
+            logger.info(
+                "round cancelled project=%s session=%s round=%s",
+                project_id,
+                state.session_id,
+                state.round_id,
+            )
+            await self._mark_round_cancelled(project_id, state.session_id, state.round_id)
         except Exception as exc:
             logger.exception(
                 "round failed project=%s session=%s round=%s",
@@ -278,11 +302,12 @@ class ChatService:
         state: RoundState,
         tool_name: str,
         arguments: dict[str, Any],
+        call_id: str,
     ) -> dict[str, Any]:
         if tool_name == "document_read":
             result = self.executor.document_read(project_id, arguments)
             section_id = arguments.get("section_id") or arguments.get("block_id") or ""
-            await self._emit_tool(
+            await self.events.tool(
                 project_id,
                 state,
                 tool="document_read",
@@ -290,12 +315,13 @@ class ChatService:
                 summary_started=f"开始读取 {section_id}" if section_id else "开始读取章节",
                 summary_finished=f"{section_id} 已读取" if section_id else "章节已读取",
                 result=result,
+                call_id=call_id,
             )
             return result
 
         if tool_name == "document_edit":
             result = self.executor.document_edit(project_id, arguments)
-            await self._emit_tool(
+            await self.events.tool(
                 project_id,
                 state,
                 tool="document_edit",
@@ -303,15 +329,16 @@ class ChatService:
                 summary_started="开始写入 disclosure.json",
                 summary_finished="文档更新已完成",
                 result=result,
+                call_id=call_id,
             )
             return result
 
         if tool_name == "execute_subagent":
-            return await self._emit_execute_subagent(project_id, state, arguments=arguments)
+            return await self.events.execute_subagent(project_id, state, arguments=arguments, call_id=call_id)
 
         if tool_name == "exec_command":
             result = self.executor.exec_command(project_id, arguments)
-            await self._emit_tool(
+            await self.events.tool(
                 project_id,
                 state,
                 tool="exec_command",
@@ -319,6 +346,7 @@ class ChatService:
                 summary_started="开始执行诊断命令",
                 summary_finished="诊断命令已完成",
                 result=result,
+                call_id=call_id,
             )
             return result
 
@@ -338,7 +366,7 @@ class ChatService:
         )
         if tool_call.arguments_error:
             result = self._invalid_tool_arguments_json_result(tool_call.arguments_error)
-            await self._emit_failed_tool_result(
+            await self.events.failed_tool_result(
                 project_id,
                 state,
                 tool=tool_call.tool,
@@ -352,7 +380,7 @@ class ChatService:
                 result.get("status"),
             )
             return result
-        result = await self._dispatch_tool(project_id, state, tool_call.tool, tool_call.arguments)
+        result = await self._dispatch_tool(project_id, state, tool_call.tool, tool_call.arguments, tool_call.tool_call_id)
         logger.info(
             "round tool_call id=%s tool=%s status=%s",
             tool_call.tool_call_id,
@@ -361,218 +389,9 @@ class ChatService:
         )
         return result
 
-    async def _emit_agent_output(self, project_id: str, state: RoundState, text: str) -> None:
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="agent_output",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            payload={"text": text},
-        )
-
     @staticmethod
     def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
-        return {
-            "status": "failed",
-            "code": "invalid_tool_arguments_json",
-            "message": message,
-        }
-
-    async def _emit_failed_tool_result(
-        self,
-        project_id: str,
-        state: RoundState,
-        *,
-        tool: str,
-        call_id: str,
-        result: dict[str, Any],
-    ) -> None:
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_call",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=call_id,
-            payload={"tool": tool, "arguments": {}},
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "tool_call_started",
-            {
-                "call_id": call_id,
-                "parent_call_id": None,
-                "scope": "main",
-                "tool": tool,
-                "summary": f"开始执行 {tool}",
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
-        )
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_result",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=call_id,
-            payload={"tool": tool, **result},
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "tool_call_finished",
-            {
-                "call_id": call_id,
-                "parent_call_id": None,
-                "scope": "main",
-                "tool": tool,
-                "summary": "执行失败",
-                "result": result,
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
-        )
-
-    async def _emit_tool(
-        self,
-        project_id: str,
-        state: RoundState,
-        *,
-        tool: str,
-        arguments: dict[str, Any],
-        summary_started: str,
-        summary_finished: str,
-        result: dict[str, Any],
-    ) -> str:
-        call_id = generate_id("call")
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_call",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=call_id,
-            payload={"tool": tool, "arguments": arguments},
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "tool_call_started",
-            {
-                "call_id": call_id,
-                "parent_call_id": None,
-                "scope": "main",
-                "tool": tool,
-                "summary": summary_started,
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
-        )
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_result",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=call_id,
-            payload={"tool": tool, **result},
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "tool_call_finished",
-            {
-                "call_id": call_id,
-                "parent_call_id": None,
-                "scope": "main",
-                "tool": tool,
-                "summary": summary_finished,
-                "result": result,
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
-        )
-        return call_id
-
-    async def _emit_execute_subagent(
-        self,
-        project_id: str,
-        state: RoundState,
-        *,
-        arguments: dict[str, Any],
-    ) -> dict[str, Any]:
-        call_id = generate_id("call")
-        agent_id = str(arguments.get("agent_id") or "")
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_call",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=call_id,
-            payload={"tool": "execute_subagent", "arguments": arguments},
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "tool_call_started",
-            {
-                "call_id": call_id,
-                "parent_call_id": None,
-                "scope": "main",
-                "tool": "execute_subagent",
-                "summary": f"已启动 {agent_id}" if agent_id else "已启动子 agent",
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
-        )
-
-        result = await self.executor.execute_subagent(
-            project_id,
-            arguments,
-            session_id=state.session_id,
-            round_id=state.round_id,
-            message_id=state.message_id,
-            parent_call_id=call_id,
-            on_tool_event=lambda event_name, event_payload: self.bus.publish(
-                (project_id, state.session_id),
-                event_name,
-                {
-                    **event_payload,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
-            ),
-        )
-        self.store.append_session_event(
-            project_id,
-            state.session_id,
-            event_type="tool_result",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
-            call_id=call_id,
-            payload={"tool": "execute_subagent", **result},
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "tool_call_finished",
-            {
-                "call_id": call_id,
-                "parent_call_id": None,
-                "scope": "main",
-                "tool": "execute_subagent",
-                "summary": f"{agent_id} 已完成" if agent_id else "子 agent 已完成",
-                "result": result,
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
-        )
-        return result
+        return tool_failed("invalid_tool_arguments_json", message)
 
     async def _commit(self, project_id: str, changed_payload: dict[str, Any]) -> tuple[bool, dict[str, str] | None]:
         return await asyncio.to_thread(
@@ -590,20 +409,56 @@ class ChatService:
             project.updated_at = now_iso()
             self.store.save_project(project)
 
+    async def _mark_round_cancelled(self, project_id: str, session_id: str, round_id: str) -> dict[str, Any]:
+        async with self._project_locks[project_id]:
+            project = self.store.get_project(project_id)
+            if project.running_session_id == session_id and project.running_round_id == round_id:
+                project.running_session_id = None
+                project.running_round_id = None
+                project.is_busy = False
+                project.updated_at = now_iso()
+                self.store.save_project(project)
+
+            message_id = generate_id("msg")
+            already_marked = False
+            if self.store.session_exists(project_id, session_id):
+                events = self.store.read_session_events(project_id, session_id)
+                round_events = [event for event in events if event.round_id == round_id]
+                user_event = next((event for event in round_events if event.type == "user_input"), None)
+                if user_event:
+                    message_id = user_event.message_id
+                already_marked = any(
+                    event.type == "agent_output"
+                    and event.round_id == round_id
+                    and event.payload.get("code") == "round_cancelled"
+                    for event in round_events
+                )
+                if not already_marked:
+                    self.store.append_session_event(
+                        project_id,
+                        session_id,
+                        event_type="agent_output",
+                        scope="main",
+                        round_id=round_id,
+                        message_id=message_id,
+                        payload={
+                            "text": "本轮任务已取消。",
+                            "status": "cancelled",
+                            "code": "round_cancelled",
+                        },
+                    )
+
+        payload = {
+            "cancelled": True,
+            "project_id": project_id,
+            "session_id": session_id,
+            "round_id": round_id,
+            "message_id": message_id,
+            "reply": "本轮任务已取消。",
+        }
+        if not already_marked:
+            await self.bus.publish((project_id, session_id), "round_cancelled", payload)
+        return payload
+
     async def _sleep(self, duration: float | None = None) -> None:
         await asyncio.sleep(self.settings.round_step_delay if duration is None else duration)
-
-
-def format_sse_event(event: str, payload: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def build_commit_message(changed_payload: dict[str, Any]) -> str:
-    sections = changed_payload.get("changed_section_ids", [])[:10]
-    blocks = changed_payload.get("changed_block_ids", [])[:10]
-    lines = ["update disclosure", "", f"Time: {now_iso()}", "", "Changed sections:"]
-    lines.extend(f"- {section_id}" for section_id in sections)
-    lines.append("")
-    lines.append("Changed blocks:")
-    lines.extend(f"- {block_id}" for block_id in blocks)
-    return "\n".join(lines)

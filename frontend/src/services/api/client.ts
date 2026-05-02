@@ -16,6 +16,19 @@ export type ApiClient = {
   }>;
   listSessions: (project_id: string) => Promise<{ sessions: SessionSummary[] }>;
   getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: SessionEventRecord[] }>;
+  exportMarkdown: (project_id: string) => Promise<{ path: string }>;
+  cancelRound: (
+    project_id: string,
+    session_id: string,
+    round_id: string,
+  ) => Promise<{
+    cancelled: boolean;
+    project_id: string;
+    session_id: string;
+    round_id: string;
+    message_id: string;
+    reply: string;
+  }>;
 };
 
 export const apiClient: ApiClient = {
@@ -49,5 +62,22 @@ export const apiClient: ApiClient = {
   },
   async getSessionEvents(project_id, session_id) {
     return requestJson<{ events: SessionEventRecord[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);
+  },
+  async exportMarkdown(project_id) {
+    return requestJson<{ path: string }>(`/api/projects/${project_id}/export/markdown`, {
+      method: 'POST',
+    });
+  },
+  async cancelRound(project_id, session_id, round_id) {
+    return requestJson<{
+      cancelled: boolean;
+      project_id: string;
+      session_id: string;
+      round_id: string;
+      message_id: string;
+      reply: string;
+    }>(`/api/projects/${project_id}/sessions/${session_id}/rounds/${round_id}/cancel`, {
+      method: 'POST',
+    });
   },
 };
