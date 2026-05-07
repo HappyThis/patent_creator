@@ -59,14 +59,19 @@ class OpenAICompatibleClient:
             )
         started = time.monotonic()
         try:
-            completion = await client.chat.completions.create(
-                model=self.settings.openai_model,
-                response_format={"type": "json_object"},
-                messages=[
+            request_payload: dict[str, Any] = {
+                "model": self.settings.openai_model,
+                "response_format": {"type": "json_object"},
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                extra_body=self._thinking_extra_body(),
+            }
+            extra_body = self._thinking_extra_body()
+            if extra_body:
+                request_payload["extra_body"] = extra_body
+            completion = await client.chat.completions.create(
+                **request_payload,
             )
         except APIStatusError as exc:
             logger.warning("generate_json http_error status=%s body=%s", exc.status_code, _describe_api_error(exc))
@@ -120,8 +125,10 @@ class OpenAICompatibleClient:
                 "tools": tools,
                 "tool_choice": "auto",
                 "stream": True,
-                "extra_body": self._thinking_extra_body(),
             }
+            extra_body = self._thinking_extra_body()
+            if extra_body:
+                request_payload["extra_body"] = extra_body
             if response_format_json:
                 request_payload["response_format"] = {"type": "json_object"}
             stream = await client.chat.completions.create(
@@ -250,8 +257,9 @@ class OpenAICompatibleClient:
             message["tool_calls"] = tool_calls
         return message
 
-    @staticmethod
-    def _thinking_extra_body() -> dict[str, Any]:
+    def _thinking_extra_body(self) -> dict[str, Any] | None:
+        if not self.settings.openai_compat_enable_thinking:
+            return None
         return {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
 
     @classmethod

@@ -240,7 +240,15 @@ class StubLLMClient:
                 },
             }
 
-        tool_results = [msg for msg in messages if msg.get("role") == "tool"]
+        last_user_index = max(
+            (index for index, message in enumerate(messages) if message.get("role") == "user"),
+            default=-1,
+        )
+        tool_results = [
+            msg
+            for msg in messages[last_user_index + 1 :]
+            if msg.get("role") == "tool"
+        ]
 
         if not tool_results:
             user_messages = [

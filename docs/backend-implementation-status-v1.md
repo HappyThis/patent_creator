@@ -37,10 +37,10 @@
 - 文档写入：`document_edit` 成为 `disclosure.json` 的唯一业务写入口，支持原子校验后写入
 - 自动提交：回合结束后按文档变更执行工作区 git commit
 - chat 输入模型：以 `message` 为唯一用户语义输入，后端在回合内自行提取章节线索与任务目标
-- OpenAI 兼容模型接入：支持通过 `OPENAI_COMPAT_BASE_URL` / `OPENAI_COMPAT_API_KEY` / `OPENAI_MODEL` 配置真实模型调用
+- OpenAI 兼容模型接入：支持通过 `OPENAI_COMPAT_BASE_URL` / `OPENAI_COMPAT_API_KEY` / `OPENAI_MODEL` 配置真实模型调用，并可通过 `OPENAI_COMPAT_ENABLE_THINKING` 控制是否发送供应商专属 thinking 参数
 - DeepSeek 默认配置：默认以 `https://api.deepseek.com` 和 `deepseek-v4-pro` 作为测试模型口径
 - LLM 超时与重试：支持 `PATENT_CREATOR_LLM_TIMEOUT` 与 `PATENT_CREATOR_LLM_MAX_RETRIES`
-- 真实 LLM 主 agent loop：已接入 OpenAI-compatible tool calling，支持多工具调用、流式文本 delta 和 DeepSeek thinking/tool-call 协议
+- 真实 LLM 主 agent loop：已接入 OpenAI-compatible tool calling，支持多工具调用、流式文本 delta，并可按供应商兼容性启用 thinking 参数
 - 子 agent loop：4 个子 agent 均通过统一 loop 运行，可调用 `document_read` 与 `exec_command`
 - 子 agent JSON 输出：子 agent 最终响应启用 JSON mode；若仍返回非法 JSON，会转为 `execute_subagent` 的 failed 工具结果交回主 agent 决策
 - 子 agent SSE：子 agent 内部工具调用会以 `scope=subagent:<agent_id>` 写入 session log 并实时推送

@@ -12,6 +12,7 @@ class Settings:
     git_user_email: str
     openai_compat_base_url: str = "https://api.deepseek.com"
     openai_compat_api_key: str | None = None
+    openai_compat_enable_thinking: bool = True
     openai_model: str = "deepseek-v4-pro"
     llm_timeout: float = 45.0
     llm_max_retries: int = 2
@@ -42,6 +43,7 @@ class Settings:
             git_user_email=os.getenv("PATENT_CREATOR_GIT_USER_EMAIL", "patent-creator@local"),
             openai_compat_base_url=os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.deepseek.com"),
             openai_compat_api_key=os.getenv("OPENAI_COMPAT_API_KEY"),
+            openai_compat_enable_thinking=_parse_bool_env(os.getenv("OPENAI_COMPAT_ENABLE_THINKING"), True),
             openai_model=os.getenv("OPENAI_MODEL", "deepseek-v4-pro"),
             llm_timeout=float(os.getenv("PATENT_CREATOR_LLM_TIMEOUT", "45")),
             llm_max_retries=int(os.getenv("PATENT_CREATOR_LLM_MAX_RETRIES", "2")),

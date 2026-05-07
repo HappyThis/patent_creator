@@ -60,13 +60,27 @@ session 事件日志用于记录：
 - tool 返回结果
 - 文档变更结果
 
-### 2. 子 agent 的过程不进入主 agent 上下文，但要进入日志
+### 2. 主 agent 工具调用结果既进入日志，也进入主 agent 上下文
+
+`scope=main` 的 `tool_call` 与 `tool_result` 不只是审计记录。
+
+它们也是后续主 agent 上下文恢复的权威来源：
+
+- `tool_call` 恢复为 OpenAI-compatible 的 `assistant(tool_calls)`。
+- `tool_result` 恢复为紧随其后的 `tool` message。
+- `execute_subagent` 的最终返回结果按普通主流程工具结果恢复。
+
+这些结果持续保留到上下文压缩或 cursor 裁剪发生为止。
+
+### 3. 子 agent 的过程不进入主 agent 上下文，但要进入日志
 
 主 agent 继续推理时，通常只需要子 agent 的最终结构化结果。
 
 session 日志必须保留子 agent 的执行过程，便于问题排查。
 
-### 3. 日志定位使用 id
+子 agent 内部 `scope=subagent:*` 的 `tool_call` 与 `tool_result` 不投影到主 agent 历史上下文。
+
+### 4. 日志定位使用 id
 
 日志中涉及文档内容时，统一使用：
 
@@ -216,6 +230,7 @@ v1 建议取值：
 说明：
 
 - `agent_output` 用于记录主 agent 最终回复，供历史恢复与 session 回放使用。
+- 如果主 agent 在工具调用前输出了可见前置说明，该说明也用 `agent_output` 记录；上下文恢复时应将它作为紧邻工具调用的 assistant preamble。
 - 正常完成时，本轮最终回复也会在 SSE 的 `round_finished.reply` 中收束；取消或失败时分别通过 `round_cancelled.reply`、`round_failed.reply` 收束。
 
 ### 3. tool_call
@@ -359,6 +374,11 @@ v1 建议取值：
 
 子 agent 内部事件的 `parent_call_id` 指向主流程中的 `execute_subagent` 调用。
 
+主 agent 恢复上下文时：
+
+- 恢复第 1 步和第 4 步，即 `scope=main` 的 `execute_subagent` 调用和最终结果。
+- 不恢复第 3 步，即 `scope=subagent:<agent_id>` 的内部工具过程。
+
 ## 十、完整示例
 
 ```jsonl
@@ -381,5 +401,6 @@ v1 的 session 事件日志 schema 采用：
 
 - 主 agent 过程通过 `scope=main` 记录。
 - 子 agent 过程通过 `scope=subagent:<agent_id>` 记录。
-- 子 agent 过程需要完整记录，但不进入主 agent 上下文。
+- 主 agent 的工具调用和工具结果需要进入主 agent 上下文。
+- 子 agent 内部过程需要完整记录，但不进入主 agent 上下文。
 - 文档变更记录使用 `changed_section_ids` 和 `changed_block_ids`。

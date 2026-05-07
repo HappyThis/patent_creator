@@ -175,6 +175,7 @@ class ContextManager:
             },
             "context_policy": {
                 "current_user_message_position": "最后一条 role=user 消息",
+                "main_tool_results_restored_across_rounds": True,
                 "subagent_internal_events_visible_to_main_agent": False,
                 "full_disclosure_injected_by_default": False,
             },
@@ -194,7 +195,7 @@ class ContextManager:
         *,
         current_user_message: str | None = None,
         current_message_id: str | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         if not session_id or not self.store.session_exists(project_id, session_id):
             return [{"role": "user", "content": current_user_message or ""}] if current_user_message else []
 
@@ -225,12 +226,17 @@ class ContextManager:
             event
             for event in events
             if event.scope == "main"
-            and event.type in {"user_input", "agent_output"}
+            and event.type in {"user_input", "agent_output", "tool_call", "tool_result"}
             and anchor["cursor_seq"] <= event.seq < current_event.seq
         ]
         if len(compressible) < 2:
             return False
 
+        all_tool_result_ids = [
+            str(event.call_id)
+            for event in compressible
+            if event.type == "tool_result" and event.call_id
+        ]
         payload = {
             "task": "compress_main_agent_context",
             "target_estimated_tokens": max(1, int(self.settings.context_max_tokens * self.settings.context_target_ratio)),
@@ -238,11 +244,15 @@ class ContextManager:
                 "只总结用户真实意图、主 agent 已完成事项、仍需延续的约束、重要结论和待办。",
                 "不要把摘要写成用户原话。",
                 "不要引入 session log 中不存在的信息。",
-                "工具调用内部细节只有在影响后续决策时才保留为简短结论。",
+                "工具调用结果只以 call_id 引用给你，原始结果不在压缩输入中。",
+                "如果后续主 agent 必须看到某个工具原始返回结果，把对应 call_id 写入 preserved_tool_result_ids。",
+                "如果摘要中已经吸收结论，不要把该工具 call_id 写入 preserved_tool_result_ids。",
             ],
             "events": [compressible_event_payload(event) for event in compressible],
             "output_schema": {
                 "summary": "string",
+                "preserved_tool_result_ids": ["call_id"],
+                "referenced_tool_result_ids": ["call_id"],
                 "warnings": ["string"],
             },
         }
@@ -255,6 +265,19 @@ class ContextManager:
         if not summary:
             return False
 
+        preserved_tool_result_ids = _string_list(result.get("preserved_tool_result_ids"))
+        preserved_tool_result_ids = [call_id for call_id in preserved_tool_result_ids if call_id in all_tool_result_ids]
+        referenced_tool_result_ids = _string_list(result.get("referenced_tool_result_ids"))
+        referenced_tool_result_ids = [
+            call_id
+            for call_id in referenced_tool_result_ids
+            if call_id in all_tool_result_ids and call_id not in preserved_tool_result_ids
+        ]
+        absorbed_tool_result_ids = [
+            call_id
+            for call_id in all_tool_result_ids
+            if call_id not in preserved_tool_result_ids and call_id not in referenced_tool_result_ids
+        ]
         summary_messages = [
             {
                 "role": "user",
@@ -279,9 +302,9 @@ class ContextManager:
                 "summary": summary,
                 "estimated_tokens_before": usage_before.used_tokens,
                 "estimated_tokens_after": estimate_messages_tokens(summary_messages),
-                "preserved_tool_result_ids": [],
-                "referenced_tool_result_ids": [],
-                "absorbed_tool_result_ids": [],
+                "preserved_tool_result_ids": preserved_tool_result_ids,
+                "referenced_tool_result_ids": referenced_tool_result_ids,
+                "absorbed_tool_result_ids": absorbed_tool_result_ids,
                 "compression_model": self.settings.openai_model,
                 "cursor_seq_after": compressible[-1].seq + 1,
                 "warnings": warnings if isinstance(warnings, list) else [],
@@ -341,7 +364,7 @@ class ContextManager:
             },
         )
 
-    def _fit_messages_to_budget(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _fit_messages_to_budget(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         usage = usage_for_messages(messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
             return messages
@@ -350,8 +373,7 @@ class ContextManager:
         body = messages[1:]
         current = body[-1:] if body and body[-1].get("role") == "user" else []
         history = body[: -len(current)] if current else body
-        keep_messages = max(0, self.settings.context_recent_full_rounds * 2)
-        trimmed_history = history[-keep_messages:] if keep_messages else []
+        trimmed_history = _recent_history_from_user_boundary(history, max(1, self.settings.context_recent_full_rounds))
         fitted = [*context_message, *trimmed_history, *current]
         fitted_usage = usage_for_messages(fitted, self.settings)
         if fitted_usage.used_tokens <= usage.threshold_tokens:
@@ -373,3 +395,17 @@ class ContextManager:
             children = section.get("children") or []
             if isinstance(children, list):
                 self._collect_section_state(children, filled, empty)
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item]
+
+
+def _recent_history_from_user_boundary(history: list[dict[str, Any]], keep_user_messages: int) -> list[dict[str, Any]]:
+    user_indexes = [index for index, message in enumerate(history) if message.get("role") == "user"]
+    if not user_indexes:
+        return []
+    start = user_indexes[-keep_user_messages] if len(user_indexes) >= keep_user_messages else user_indexes[0]
+    return history[start:]

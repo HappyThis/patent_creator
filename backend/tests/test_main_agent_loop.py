@@ -679,6 +679,153 @@ async def test_main_agent_restores_session_history_between_rounds(tmp_path: Path
 
 
 @pytest.mark.anyio
+async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Path) -> None:
+    def first_round_read(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "document_read",
+                    {"action": "get_section", "section_id": "technical_field"},
+                    "call_restore_read",
+                )
+            ],
+        }
+
+    def first_round_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        assert last_tool["tool_call_id"] == "call_restore_read"
+        assert json.loads(last_tool["content"])["status"] == "success"
+        return {"type": "respond", "text": "第一轮已读取。"}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assistant_tool_messages = [
+            message
+            for message in messages
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        restored_tool_calls = [
+            call
+            for message in assistant_tool_messages
+            for call in message["tool_calls"]
+            if call.get("id") == "call_restore_read"
+        ]
+        assert restored_tool_calls
+        assert restored_tool_calls[0]["function"]["name"] == "document_read"
+
+        restored_tool = next(
+            message
+            for message in messages
+            if message.get("role") == "tool" and message.get("tool_call_id") == "call_restore_read"
+        )
+        restored_result = json.loads(restored_tool["content"])
+        assert restored_result["status"] == "success"
+        assert "output" in restored_result
+        assert messages[-1] == {"role": "user", "content": "继续判断"}
+        return {"type": "respond", "text": "第二轮看到了历史工具结果。"}
+
+    llm = ScriptedLLMClient([first_round_read, first_round_respond, second_round])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message="先读技术领域"))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续判断"))
+    await wait_until_idle(services, project_id)
+
+
+@pytest.mark.anyio
+async def test_main_agent_restores_execute_subagent_result_without_subagent_internal_tools(tmp_path: Path) -> None:
+    def main_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {
+                        "agent_id": "section_writer",
+                        "call_type": "task_only_specialist",
+                        "goal": "读取并总结背景技术。",
+                        "target_section_id": "background_technology",
+                        "user_message": "读取背景技术",
+                    },
+                    "call_restore_subagent",
+                )
+            ],
+        }
+
+    def subagent_read(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "document_read",
+                    {"action": "get_section", "section_id": "background_technology"},
+                    "sub_internal_read",
+                )
+            ],
+        }
+
+    def subagent_submit(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert any(
+            message.get("role") == "tool" and message.get("tool_call_id") == "sub_internal_read"
+            for message in messages
+        )
+        arguments = {
+            "summary": "已读取背景技术。",
+            "reply": "已读取背景技术。",
+            "rationale": "测试子 agent 内部工具过程隔离。",
+            "proposal_type": "analysis_result",
+            "proposal": {"facts": [{"kind": "section_read", "text": "背景技术已读取。"}]},
+            "questions": [],
+            "warnings": [],
+        }
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_restore")],
+        }
+
+    def main_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        assert last_tool["tool_call_id"] == "call_restore_subagent"
+        assert json.loads(last_tool["content"])["status"] == "success"
+        return {"type": "respond", "text": "主流程已收到子 agent 最终结果。"}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        restored_main_tool = [
+            message
+            for message in messages
+            if message.get("role") == "tool" and message.get("tool_call_id") == "call_restore_subagent"
+        ]
+        assert restored_main_tool
+        assert json.loads(restored_main_tool[0]["content"])["output"]["agent_id"] == "section_writer"
+        assert not any(
+            message.get("role") == "tool" and message.get("tool_call_id") == "sub_internal_read"
+            for message in messages
+        )
+        assert not any(
+            call.get("id") == "sub_internal_read"
+            for message in messages
+            for call in (message.get("tool_calls") or [])
+        )
+        return {"type": "respond", "text": "第二轮只看到了子 agent 最终结果。"}
+
+    llm = ScriptedLLMClient(
+        [main_call_subagent, subagent_read, subagent_submit, main_respond, second_round],
+        script_subagents=True,
+    )
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message="让子 agent 读背景技术"))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
+    await wait_until_idle(services, project_id)
+
+
+@pytest.mark.anyio
 async def test_context_manager_compresses_old_session_history(tmp_path: Path) -> None:
     long_text = "历史技术细节" * 80
 

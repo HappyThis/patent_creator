@@ -105,6 +105,8 @@ user: 历史用户输入 1
 assistant: 历史主 agent 最终回复 1
 
 user: 历史用户输入 2
+assistant(tool_calls): 主 agent 历史工具调用
+tool: 历史工具返回结果
 assistant: 历史主 agent 最终回复 2
 
 user: 当前用户输入
@@ -113,6 +115,7 @@ user: 当前用户输入
 说明：
 
 - 历史对话应尽量按 OpenAI-compatible 多轮对话格式恢复。
+- `scope=main` 的历史工具调用必须恢复为 `assistant(tool_calls)`，对应工具结果必须恢复为紧随其后的 `tool` message。
 - 当前用户输入必须作为最后一条真实 `user` message。
 - 项目上下文、压缩摘要等系统生成信息不能伪装成用户原话。
 - 如果必须以 `role=user` 承载系统上下文，内容必须明确标注“不是用户的新指令，也不是用户原文”。
@@ -127,11 +130,17 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
 
 - `scope=main` 的 `user_input`
 - `scope=main` 的最终 `agent_output`
-- `scope=main` 的 tool call 摘要
-- `scope=main` 的 tool result 摘要或必要原文
-- `execute_subagent` 的调用及最终结果
+- `scope=main` 的 tool call 原始协议结构
+- `scope=main` 的 tool result 原始返回结果
+- `execute_subagent` 的调用及最终工具返回结果
 - `context_summary`
 - 与当前文档状态相关的摘要
+
+说明：
+
+- 主 agent 的工具结果不仅进入 session log，也进入后续主 agent 上下文。
+- 这些结果按工具返回原文进入，不在跨轮恢复时改写成摘要。
+- 它们会持续保留，直到上下文压缩或兜底 cursor 移动改变可见窗口。
 
 ### 2. 主 agent 不可见
 
@@ -272,44 +281,32 @@ user(current)
 
 其中 `context_summary` 虽然在 API 中可能以 `role=user` 承载，但必须标注为系统压缩摘要，不是用户原话。
 
-跨轮恢复主 agent messages 时，默认不恢复旧的原始 `assistant(tool_calls)` / `tool` 协议消息；旧工具结果应通过摘要或引用进入上下文。
+跨轮恢复主 agent messages 时，必须恢复主流程旧的原始 `assistant(tool_calls)` / `tool` 协议消息。
+
+例外只有两类：
+
+1. 事件在 `context_cursor_seq` 之前，已经被压缩或裁剪。
+2. 事件属于 `scope=subagent:*`，是子 agent 内部过程。
 
 ## 八、工具结果压缩策略
 
 正常运行时，工具结果可以进入当前 agent 的上下文。
 
-但执行上下文压缩时，长工具结果不应直接交给压缩 agent 原文处理。
+但执行上下文压缩时，工具结果不应直接交给压缩 agent 原文处理。
 
 压缩前应先编码工具结果：
 
 ```text
-[tool_result_ref id=tr_001 tool=exec_command status=success tokens=18000]
-summary: 抓取 DeepSeek 多轮对话文档，包含 messages 拼接说明。
-[/tool_result_ref]
+[tool_result_ref id=call_000001 tool=document_read status=success]
 ```
 
 压缩 agent 输出结构化策略：
 
 ```json
 {
-  "summary_message": "压缩后的上下文摘要...",
-  "tool_result_policy": [
-    {
-      "id": "tr_001",
-      "mode": "absorbed",
-      "reason": "结论已被摘要吸收，原始 HTML 不再需要进入上下文"
-    },
-    {
-      "id": "tr_002",
-      "mode": "referenced",
-      "reason": "后续可能需要复核来源，但当前不需要原文"
-    },
-    {
-      "id": "tr_003",
-      "mode": "preserved",
-      "reason": "后续任务依赖工具返回的精确原文"
-    }
-  ],
+  "summary": "压缩后的上下文摘要...",
+  "preserved_tool_result_ids": ["call_000003"],
+  "referenced_tool_result_ids": ["call_000001"],
   "warnings": []
 }
 ```
@@ -317,8 +314,10 @@ summary: 抓取 DeepSeek 多轮对话文档，包含 messages 拼接说明。
 三种模式：
 
 - `absorbed`：结论已进入摘要，不保留原始工具结果。
-- `referenced`：保留 ref 和短摘要，可按需恢复原文。
+- `referenced`：保留 ref，可按需从 session log 复核原文。
 - `preserved`：尝试恢复原始工具结果进入上下文。
+
+压缩 agent 只能看到工具调用 id、工具名、状态等元信息，不能看到工具返回原文。它必须根据上下文任务判断哪些工具结果需要继续原文保留，并把对应 `call_id` 写入 `preserved_tool_result_ids`。
 
 恢复 `preserved` 原文时必须再次检查 token 预算。
 

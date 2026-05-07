@@ -31,7 +31,15 @@ def build_section_writer_context(
                 "append_child_section",
                 "replace_section",
             ],
-            "preferred_write_strategy": "优先 replace_section_blocks，只有需要同时生成 children 时才用 replace_section",
+            "preferred_write_strategy": (
+                "短小局部修改使用 replace_section_blocks/append_block；"
+                "当内容涉及整体架构、处理流程、模块、步骤、关键规则、实施例或拓展方案时，"
+                "优先使用 replace_section 生成 children，避免复杂内容平铺成 blocks。"
+            ),
+            "final_text_policy": (
+                "交底书正文必须是最终态文本，不描述对话过程、修改过程或方案迭代过程；"
+                "替换旧方案时直接写最终方案，不写“之前/现在/改为/本次修改”等过程性表述。"
+            ),
         },
         "outline": outline,
         "current_section": section,

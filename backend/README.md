@@ -8,10 +8,13 @@ uv run uvicorn app.api.app:app --reload --host 127.0.0.1 --port 8000
 如果要启用真实 agent 写作能力，需要配置 OpenAI 兼容接口：
 
 ```bash
-export OPENAI_COMPAT_BASE_URL=https://api.deepseek.com/v1
-export OPENAI_COMPAT_API_KEY=your_deepseek_api_key
-export OPENAI_MODEL=deepseek-v4-pro
+export OPENAI_COMPAT_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1
+export OPENAI_COMPAT_API_KEY=your_provider_api_key
+export OPENAI_COMPAT_ENABLE_THINKING=false
+export OPENAI_MODEL=mimo-v2.5-pro
 ```
+
+`OPENAI_COMPAT_ENABLE_THINKING` 用于控制是否发送供应商专属的 thinking/reasoning 参数。DeepSeek 等兼容该参数的服务可保持 `true`；不确认兼容性的模型服务建议设为 `false`。
 
 ## Structure
 

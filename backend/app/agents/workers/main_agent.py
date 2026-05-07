@@ -40,14 +40,14 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "document_read",
-            "description": "按 section_id 或 block_id 读取当前交底书的部分正文。",
+            "description": "按 section_id、block_id 或关键词读取当前交底书的部分正文。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["get_section", "get_block"],
-                        "description": "读取动作。get_section 按章节 id，get_block 按 block id。",
+                        "enum": ["get_section", "get_block", "search_blocks"],
+                        "description": "读取动作。get_section 按章节 id，get_block 按 block id，search_blocks 按关键词搜索正文。",
                     },
                     "section_id": {
                         "type": "string",
@@ -56,6 +56,10 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
                     "block_id": {
                         "type": "string",
                         "description": "block id。action=get_block 时必填。",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词。action=search_blocks 时必填。",
                     },
                     "include_children": {
                         "type": "boolean",
