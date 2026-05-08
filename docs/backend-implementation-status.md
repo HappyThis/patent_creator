@@ -1,25 +1,25 @@
-# 后端实现状态 v1
+# 后端实现概览
 
-## 已核对文档
+## 文档范围
 
-已按当前后端实现逐项核对 `docs/` 下核心设计与状态文档：
+后端设计覆盖 `docs/` 下核心文档：
 
 - `README.md`
-- `agent-principles-v1.md`
-- `agent-prompt-context-spec-v1.md`
-- `api-design-v1.md`
-- `frontend-interaction-v1.md`
-- `patent-disclosure-structure-v1.md`
-- `render-ast-schema-v1.md`
-- `round-lifecycle-v1.md`
-- `session-log-v1.md`
-- `context-management-v1.md`
-- `subagents-v1.md`
-- `tech-stack-v1.md`
-- `tools-v1.md`
-- `workspace-init-v1.md`
+- `agent-principles.md`
+- `agent-prompt-context-spec.md`
+- `api-design.md`
+- `frontend-interaction.md`
+- `patent-disclosure-structure.md`
+- `render-ast-schema.md`
+- `round-lifecycle.md`
+- `session-log.md`
+- `context-management.md`
+- `subagents.md`
+- `tech-stack.md`
+- `tools.md`
+- `workspace-init.md`
 
-## 已实现
+## 能力清单
 
 - 后端技术栈：`Python 3.11 + FastAPI + Uvicorn + uv`
 - 文件系统持久化：`project.json`、`disclosure.json`、`sessions/*.jsonl`、`exports/`、`assets/`、`runtime/`
@@ -32,7 +32,7 @@
 - SSE：支持 `assistant_delta`、`tool_call_started`、`tool_call_finished`、`document_changed`、`round_finished`、`round_failed`、`round_cancelled`
 - 运行中恢复：支持通过 `GET /sessions/{session_id}/stream` 重新订阅运行中 session 的 SSE
 - 运行中取消：支持通过 `POST /sessions/{session_id}/rounds/{round_id}/cancel` 取消当前 round
-- 工具体系：实现 `document_read`、`document_edit`、`execute_subagent`、`exec_command` 的 v1 协议骨架
+- 工具体系：实现 `document_read`、`document_edit`、`execute_subagent`、`exec_command` 协议
 - 权限边界：子 agent 可读文档，但不能调用 `document_edit` 和 `execute_subagent`
 - 文档写入：`document_edit` 成为 `disclosure.json` 的唯一业务写入口，支持原子校验后写入
 - 自动提交：回合结束后按文档变更执行工作区 git commit
@@ -47,23 +47,16 @@
 - `section_writer`：已接入真实 LLM runtime，输出 `document_edit_proposal` 后再通过 `document_edit` 落盘
 - `material_analyst` / `solution_refiner` / `consistency_reviewer`：已接入真实 LLM runtime，并输出各自 proposal envelope
 - `solution_refiner`：支持 `analysis_result`，也支持在必要时返回 `document_edit_proposal`
-- `call_type`：已区分 `task_only_specialist`、`rich_context_specialist`、`forked_context` 的上下文装配策略
+- `execute_subagent`：主 agent 提供 `agent_id`、`goal` 和必要目标参数，`ContextManager` 自动装配子 agent `messages`
 - `exec_command`：已接入主 agent 与子 agent，以项目工作区为 cwd 执行命令字符串，不做命令白名单限制
-- 前端上下文用量展示：当前 chat composer 区显示上下文窗口估算用量
+- 前端上下文用量展示：chat composer 区显示上下文窗口估算用量
 - 前端 Markdown 导出：可从 Chat 区触发导出，并回显导出文件路径
 - `disclosure.json` 写入：已使用临时文件替换方式落盘，避免半写入文件
 - 目录结构：已拆出 `app/agents` 与 `app/runtime`，将 agent 能力、上下文管理和执行器职责分开
 
-## 暂未实现为真实能力
-
-- 显式 prefix cache：当前已按稳定/半稳定/动态片段组织 prompt，但未接入供应商级显式缓存控制
-- 子 agent run-local 压缩：主 agent 跨轮上下文压缩已实现，子 agent 单次运行内部压缩尚未接入
-- 更细粒度命令审批：当前 `exec_command` 不做命令白名单限制，尚未加入用户审批流
-- 子 agent 并行调度：v1 仍采用同步子 agent 调用模型
-
 ## 结构原则
 
-后端当前按以下分层组织：
+后端按以下分层组织：
 
 - `app/api`：请求响应、路由注册、错误转换
 - `app/services`：回合编排、SSE 事件总线、服务装配

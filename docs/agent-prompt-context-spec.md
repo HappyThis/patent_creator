@@ -1,4 +1,4 @@
-# Agent Prompt 与上下文规范 v1
+# Agent Prompt 与上下文规范
 
 ## 文档定位
 
@@ -6,8 +6,8 @@
 
 它建立在以下文档之上：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
 
 本文档覆盖两类内容：
 
@@ -16,7 +16,7 @@
 
 更细的 session 恢复、上下文窗口、cursor、压缩和兜底裁剪策略见：
 
-- [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+- [上下文管理规范](/Users/yangchaoqun/myProj/patent_creator/docs/context-management.md)
 
 ## 目标
 
@@ -327,7 +327,7 @@
 - 面向用户的回复可以是自然语言
 - 面向系统的控制指令必须结构化
 
-v1 建议主 agent 只输出两类控制动作：
+主 agent 只输出两类控制动作：
 
 1. `respond`
 2. `tool_call`
@@ -367,7 +367,7 @@ v1 建议主 agent 只输出两类控制动作：
 
 ## 九、execute_subagent 最小调用协议
 
-v1 中，启动子 agent 统一使用一个工具：
+启动子 agent 统一使用一个工具：
 
 - `execute_subagent`
 
@@ -375,12 +375,12 @@ v1 中，启动子 agent 统一使用一个工具：
 
 - `agent_id`
 - `goal`
-- `call_type`
 
 可选参数：
 
 - `target_section_id`
 - `target_block_id`
+- `user_message`
 
 示例：
 
@@ -391,9 +391,9 @@ v1 中，启动子 agent 统一使用一个工具：
   "arguments": {
     "agent_id": "solution_refiner",
     "goal": "将当前讨论内容整理成一个更完整的技术方案，并指出仍需用户确认的关键决策。",
-    "call_type": "rich_context_specialist",
     "target_section_id": "technical_solution",
-    "target_block_id": null
+    "target_block_id": null,
+    "user_message": null
   }
 }
 ```
@@ -402,55 +402,40 @@ v1 中，启动子 agent 统一使用一个工具：
 
 - `agent_id`：调用哪个子 agent
 - `goal`：对子 agent 的自然语言任务描述，也是最核心的任务语义输入
-- `call_type`：本次调用采用哪种上下文装配策略
 - `target_section_id`：目标章节，可选
 - `target_block_id`：目标 block，可选
+- `user_message`：本次子任务需要显式强调的用户原始表达或任务材料，可选
 
 说明：
 
 1. `goal` 负责描述“要做什么”
-2. `call_type` 负责选择“按什么类型装配上下文”
-3. `target_section_id` 和 `target_block_id` 负责提供结构化目标
-4. 上下文管理器根据 `call_type` 和当前系统状态装配实际上下文
+2. `target_section_id` 和 `target_block_id` 负责提供结构化目标
+3. `user_message` 只用于承载本次子任务需要强调的用户表达，不承担上下文搬运职责
+4. 上下文管理器根据当前调用方可见 `messages`、子 agent 声明和任务参数装配实际上下文
 
-因此，v1 的核心原则是：
+因此，核心原则是：
 
 **主 agent 只负责做意图级决策，不负责显式搬运上下文。**
 
-### 三种 `call_type` 的装配规则
+### 子 agent messages 装配规则
 
-#### 1. `forked_context`
+上下文管理器为子 agent 装配 `messages` 时遵循以下规则：
 
-- `100%` 继承当前调用方上下文
-- 包括系统提示词
+1. 使用子 agent 自己的 system prompt 作为第一条系统消息。
+2. 继承调用方当前可见的 OpenAI-compatible `messages`。
+3. 继承对象是模型可见消息，不是 session raw events。
+4. 不继承调用方的 system prompt。
+5. 在继承消息之后追加本次子任务消息，包含 `agent_id`、`goal`、目标章节或目标 block。
+6. 子 agent 内部工具调用和工具结果只进入本次子 agent run。
+7. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
 
-当前实现中，`forked_context` 会在专业子 agent 自己的 system prompt 下，额外注入最近 session 事件摘要，尽量保留调用现场；不会让子 agent 继承主 agent 的系统提示词，以避免职责边界混淆。
-
-#### 2. `rich_context_specialist`
-
-- 继承当前调用方的非系统提示词部分
-- 使用自己的 system prompt
-
-当前实现中，`rich_context_specialist` 会注入目录、最近用户输入，并在提供 `target_section_id` 时预读目标章节。
-
-#### 3. `task_only_specialist`
-
-- 只继承 `goal`
-- 不继承其他上下文
-
-当前实现中，`task_only_specialist` 只注入任务、用户原始输入和结构化目标 id；如需正文或目录，子 agent 必须通过 `document_read` 自行读取。
-
-说明：
-
-- `forked_context` 更像复制一个当前调用方的完整现场
-- `rich_context_specialist` 更像带着当前现场，切换到一个专门子 agent 的脑子
-- `task_only_specialist` 更像只给任务，不给背景
+如果子 agent 需要更多正文信息，应在权限范围内调用 `document_read`。主 agent 不通过参数手工拼接正文全文。
 
 ## 十、子 agent 的统一输出协议
 
 既然子 agent 在调用层被视为一种特殊工具，那么它必须有统一的标准输出。
 
-v1 的输出协议固定为：
+输出协议固定为：
 
 - `status`
 - `summary`
@@ -462,7 +447,7 @@ v1 的输出协议固定为：
 
 `status` 表示本次执行的最终状态。
 
-v1 建议先固定两个值：
+`status` 固定取值：
 
 - `success`
 - `failed`
@@ -666,7 +651,7 @@ v1 建议先固定两个值：
 
 - `base_agent_prompt`
 - `main_agent_prompt`
-- `subagent_prompt_<type>`
+- `subagent_prompt_<agent_id>`
 - `project_context_fragment`
 - `runtime_context_fragment`
 
@@ -688,8 +673,8 @@ v1 建议先固定两个值：
 3. 正文内容按需读取
 4. 主 agent 面向系统的控制输出必须结构化
 5. 子 agent 统一通过 `execute_subagent` 工具触发
-6. `execute_subagent` 的最小参数为 `agent_id + goal + call_type`
-7. `execute_subagent` 可携带 `target_section_id` 和 `target_block_id`
+6. `execute_subagent` 的最小参数为 `agent_id + goal`
+7. `execute_subagent` 可携带 `target_section_id`、`target_block_id` 和 `user_message`
 8. 子 agent 的统一输出协议为 `status + summary + proposal + questions + warnings`
 9. prompt 同时按角色和稳定性两个维度拆分
 10. 稳定规则尽量前置，以利用 prefix cache

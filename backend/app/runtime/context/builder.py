@@ -54,6 +54,26 @@ class ContextManager:
     ) -> list[dict[str, Any]]:
         """从 session log 恢复主 agent messages，并把当前用户输入作为最后一条 user message。"""
 
+        messages = self._build_main_agent_messages_unfitted(
+            project_id,
+            session_id,
+            user_message=user_message,
+            active_section_id=active_section_id,
+            active_block_id=active_block_id,
+            current_message_id=current_message_id,
+        )
+        return self._fit_messages_to_budget(messages)
+
+    def _build_main_agent_messages_unfitted(
+        self,
+        project_id: str,
+        session_id: str | None,
+        *,
+        user_message: str,
+        active_section_id: str | None,
+        active_block_id: str | None,
+        current_message_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         context_message = self._build_project_context_message(
             project_id,
             active_section_id=active_section_id,
@@ -65,8 +85,7 @@ class ContextManager:
             current_user_message=user_message,
             current_message_id=current_message_id,
         )
-        messages = [context_message, *history]
-        return self._fit_messages_to_budget(messages)
+        return [context_message, *history]
 
     async def prepare_main_agent_messages(
         self,
@@ -82,7 +101,7 @@ class ContextManager:
     ) -> list[dict[str, Any]]:
         """恢复主 agent messages；必要时先压缩当前用户输入之前的历史。"""
 
-        messages = self.build_main_agent_messages(
+        messages = self._build_main_agent_messages_unfitted(
             project_id,
             session_id,
             user_message=user_message,
@@ -110,7 +129,7 @@ class ContextManager:
             compressed = False
 
         if compressed:
-            messages = self.build_main_agent_messages(
+            messages = self._build_main_agent_messages_unfitted(
                 project_id,
                 session_id,
                 user_message=user_message,
@@ -120,7 +139,7 @@ class ContextManager:
             )
             usage = usage_for_messages(messages, self.settings)
             if usage.used_tokens <= usage.threshold_tokens:
-                return messages
+                return self._fit_messages_to_budget(messages)
 
         self._prune_main_history(
             project_id,

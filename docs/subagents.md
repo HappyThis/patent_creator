@@ -1,15 +1,15 @@
-# 子 Agent 定义 v1
+# 子 Agent 定义
 
 ## 文档定位
 
-本文档定义本项目 v1 阶段的 4 个核心子 agent。
+本文档定义本项目的 4 个核心子 agent。
 
 它建立在以下文档之上：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-- [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
+- [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
 
 本文档定义：
 
@@ -22,7 +22,7 @@
 
 ## 一、总体原则
 
-v1 阶段先收敛为 4 个业务子 agent：
+系统提供 4 个业务子 agent：
 
 1. `material_analyst`
 2. `solution_refiner`
@@ -47,7 +47,7 @@ v1 阶段先收敛为 4 个业务子 agent：
 7. 子 agent 可以读取文档，但不直接修改 `disclosure.json`。
 8. 子 agent 支持多轮 tool use，但不允许继续调用其他子 agent。
 
-当前实现口径：
+运行口径：
 
 - 4 个子 agent 均通过统一的子 agent loop 运行。
 - 子 agent 可在 loop 中调用 `document_read` 和 `exec_command`。
@@ -75,47 +75,20 @@ v1 阶段先收敛为 4 个业务子 agent：
 - 执行 git commit
 - 面向用户直接收束回合
 
-## 三、上下文类型
+## 三、上下文装配
 
-当前类型定义如下：
+子 agent 采用统一上下文装配策略：
 
-### 1. forked_context
+1. 主 agent 通过 `execute_subagent` 提供 `agent_id`、`goal` 和必要目标参数。
+2. 上下文管理器自动装配子 agent 的 OpenAI-compatible `messages`。
+3. 子 agent 使用自己的 system prompt。
+4. 子 agent 不继承主 agent 的 system prompt。
+5. 子 agent 继承调用方当前可见 `messages`，这里的 `messages` 不是 session raw events。
+6. 上下文管理器在继承消息之后追加本次子任务消息。
+7. 子 agent 内部工具调用与工具结果只服务于本次子 agent run。
+8. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
 
-定义：
-
-- `100%` 继承当前调用方上下文
-- 包括系统提示词
-
-适合：
-
-- 上下文压缩
-- 历史整理
-- 处理当前运行现场的 runtime agent
-
-### 2. rich_context_specialist
-
-定义：
-
-- 继承当前调用方的非系统提示词部分
-- 使用自己的 system prompt
-
-适合：
-
-- 带着当前任务现场执行专业任务
-- 局部写作
-- 局部审查
-
-### 3. task_only_specialist
-
-定义：
-
-- 只知道 `goal`
-- 不继承其他上下文
-
-适合：
-
-- 输入已经足够自包含的任务
-- 可通过工具自行读取上下文的任务
+如果子 agent 判断上下文不足，应在权限范围内调用 `document_read`，或在统一 envelope 中返回需要补充确认的问题。
 
 ## 四、子 agent 清单
 
@@ -136,15 +109,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 - 直接生成交底书正文
 - 做最终一致性裁决
 - 修改文档
-
-默认类型：
-
-- `rich_context_specialist`
-
-允许类型：
-
-- `rich_context_specialist`
-- `task_only_specialist`
 
 适合场景：
 
@@ -170,15 +134,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 - 直接完成整份交底书成文
 - 做最终落盘决定
 - 修改文档
-
-默认类型：
-
-- `rich_context_specialist`
-
-允许类型：
-
-- `rich_context_specialist`
-- `task_only_specialist`
 
 适合场景：
 
@@ -206,15 +161,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 - 做全文一致性裁决
 - 修改文档
 
-默认类型：
-
-- `rich_context_specialist`
-
-允许类型：
-
-- `rich_context_specialist`
-- `task_only_specialist`
-
 适合场景：
 
 - 用户明确要求“写出来”
@@ -239,15 +185,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 - 决定是否最终采纳修改
 - 接管写作任务
 
-默认类型：
-
-- `rich_context_specialist`
-
-允许类型：
-
-- `rich_context_specialist`
-- `task_only_specialist`
-
 适合场景：
 
 - 用户要求“检查一下”
@@ -260,8 +197,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 
 - `id`
 - `description`
-- `default_type`
-- `allowed_types`
 - `input_expectation`
 - `output_contract`
 - `tool_permissions`
@@ -271,8 +206,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 
 - `id`：子 agent 的稳定机器标识
 - `description`：能力边界说明
-- `default_type`：默认上下文类型
-- `allowed_types`：允许采用的上下文类型范围
 - `input_expectation`：通常需要的输入
 - `output_contract`：返回结构约束
 - `tool_permissions`：允许调用的工具
@@ -286,11 +219,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 {
   "id": "material_analyst",
   "description": "从用户对话、参考资料和已有草稿中提炼结构化技术事实，输出事实摘要、信息缺口和候选术语，不直接生成交底书正文。",
-  "default_type": "rich_context_specialist",
-  "allowed_types": [
-    "rich_context_specialist",
-    "task_only_specialist"
-  ],
   "input_expectation": "需要任务描述，通常需要参考资料、已有文本片段或用户刚提供的说明内容。",
   "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 analysis_result。",
   "tool_permissions": [
@@ -307,11 +235,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 {
   "id": "solution_refiner",
   "description": "将零散技术事实整理为可写作的技术方案，输出方案结构、创新点和待确认决策，不直接修改交底书正文。",
-  "default_type": "rich_context_specialist",
-  "allowed_types": [
-    "rich_context_specialist",
-    "task_only_specialist"
-  ],
   "input_expectation": "需要任务描述，通常需要已有事实、局部正文片段或参考方案说明。",
   "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 analysis_result，必要时可返回 document_edit_proposal。",
   "tool_permissions": [
@@ -328,11 +251,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 {
   "id": "section_writer",
   "description": "针对指定章节或 block 执行写作任务，输出可由主 agent 审查采纳的候选 document_edit operations，不直接修改文档。",
-  "default_type": "rich_context_specialist",
-  "allowed_types": [
-    "rich_context_specialist",
-    "task_only_specialist"
-  ],
   "input_expectation": "需要任务描述、目标 section_id 或 block_id、局部正文上下文和必要的方案材料。",
   "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 document_edit_proposal。",
   "tool_permissions": [
@@ -349,11 +267,6 @@ v1 阶段先收敛为 4 个业务子 agent：
 {
   "id": "consistency_reviewer",
   "description": "检查术语、逻辑、章节关系和技术闭环是否一致，输出问题清单和修改建议，不直接改写正文。",
-  "default_type": "rich_context_specialist",
-  "allowed_types": [
-    "rich_context_specialist",
-    "task_only_specialist"
-  ],
   "input_expectation": "需要任务描述，通常需要目标章节和必要的关联章节内容。",
   "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 review_report。",
   "tool_permissions": [
@@ -495,9 +408,9 @@ review_report
 }
 ```
 
-## 九、当前结论
+## 九、设计结论
 
-v1 采用以下子 agent 设计：
+子 agent 设计如下：
 
 1. 子 agent 清单为 `material_analyst`、`solution_refiner`、`section_writer`、`consistency_reviewer`。
 2. 子 agent 只提出建议，不直接修改文档。

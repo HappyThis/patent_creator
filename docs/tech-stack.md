@@ -1,14 +1,14 @@
-# 技术栈规范 v1
+# 技术栈规范
 
 ## 文档定位
 
-本文档定义本项目 v1 阶段的实现技术栈。
+本文档定义本项目的实现技术栈。
 
 它建立在以下文档之上：
 
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
-- [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [API 设计规范](/Users/yangchaoqun/myProj/patent_creator/docs/api-design.md)
+- [工作区初始化规范](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init.md)
 
 本文档用于明确：
 
@@ -20,7 +20,7 @@
 
 ## 一、总体原则
 
-v1 是单机工具型项目。
+本项目是单机工具型项目。
 
 因此技术栈遵循以下原则：
 
@@ -67,11 +67,11 @@ v1 是单机工具型项目。
 
 1. Python 依赖通过 `uv` 管理。
 2. Python 运行、安装和锁定流程围绕 `uv` 组织。
-3. v1 不额外引入其他 Python 包管理方案。
+3. 不额外引入其他 Python 包管理方案。
 
 ## 五、持久化与状态
 
-v1 采用文件系统持久化。
+系统采用文件系统持久化。
 
 核心对象：
 
@@ -89,14 +89,14 @@ v1 采用文件系统持久化。
 
 ## 六、数据库策略
 
-v1 不引入数据库。
+系统不引入数据库。
 
 原因：
 
-1. 当前是单机工具型项目。
+1. 系统是单机工具型项目。
 2. 没有用户概念。
 3. 没有多租户需求。
-4. 当前核心真相源已经由文件系统表达清楚。
+4. 核心真相源由文件系统表达清楚。
 
 ## 七、网络与外部读取
 
@@ -110,9 +110,9 @@ agent 在回合内只接收用户的自然语言 `message`，并自行从文本�
 2. 是否执行额外信息阅读，属于 agent 内部能力，而不是独立 API 契约。
 3. 外部引用信息即便被读取，也不作为项目资源持久化。
 
-## 八、当前结论
+## 八、设计结论
 
-v1 技术栈固定为：
+技术栈固定为：
 
 - 前端：`TypeScript + React + Vite`
 - 后端：`Python 3.11 + FastAPI + Uvicorn`

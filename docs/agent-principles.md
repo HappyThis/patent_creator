@@ -1,4 +1,4 @@
-# Agent 基本设计原则 v1
+# Agent 基本设计原则
 
 ## 文档定位
 
@@ -6,12 +6,12 @@
 
 阅读前建议先了解交底书文档结构：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
 
 相关文档：
 
-- [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-- [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
+- [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
+- [子 Agent 定义](/Users/yangchaoqun/myProj/patent_creator/docs/subagents.md)
 
 ## 目标
 
@@ -49,9 +49,9 @@
 - 当前交底书文档是真正的文档内容
 - session 事件日志负责记录过程
 
-### 当前产品形态
+### 产品形态
 
-当前阶段，产品采用 Web 前端三栏结构：
+产品采用 Web 前端三栏结构：
 
 1. `目录区域`
 2. `渲染区`
@@ -63,7 +63,7 @@
 - `渲染区`：实时预览当前交底书
 - `Agent Chat 区`：承接用户与主 agent 的对话
 
-当前阶段暂不支持用户在前端手动编辑正文。
+前端不提供正文手动编辑器。
 
 也就是说：
 
@@ -167,14 +167,12 @@
 
 每个子 agent 都必须有声明，作用类似轻量版 skill manifest。
 
-声明的目标不是描述某次具体调用，而是描述这个子 agent 本身的能力定义与默认调用倾向。
+声明的目标不是描述某次具体调用，而是描述这个子 agent 本身的能力边界。
 
-v1 建议的轻量字段如下：
+子 agent 声明字段如下：
 
 - `id`
 - `description`
-- `default_type`
-- `allowed_types`
 - `input_expectation`
 - `output_contract`
 - `tool_permissions`
@@ -184,8 +182,6 @@ v1 建议的轻量字段如下：
 
 - `id`：子 agent 的稳定机器标识
 - `description`：对子 agent 能力边界的一句话说明，要求尽量精确，直接写清楚做什么、输出什么、尽量不做什么
-- `default_type`：该子 agent 在大多数情况下更偏向的默认上下文类型
-- `allowed_types`：该子 agent 被允许采用的上下文类型范围
 - `input_expectation`：调用它时通常需要给哪些输入
 - `output_contract`：调用它后通常会返回什么类型的结果
 - `tool_permissions`：该子 agent 允许调用哪些工具
@@ -193,60 +189,32 @@ v1 建议的轻量字段如下：
 
 说明：
 
-1. `responsibilities` 与 `not_responsible_for` 在 v1 中不单独建字段
-2. 相关边界信息尽量直接写进 `description`
-3. `default_type` 只是默认倾向，不是硬约束
-4. 某次调用的实际类型由主 agent 决定
-5. 上下文管理器根据这次选定的类型装配上下文
+1. `responsibilities` 与 `not_responsible_for` 不单独建字段。
+2. 相关边界信息直接写进 `description`。
+3. 主 agent 调用子 agent 时只描述任务意图和必要目标参数。
+4. 子 agent 的实际 `messages` 由上下文管理器统一装配。
 
 这里的核心原则是：
 
-**agent 是能力定义，type 是调用时的上下文策略。**
+**agent 是能力定义，上下文装配是系统职责。**
 
-### 三种上下文类型的定义
+### 子 agent 的统一上下文继承策略
 
-当前阶段约定以下三种 `call_type`：
+子 agent 采用统一上下文装配策略：
 
-#### 1. `forked_context`
-
-定义：
-
-- `100%` 继承当前调用方上下文
-- 包括系统提示词
-
-适合：
-
-- 上下文压缩
-- 历史整理
-- 处理当前思维现场的 runtime agent
-
-#### 2. `rich_context_specialist`
-
-定义：
-
-- 继承当前调用方的非系统提示词部分
-- 使用自己的 system prompt
-
-这意味着它通常会继承：
-
-- 当前任务上下文
-- 最近对话
-- 已读取结果
-- 已有工具结果
-
-但不会继承当前调用方的 system prompt 本体。
-
-#### 3. `task_only_specialist`
-
-定义：
-
-- 只知道 `goal`
-- 不继承其他上下文
+1. 子 agent 使用自己的 system prompt。
+2. 子 agent 不继承主 agent 的 system prompt。
+3. 子 agent 继承调用方当前可见的 OpenAI-compatible `messages`。
+4. 这里的 `messages` 是发送给模型的消息数组，不是 session raw events。
+5. 上下文管理器在继承消息之后追加本次子 agent 任务消息。
+6. 子 agent 内部工具调用与工具结果只进入该子 agent 本次运行上下文。
+7. 主 agent 只接收 `execute_subagent` 的最终工具结果。
 
 说明：
 
-- 如果该类型在执行中需要更多信息，应自行通过工具获取
-- 或直接返回失败结果
+- 主 agent 不负责把正文片段、历史片段或工具结果手工搬运给子 agent。
+- 子 agent 如果需要补充正文，可以在权限范围内调用 `document_read`。
+- 子 agent 的内部过程进入 session log，用于 UI、调试和审计，但不投影回主 agent 上下文。
 
 ## 五、上下文管理器的职责
 
@@ -262,7 +230,7 @@ v1 建议的轻量字段如下：
 
 上下文窗口、session cursor、压缩、兜底裁剪和 agent scope 投影规则见：
 
-- [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+- [上下文管理规范](/Users/yangchaoqun/myProj/patent_creator/docs/context-management.md)
 
 换句话说：
 
@@ -308,7 +276,7 @@ v1 建议的轻量字段如下：
 
 ### 子 agent 的触发方式
 
-v1 中，子 agent 的触发统一抽象为一个工具调用：
+子 agent 的触发统一抽象为一个工具调用：
 
 - `execute_subagent`
 
@@ -349,7 +317,7 @@ v1 中，子 agent 的触发统一抽象为一个工具调用：
 - 待确认问题
 - 任务调度信息
 
-交底书文档的历史版本建议通过 `git` 管理。
+交底书文档的历史版本通过 `git` 管理。
 
 也就是说：
 
@@ -407,7 +375,7 @@ session 事件日志不是普通聊天记录，而是结构化事件流。
 
 ## 九、默认上下文内容
 
-默认情况下，建议优先注入以下信息：
+默认情况下优先注入以下信息：
 
 1. 交底书目录
 2. 当前 session 中与本轮任务直接相邻的少量上下文
@@ -429,7 +397,7 @@ session 事件日志不是普通聊天记录，而是结构化事件流。
 
 关于 agent 提示词和上下文的更细粒度组成，另见：
 
-- [agent-prompt-context-spec-v1.md](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
+- [agent-prompt-context-spec.md](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
 
 ## 十、正文内容按需读取
 
@@ -483,7 +451,7 @@ session 事件日志不是普通聊天记录，而是结构化事件流。
 
 ## 十三、同步子 agent 调用原则
 
-v1 先采用同步子 agent 调用模型。
+系统采用同步子 agent 调用模型。
 
 也就是说：
 
@@ -492,7 +460,7 @@ v1 先采用同步子 agent 调用模型。
 3. 子 agent 返回结果
 4. 主 agent 决定是否采纳
 
-第一版先不引入异步调度复杂度。
+系统不引入异步子 agent 调度。
 
 ## 十四、最终原则总结
 
@@ -509,6 +477,6 @@ v1 先采用同步子 agent 调用模型。
 9. 正文内容按需读取，不默认注入全文
 10. 修改后只在必要时回读目标章节确认
 11. 辅助信息属于 session 运行态或事件日志，不属于交底书文档
-12. v1 先采用同步子 agent 模型
+12. 子 agent 调用采用同步模型
 
 这套原则构成了本项目 agent 设计的基础约束。

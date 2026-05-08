@@ -1,4 +1,4 @@
-# 上下文管理规范 v1
+# 上下文管理规范
 
 ## 文档定位
 
@@ -6,10 +6,10 @@
 
 它建立在以下文档之上：
 
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-- [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
-- [一轮内部时序 v1](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle-v1.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
+- [Session 事件日志 Schema](/Users/yangchaoqun/myProj/patent_creator/docs/session-log.md)
+- [一轮内部时序](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle.md)
 
 本文档重点回答：
 
@@ -59,15 +59,15 @@ cursor 表示当前可展开上下文窗口的起点：
 context_cursor_seq -> session 最新事件
 ```
 
-cursor 之前的历史不再逐条恢复，而是由最近一次 `context_summary` 表达。
+早于 cursor 的历史由最近一次 `context_summary` 中的 `compressed_messages` 表达。
 
 ### 4. 当前上下文用量
 
 每个 session 应维护当前上下文窗口的估算用量。
 
-第一版可使用粗估 token 算法，后续再替换为模型 tokenizer。
+系统使用粗估 token 算法估算上下文用量；模型 tokenizer 可作为更精确的实现替换该估算器。
 
-建议配置：
+配置项：
 
 ```text
 PATENT_CREATOR_CONTEXT_MAX_TOKENS
@@ -117,7 +117,7 @@ user: 当前用户输入
 - 历史对话应尽量按 OpenAI-compatible 多轮对话格式恢复。
 - `scope=main` 的历史工具调用必须恢复为 `assistant(tool_calls)`，对应工具结果必须恢复为紧随其后的 `tool` message。
 - 当前用户输入必须作为最后一条真实 `user` message。
-- 项目上下文、压缩摘要等系统生成信息不能伪装成用户原话。
+- 项目上下文、压缩后的历史消息等系统生成信息不能伪装成用户原话。
 - 如果必须以 `role=user` 承载系统上下文，内容必须明确标注“不是用户的新指令，也不是用户原文”。
 
 ## 三、Agent Scope 可见性
@@ -155,19 +155,21 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
 
 ### 3. 子 agent 可见
 
-子 agent 每次调用都是全新上下文，不从历史 session 恢复长期 messages。
+子 agent 每次调用都由上下文管理器装配独立 `messages`，不从 session log 自行恢复长期 messages。
 
 子 agent 可见：
 
 - 主 agent 传入的任务。
-- 根据 `call_type` 装配的局部文档上下文。
+- 调用方当前可见的 OpenAI-compatible `messages`。
+- 子 agent 自己的 system prompt。
 - 本次子 agent run 内部的 tool call / tool result。
 
 子 agent 不可见：
 
 - 其他 session 的历史。
 - 其他子 agent 的内部过程。
-- 主 agent 的完整历史 messages，除非通过 `forked_context` 明确传入压缩后的调用现场。
+- 调用方的 system prompt。
+- 未投影到调用方 `messages` 的 session raw events。
 
 ## 四、上下文窗口与压缩触发
 
@@ -196,34 +198,84 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
 
 ## 五、Context Summary
 
-压缩结果应写回 session log，事件类型为 `context_summary`。
+压缩结果应写回 session log，事件类型仍为 `context_summary`。
 
-建议 payload：
+`context_summary` 保存一段压缩后的 OpenAI-compatible messages：
 
 ```json
 {
   "agent_scope": "main",
   "covered_seq_start": 1,
   "covered_seq_end": 120,
-  "summary": "压缩摘要文本...",
+  "cursor_seq_after": 121,
+  "compressed_messages": [
+    {
+      "role": "user",
+      "content": "压缩历史中的用户目标：用户希望主 agent 工具调用结果跨轮进入上下文，并希望压缩后仍保持自然对话结构。"
+    },
+    {
+      "role": "assistant",
+      "content": "压缩历史中的已完成工作：已确认上下文压缩应采用 message-level compression。"
+    },
+    {
+      "role": "assistant",
+      "content": "为核对当前上下文恢复逻辑，读取了相关实现。",
+      "tool_calls": [
+        {
+          "id": "call_000123",
+          "type": "function",
+          "function": {
+            "name": "document_read",
+            "arguments": "{\"action\":\"get_section\",\"section_id\":\"context_management\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_000123",
+      "content": ""
+    },
+    {
+      "role": "assistant",
+      "content": "基于工具结果，确认压缩后应由程序按 tool_call_id 恢复原始工具结果。"
+    },
+    {
+      "role": "user",
+      "content": "【系统说明】上述消息是系统从早期 session 历史压缩重建的上下文，不是用户新指令，也不是逐字原文。从下一条消息开始，是未压缩的真实 session 历史。"
+    }
+  ],
   "estimated_tokens_before": 62000,
   "estimated_tokens_after": 4200,
-  "preserved_tool_result_ids": [],
-  "referenced_tool_result_ids": [],
-  "absorbed_tool_result_ids": [],
-  "compression_model": "deepseek-v4-pro",
-  "cursor_seq_after": 121,
+  "compression_model": "mimo-v2.5-pro",
   "warnings": []
 }
 ```
 
-进入模型时，summary 应以明确的上下文消息出现：
+必需字段：
 
-```text
-以下是系统从本 session 早期上下文压缩得到的摘要，不是用户的新指令，也不是用户原文：
+- `covered_seq_start`
+- `covered_seq_end`
+- `cursor_seq_after`
+- `compressed_messages`
 
-...
-```
+观测字段：
+
+- `estimated_tokens_before`
+- `estimated_tokens_after`
+- `compression_model`
+- `warnings`
+
+`compressed_messages` 必须满足以下约束：
+
+1. 它是一段缩短后的历史消息，不是当前用户新指令。
+2. 它可以包含 `role=user`、`role=assistant` 和 `role=tool`。
+3. 如果保留历史工具调用，必须保留完整的 `assistant.tool_calls` 结构。
+4. 如果保留 `assistant.tool_calls`，必须紧随对应的 `role=tool` message。
+5. `role=tool.content` 在压缩事件中必须为空字符串。
+6. `role=tool.tool_call_id` 必须来自被压缩窗口中真实存在的主流程 tool call。
+7. 工具名、工具参数和 `tool_call_id` 不能由压缩 agent 编造。
+8. 最后一条 `compressed_messages` 必须是边界说明，明确“上述消息是系统压缩重建的历史，从下一条消息开始是真实未压缩历史”。
 
 ## 六、兜底裁剪策略
 
@@ -243,7 +295,7 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
 
 兜底裁剪后应写入 `context_pruned` 事件，便于 debug。
 
-建议 payload：
+payload：
 
 ```json
 {
@@ -273,15 +325,16 @@ user(current)
 或者：
 
 ```text
-context_summary
+compressed_messages
+system boundary note
 user
 assistant
 user(current)
 ```
 
-其中 `context_summary` 虽然在 API 中可能以 `role=user` 承载，但必须标注为系统压缩摘要，不是用户原话。
+其中 `compressed_messages` 是系统压缩重建的早期历史。压缩块最后必须带边界说明，明确该块不是用户新指令，也不是逐字原文；边界说明之后的消息才是未压缩的真实 session 历史。
 
-跨轮恢复主 agent messages 时，必须恢复主流程旧的原始 `assistant(tool_calls)` / `tool` 协议消息。
+跨轮恢复主 agent messages 时，必须恢复主流程历史原始 `assistant(tool_calls)` / `tool` 协议消息。
 
 例外只有两类：
 
@@ -292,122 +345,127 @@ user(current)
 
 正常运行时，工具结果可以进入当前 agent 的上下文。
 
-但执行上下文压缩时，工具结果不应直接交给压缩 agent 原文处理。
+执行上下文压缩时，压缩 agent 应能看到完整待压缩上下文，包括工具结果原文。这样它才能判断哪些工具调用对后续任务仍有价值，以及这些工具调用应位于压缩后消息块中的哪个语义位置。
 
-压缩前应先编码工具结果：
-
-```text
-[tool_result_ref id=call_000001 tool=document_read status=success]
-```
-
-压缩 agent 输出结构化策略：
+压缩 agent 的输出中可以保留工具调用结构，但不能复写工具结果内容：
 
 ```json
 {
-  "summary": "压缩后的上下文摘要...",
-  "preserved_tool_result_ids": ["call_000003"],
-  "referenced_tool_result_ids": ["call_000001"],
-  "warnings": []
+  "role": "assistant",
+  "content": "为确认当前文档状态，读取了技术方案章节。",
+  "tool_calls": [
+    {
+      "id": "call_000123",
+      "type": "function",
+      "function": {
+        "name": "document_read",
+        "arguments": "{\"action\":\"get_section\",\"section_id\":\"technical_solution\"}"
+      }
+    }
+  ]
 }
 ```
 
-三种模式：
+紧随其后的工具消息必须保留位置和 `tool_call_id`，但 `content` 必须为空：
 
-- `absorbed`：结论已进入摘要，不保留原始工具结果。
-- `referenced`：保留 ref，可按需从 session log 复核原文。
-- `preserved`：尝试恢复原始工具结果进入上下文。
+```json
+{
+  "role": "tool",
+  "tool_call_id": "call_000123",
+  "content": ""
+}
+```
 
-压缩 agent 只能看到工具调用 id、工具名、状态等元信息，不能看到工具返回原文。它必须根据上下文任务判断哪些工具结果需要继续原文保留，并把对应 `call_id` 写入 `preserved_tool_result_ids`。
+恢复 `context_summary` 时，程序负责：
 
-恢复 `preserved` 原文时必须再次检查 token 预算。
+1. 遍历 `compressed_messages`。
+2. 遇到 `role=tool` 且 `content=""` 时，根据 `tool_call_id` 从 session log 查找原始 `scope=main` 的 `tool_result`。
+3. 将原始工具结果按 OpenAI-compatible `tool` message 的 `content` 格式回填。
+4. 如果找不到对应工具结果、工具调用结构不合法，或回填后仍超限，则本次压缩结果视为不可用，进入兜底裁剪。
 
-如果恢复后超限，`preserved` 自动降级为 `referenced`。
+工具结果是否保留由压缩 agent 通过是否输出对应 `assistant.tool_calls` / `role=tool` 结构来表达。
 
 ## 九、Context Compressor
 
-压缩上下文由一个特殊子 agent 完成。
-
-建议声明：
-
-```text
-agent_id: context_compressor
-call_type: forked_context
-```
+压缩上下文由 `context_compressor` 完成。
 
 它的职责：
 
 - 压缩调用方当前上下文。
 - 保留后续任务需要的事实、用户偏好、决策、未解决问题。
 - 不编造新事实。
-- 不把系统摘要伪装成用户原话。
-- 输出结构化压缩结果与工具结果保留策略。
+- 不把压缩后的历史消息伪装成用户新指令。
+- 输出结构化的 `compressed_messages`。
+- 当保留工具调用时，只输出工具调用结构和空 `tool.content`，由程序恢复原始工具结果。
 
-压缩 agent 的事件应写入 session log，方便 debug。
+压缩 agent 的输入应是结构化 JSON，至少包含：
 
-但压缩 agent 的内部过程不进入调用方上下文；调用方只接收最终 `context_summary`。
+```json
+{
+  "task": "compress_main_agent_context",
+  "target_estimated_tokens": 83200,
+  "compression_window": {
+    "cursor_seq": 1,
+    "covered_seq_start": 1,
+    "covered_seq_end": 120,
+    "current_user_seq": 121
+  },
+  "current_user_message": {
+    "message_id": "msg_current",
+    "content": "当前用户问题，仅用于判断压缩重点，不得写入 compressed_messages。"
+  },
+  "compressible_messages": []
+}
+```
+
+输入规则：
+
+1. `compressible_messages` 是 cursor 到当前用户输入之前的完整待压缩 message transcript。
+2. `compressible_messages` 应包含完整工具结果原文，便于压缩 agent 判断是否保留对应工具调用。
+3. `current_user_message` 只作为保留重点参考，不属于压缩范围，不得写入 `compressed_messages`。
+4. 压缩 agent 不直接接收未投影的 `scope=subagent:*` 内部过程。
+
+压缩 agent 的事件写入 session log，方便 debug。
+
+但压缩 agent 的内部过程不进入调用方上下文；调用方只接收最终 `context_summary.compressed_messages`。
 
 ## 十、子 Agent 的上下文压缩
 
-子 agent run-local 压缩是目标能力，当前实现尚未接入。
-
-区别：
+子 agent run-local 压缩只服务于单次子 agent 调用。
 
 - 主 agent 有 session cursor，可跨 round 恢复。
 - 子 agent 只有 run-local cursor，不跨调用恢复。
 - 子 agent 每次被主 agent 调用时都是全新上下文。
-- 接入后，子 agent 内部压缩结果只服务于本次 run。
-- 接入后，子 agent 压缩过程仍写入 session log，便于 debug。
+- 子 agent 内部压缩结果只服务于本次 run。
+- 子 agent 压缩过程写入 session log，便于 debug。
 
 ## 十一、Context State
 
 每个 session 的 context state 由 session log 中最近的 marker 事件恢复：
 
-- `context_summary` 表示 cursor 之前的历史已被摘要吸收。
+- `context_summary` 表示 cursor 之前的历史已被压缩为 `compressed_messages`。
 - `context_pruned` 表示压缩失败或仍超限后，cursor 已移动到新的可见起点。
 
-当前实现不额外维护独立 `.context.json` 文件，避免 session log 与 state 文件出现双写不一致。
+系统不额外维护独立 `.context.json` 文件，避免 session log 与 state 文件出现双写不一致。
 
 恢复时以最近一条 `context_summary` 或 `context_pruned` 为准：
 
 ```text
-context_summary -> 注入摘要消息，并从 cursor_seq_after 继续展开后续事件
+context_summary -> 注入 compressed_messages，回填其中的 tool content，并从 cursor_seq_after 继续展开后续事件
 context_pruned  -> 不注入摘要，直接从 new_cursor_seq 继续展开后续事件
 ```
 
 session log 继续保持 append-only，是上下文恢复的唯一权威来源。
 
-## 十二、实现优先级
-
-第一阶段：
-
-1. 从 session log 恢复主 agent 多轮 user / assistant messages。
-2. 当前 user query 作为最后一条 user message。
-3. 排除子 agent 内部过程。
-4. 支持 token 粗估与上下文统计。
-5. 通过 session log marker 事件恢复 cursor。
-
-第二阶段：
-
-1. 实现超阈值压缩。
-2. 实现 `context_summary` 事件。
-3. 实现压缩失败后的 `context_pruned` 兜底。
-4. 将压缩过程作为 fork 类型子 agent 的完整可观测 run 记录。
-
-第三阶段：
-
-1. 工具结果编码与三档策略。
-2. 子 agent run-local 压缩。
-3. 接入更准确 tokenizer。
-
-## 十三、最终原则
+## 十二、最终原则
 
 1. session log 是权威事实源。
 2. ContextManager 负责维护发送给模型的 `messages`。
 3. 每个 session 有独立 cursor 和上下文用量。
-4. 压缩摘要不能伪装成用户原话。
+4. 压缩后的历史消息不能伪装成用户新指令。
 5. 当前用户输入永远作为最后一条真实 user message。
 6. 主 agent 不接收子 agent 内部过程。
-7. 子 agent run-local 压缩是后续能力，接入后不跨次恢复。
+7. 子 agent run-local 压缩只作用于单次子 agent run。
 8. 压缩失败不能阻塞主流程，必须有 cursor 移动兜底。
 9. 兜底窗口第一条业务消息必须是 user。
-10. 工具结果压缩时先编码，再由压缩 agent 输出保留策略。
+10. 压缩 agent 可以看到完整待压缩上下文，但不得复写工具结果；工具结果由程序按 `tool_call_id` 回填。

@@ -866,6 +866,42 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
 
 
 @pytest.mark.anyio
+async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(tmp_path: Path) -> None:
+    long_text = "历史技术细节" * 1200
+
+    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1]["content"] == long_text
+        return {"type": "respond", "text": "已记录历史技术细节。" + long_text}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [message["content"] for message in messages]
+        assert any("系统压缩摘要" in content for content in contents)
+        assert messages[-1] == {"role": "user", "content": "继续完善"}
+        return {"type": "respond", "text": "继续处理。"}
+
+    llm = ScriptedLLMClient([first_round, second_round])
+    settings = make_settings(tmp_path)
+    settings.context_max_tokens = 10000
+    settings.context_reserved_output_tokens = 0
+    settings.context_compress_threshold_ratio = 0.5
+    settings.context_recent_full_rounds = 1
+    services = AppServices(settings, llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message=long_text))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(session_id=first.session_id, message="继续完善"),
+    )
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, first.session_id)
+    assert any(event.type == "context_summary" for event in events)
+
+
+@pytest.mark.anyio
 async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: Path) -> None:
     def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {

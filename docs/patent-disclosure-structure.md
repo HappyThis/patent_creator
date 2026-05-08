@@ -1,4 +1,4 @@
-# 专利交底书结构方案 v1
+# 专利交底书结构方案
 
 ## 文档定位
 
@@ -8,8 +8,8 @@
 
 相关文档：
 
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
 
 ## 目标
 
@@ -135,7 +135,7 @@ embodiment_1
 2. 全文唯一。
 3. 新增 block 时由文档写入工具生成。
 4. 替换 block 时保留原 block id。
-5. v1 中 list item 和 table cell 不单独建立 id。
+5. `list` item 和 `table` cell 不单独建立 id。
 
 示例：
 
@@ -169,10 +169,10 @@ block_id
 - 一级章节
 - 二级子章节
 
-v1 建议：
+章节深度规则：
 
 - 默认支持两级章节结构
-- 第一版不放开无限深嵌套
+- 不支持无限深嵌套
 
 ### 章节对象
 
@@ -194,7 +194,7 @@ v1 建议：
 
 ## 标准交底书章节目录
 
-`专利交底书结构方案 v1` 推荐使用以下固定章节：
+`专利交底书结构方案` 推荐使用以下固定章节：
 
 1. `title`：发明名称
 2. `technical_field`：技术领域
@@ -242,7 +242,7 @@ v1 建议：
 
 每个章节或子章节内部使用 `blocks` 承载内容。
 
-v1 支持四类 block：
+支持四类 block：
 
 - `paragraph`
 - `list`
@@ -310,7 +310,7 @@ v1 支持四类 block：
 说明：
 
 - 图标统一视为图片处理
-- 流程图在 v1 中可先作为图片处理
+- 流程图作为图片处理
 
 ### Table
 
@@ -446,4 +446,4 @@ Markdown 导出应基于这棵文档树渲染。
 - 支持稳定 section id 与 block id
 - 不嵌入 session 内存或 agent 辅助信息
 
-这就是专利写作 agent v1 的交底书文档基础结构。
+这就是专利写作 agent 的交底书文档基础结构。

@@ -1,4 +1,4 @@
-# render_ast Schema v1
+# render_ast Schema
 
 ## 文档定位
 
@@ -14,9 +14,9 @@
 
 相关文档：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
-- [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
+- [API 设计规范](/Users/yangchaoqun/myProj/patent_creator/docs/api-design.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
 
 ## 目标
 
@@ -83,7 +83,7 @@ disclosure.json -> render builder -> render_ast -> Markdown 导出
 
 ## 四、核心节点类型
 
-V1 支持以下 6 种节点类型：
+支持以下 6 种节点类型：
 
 1. `document`
 2. `section`
@@ -340,7 +340,7 @@ block 节点通用字段：
 
 Markdown 不是 `render_ast` 的替代品，而是 `render_ast` 的一种导出结果。
 
-建议关系如下：
+关系如下：
 
 ```text
 disclosure.json -> render_ast -> Markdown
@@ -351,9 +351,9 @@ disclosure.json -> render_ast -> Markdown
 - 前端渲染不直接依赖 Markdown
 - Markdown 导出与前端展示应共享同一套 `render_ast` 语义
 
-## 十一、V1 取舍
+## 十一、支持范围
 
-### V1 支持
+### 支持
 
 - `document`
 - `section`
@@ -367,7 +367,7 @@ disclosure.json -> render_ast -> Markdown
 - `block_id`
 - `anchor`
 
-### V1 暂不做
+### 不支持
 
 - inline 富文本 mark 结构
 - 跨段批注
@@ -375,9 +375,9 @@ disclosure.json -> render_ast -> Markdown
 - 富样式 token 系统
 - 前端可编辑状态描述
 
-## 十二、当前结论
+## 十二、设计结论
 
-V1 的 `render_ast` 定位为：
+`render_ast` 定位为：
 
 1. 后端生成的统一展示模型
 2. 前端渲染区的直接输入

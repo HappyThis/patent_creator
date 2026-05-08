@@ -1,10 +1,10 @@
-# 前端交互规范 v1
+# 前端交互规范
 
 ## 文档定位
 
-本文档定义 Web 前端三栏界面的 V1 交互方式。
+本文档定义 Web 前端三栏界面的交互方式。
 
-当前产品形态为：
+产品形态为：
 
 1. `目录区域`
 2. `渲染区`
@@ -12,13 +12,13 @@
 
 相关文档：
 
-- [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
-- [render_ast Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema-v1.md)
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
+- [API 设计规范](/Users/yangchaoqun/myProj/patent_creator/docs/api-design.md)
+- [render_ast Schema](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
 
 ## 目标
 
-V1 前端交互需要让用户完成三件事：
+前端交互需要让用户完成三件事：
 
 1. 看清交底书结构
 2. 看清当前文稿内容和修改结果
@@ -46,7 +46,7 @@ V1 前端交互需要让用户完成三件事：
 - 章节定位
 - 最近修改位置高亮
 
-当前阶段不支持用户在渲染区手动编辑正文。
+渲染区不提供正文手动编辑器。
 
 ### 3. Agent Chat 区同时承担“对话”和“执行轨迹”
 
@@ -112,7 +112,7 @@ Agent Chat 区至少支持以下能力：
 
 ## 三、执行轨迹展示规则
 
-这是 V1 中非常关键的一条交互规则。
+这是关键交互规则。
 
 Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 
@@ -302,7 +302,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - `stream_attached`：记录当前 `round_id`，继续消费后续 SSE 事件。
 - `stream_closed`：关闭本地流并刷新 project 状态。
 
-## 五、V1 必要交互细节
+## 五、必要交互细节
 
 ### 目录区域
 
@@ -329,18 +329,18 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 - 支持上下文用量展示
 - 支持导出 Markdown
 
-## 六、V1 暂不做
+## 六、不支持范围
 
-当前阶段暂不支持：
+前端不支持：
 
 - 渲染区手动编辑正文
 - 目录区域拖拽重排
 - Chat 区多会话并行切换
 - block 级 diff 视图
 
-## 七、当前结论
+## 七、设计结论
 
-V1 前端不是“目录 + 文稿 + 聊天”这么简单。
+前端不是“目录 + 文稿 + 聊天”这么简单。
 
 更准确地说，它是：
 

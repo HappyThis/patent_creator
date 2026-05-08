@@ -1,4 +1,4 @@
-# 一轮内部时序 v1
+# 一轮内部时序
 
 ## 文档定位
 
@@ -16,11 +16,11 @@
 
 相关文档：
 
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
-- [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
-- [API 设计规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/api-design-v1.md)
-- [前端交互规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction-v1.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
+- [Session 事件日志 Schema](/Users/yangchaoqun/myProj/patent_creator/docs/session-log.md)
+- [API 设计规范](/Users/yangchaoqun/myProj/patent_creator/docs/api-design.md)
+- [前端交互规范](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction.md)
 
 ## 目标
 
@@ -160,7 +160,7 @@ user_input
 1. 主 agent 发出 `tool_call(name=execute_subagent)`。
 2. 执行器检查主 agent 权限。
 3. 执行器启动对应子 agent。
-4. 上下文管理器按 `call_type` 装配子 agent 上下文。
+4. 上下文管理器自动装配子 agent `messages`。
 
 ### 子 agent 输入
 
@@ -170,7 +170,7 @@ user_input
 - `goal`
 - `target_section_id`
 - `target_block_id`
-- 按 `call_type` 装配好的上下文
+- 继承自调用方当前可见 `messages` 的任务上下文
 
 ## 八、子 agent loop
 
@@ -201,7 +201,7 @@ user_input
    - `questions`
    - `warnings`
 
-当前实现要求：
+执行要求：
 
 - 子 agent 内部工具事件的 `parent_call_id` 指向主流程的 `execute_subagent` 调用。
 - 子 agent 只能调用 `document_read` 和 `exec_command`。
@@ -349,9 +349,9 @@ user_input
 1. 中途过程可见
 2. 最终回合有明确结束语义
 
-## 十五、当前结论
+## 十五、设计结论
 
-V1 的一轮内部时序采用以下原则：
+一轮内部时序采用以下原则：
 
 1. 主 agent 支持 loop。
 2. 子 agent 也支持 loop。

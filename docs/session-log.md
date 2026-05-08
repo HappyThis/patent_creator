@@ -1,15 +1,15 @@
-# Session 事件日志 Schema v1
+# Session 事件日志 Schema
 
 ## 文档定位
 
-本文档定义本项目 v1 阶段的 session 事件日志结构。
+本文档定义本项目的 session 事件日志结构。
 
 它建立在以下文档之上：
 
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-- [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
-- [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
+- [子 Agent 定义](/Users/yangchaoqun/myProj/patent_creator/docs/subagents.md)
+- [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
 
 本文档定义：
 
@@ -22,7 +22,7 @@
 
 本文档不定义日志轮转策略和上下文压缩策略。上下文恢复、压缩与 cursor 管理见：
 
-- [上下文管理规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/context-management-v1.md)
+- [上下文管理规范](/Users/yangchaoqun/myProj/patent_creator/docs/context-management.md)
 
 ## 一、目标
 
@@ -91,7 +91,7 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 
 ## 三、文件格式
 
-v1 建议使用：
+文件格式使用：
 
 - `jsonl`
 
@@ -102,7 +102,7 @@ v1 建议使用：
 
 ## 四、事件类型
 
-v1 基础事件包括：
+基础事件包括：
 
 1. `user_input`
 2. `agent_output`
@@ -163,7 +163,7 @@ v1 基础事件包括：
 
 `scope` 用于区分事件属于主 agent 还是某个子 agent。
 
-v1 建议取值：
+固定取值：
 
 - `main`
 - `subagent:material_analyst`
@@ -255,7 +255,6 @@ v1 建议取值：
     "arguments": {
       "agent_id": "material_analyst",
       "goal": "从当前用户输入中提炼技术方向、目标和待确认信息。",
-      "call_type": "task_only_specialist",
       "target_section_id": null,
       "target_block_id": null
     }
@@ -288,11 +287,10 @@ v1 建议取值：
   "payload": {
     "tool": "execute_subagent",
     "status": "success",
-    "output": {
-      "agent_id": "material_analyst",
-      "call_type": "task_only_specialist",
-      "target_section_id": null,
-      "target_block_id": null,
+      "output": {
+        "agent_id": "material_analyst",
+        "target_section_id": null,
+        "target_block_id": null,
       "result": {
         "status": "success",
         "summary": "已提炼出技术方向和待确认问题。",
@@ -383,15 +381,15 @@ v1 建议取值：
 
 ```jsonl
 {"id":"evt_000001","ts":"2026-04-23T15:30:00+08:00","type":"user_input","seq":1,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":null,"parent_call_id":null,"payload":{"text":"我想写一个图像检测方向的专利交底书。"}}
-{"id":"evt_000002","ts":"2026-04-23T15:30:10+08:00","type":"tool_call","seq":2,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","arguments":{"agent_id":"material_analyst","goal":"从当前用户输入中提炼技术方向、目标和待确认信息。","call_type":"task_only_specialist","target_section_id":null,"target_block_id":null}}}
+{"id":"evt_000002","ts":"2026-04-23T15:30:10+08:00","type":"tool_call","seq":2,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","arguments":{"agent_id":"material_analyst","goal":"从当前用户输入中提炼技术方向、目标和待确认信息。","target_section_id":null,"target_block_id":null}}}
 {"id":"evt_000003","ts":"2026-04-23T15:30:11+08:00","type":"tool_call","seq":3,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","arguments":{"action":"get_outline"}}}
 {"id":"evt_000004","ts":"2026-04-23T15:30:11+08:00","type":"tool_result","seq":4,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","status":"success","output":{"sections":[]}}}
-{"id":"evt_000005","ts":"2026-04-23T15:30:12+08:00","type":"tool_result","seq":5,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","status":"success","output":{"agent_id":"material_analyst","call_type":"task_only_specialist","target_section_id":null,"target_block_id":null,"result":{"status":"success","summary":"已提炼出技术方向和待确认问题。","proposal":{"type":"analysis_result","facts":[{"kind":"technical_direction","text":"当前主题可归纳为图像检测方向。"}],"candidate_terms":["图像检测"],"recommended_next_actions":[]},"questions":["是否强调低算力实时性？"],"warnings":[]}}}}
+{"id":"evt_000005","ts":"2026-04-23T15:30:12+08:00","type":"tool_result","seq":5,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","status":"success","output":{"agent_id":"material_analyst","target_section_id":null,"target_block_id":null,"result":{"status":"success","summary":"已提炼出技术方向和待确认问题。","proposal":{"type":"analysis_result","facts":[{"kind":"technical_direction","text":"当前主题可归纳为图像检测方向。"}],"candidate_terms":["图像检测"],"recommended_next_actions":[]},"questions":["是否强调低算力实时性？"],"warnings":[]}}}}
 ```
 
-## 十一、当前结论
+## 十一、设计结论
 
-v1 的 session 事件日志 schema 采用：
+session 事件日志 schema 采用：
 
 - 文件格式：`jsonl`
 - 事件类型：`user_input`、`agent_output`、`tool_call`、`tool_result`

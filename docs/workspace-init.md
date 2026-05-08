@@ -1,4 +1,4 @@
-# 工作区初始化规范 v1
+# 工作区初始化规范
 
 ## 文档定位
 
@@ -11,11 +11,11 @@
 
 相关文档：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
-- [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
-- [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
+- [Session 事件日志 Schema](/Users/yangchaoqun/myProj/patent_creator/docs/session-log.md)
+- [技术栈规范](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack.md)
 
 ## 目标
 
@@ -47,12 +47,12 @@
 
 实现约束：
 
-- v1 使用本地文件系统，不引入数据库
+- 使用本地文件系统，不引入数据库
 - Python 依赖通过 `uv` 管理
 
 ## 二、初始化时机
 
-建议在以下场景初始化工作区：
+在以下场景初始化工作区：
 
 1. 用户明确点击“新建交底书”或“新建项目”
 2. 系统明确判断当前要开始一份新的交底书，而不是继续已有项目
@@ -69,7 +69,7 @@
   projects/
 ```
 
-可通过环境变量 `PATENT_CREATOR_DATA_DIR` 覆盖该目录。项目代码仓库内不再默认承载运行数据，避免会话日志、导出文件和运行态内容混入源代码目录。
+可通过环境变量 `PATENT_CREATOR_DATA_DIR` 覆盖该目录。运行数据位于数据目录内，避免会话日志、导出文件和运行态内容混入源代码目录。
 
 每个 project 对应一个内部工作区：
 
@@ -87,7 +87,7 @@
 
 用于保存项目级元数据。
 
-建议字段：
+字段：
 
 - `project_id`
 - `title`
@@ -113,7 +113,7 @@
 
 该文件应遵循：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
 
 初始化时不应为空文件，而应写入标准骨架。
 
@@ -121,7 +121,7 @@
 
 用于保存 session 事件日志文件。
 
-建议每个 session 一个 `jsonl` 文件，例如：
+每个 session 使用一个 `jsonl` 文件，例如：
 
 ```text
 sessions/
@@ -143,7 +143,7 @@ sessions/
 
 用于保存导出的结果文件。
 
-当前阶段重点是：
+保存内容包括：
 
 - Markdown 导出结果
 
@@ -163,7 +163,7 @@ sessions/
 
 ## 四、初始化动作
 
-创建新工作区时，建议自动执行以下步骤：
+创建新工作区时自动执行以下步骤：
 
 1. 创建工作区根目录
 2. 创建 `sessions/`
@@ -178,7 +178,7 @@ sessions/
 
 ## 五、初始 disclosure.json
 
-初始化时建议写入标准交底书骨架，而不是空文档。
+初始化时写入标准交底书骨架，而不是空文档。
 
 示例：
 
@@ -278,7 +278,7 @@ sessions/
 
 ## 六、git 初始化规则
 
-建议每个工作区都是独立 git 仓库。
+每个工作区都是独立 git 仓库。
 
 原因：
 
@@ -286,14 +286,14 @@ sessions/
 2. commit message 可以直接围绕这份交底书生成
 3. diff、回退、审计都更清晰
 
-初始化步骤建议为：
+初始化步骤为：
 
 1. `git init`
 2. 写入 `.gitignore`
 3. 初始 `git add`
 4. 初始 `git commit`
 
-初始 commit message 建议：
+初始 commit message：
 
 ```text
 init disclosure workspace
@@ -316,9 +316,9 @@ Time: YYYY-MM-DD HH:mm
 - 工作区是内部实现概念
 - 项目是用户可感知概念
 
-## 八、当前结论
+## 八、设计结论
 
-当前阶段，一个新交底书项目对应一个新的内部工作区。
+一个新交底书项目对应一个新的内部工作区。
 
 工作区初始化规范固定为：
 

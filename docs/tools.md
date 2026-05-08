@@ -1,14 +1,14 @@
-# Tools 设计 v1
+# Tools 设计
 
 ## 文档定位
 
-本文档定义本项目 v1 阶段建议提供的工具集合。
+本文档定义本项目提供的工具集合。
 
 它建立在以下文档之上：
 
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Agent Prompt 与上下文规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec-v1.md)
-- [子 Agent 定义 v1](/Users/yangchaoqun/myProj/patent_creator/docs/subagents-v1.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
+- [子 Agent 定义](/Users/yangchaoqun/myProj/patent_creator/docs/subagents.md)
 
 本文档定义：
 
@@ -22,7 +22,7 @@
 
 ## 一、总体原则
 
-v1 工具设计遵循以下原则：
+工具设计遵循以下原则：
 
 1. 工具数量保持收敛。
 2. 交底书正文读写只能通过专用文档工具完成。
@@ -34,7 +34,7 @@ v1 工具设计遵循以下原则：
 
 ## 二、工具清单
 
-v1 保留以下核心工具：
+系统保留以下核心工具：
 
 1. `document_read`
 2. `document_edit`
@@ -75,7 +75,7 @@ v1 保留以下核心工具：
 它负责：
 
 - 启动指定子 agent
-- 按 `call_type` 装配上下文
+- 触发上下文管理器自动装配子 agent `messages`
 - 返回子 agent 的统一结果结构
 
 `execute_subagent` 只能由主 agent 调用。
@@ -96,7 +96,7 @@ v1 保留以下核心工具：
 - 直接修改 `disclosure.json`
 - 绕过 `document_edit` 执行文档写入
 
-当前实现口径：
+运行口径：
 
 - `exec_command` 已暴露给主 agent 和子 agent。
 - 以当前 project 工作区为 cwd 执行命令字符串。
@@ -106,7 +106,7 @@ v1 保留以下核心工具：
 
 ## 三、工具权限
 
-v1 工具权限如下：
+工具权限如下：
 
 ```text
 main_agent:
@@ -169,7 +169,7 @@ blk_000003
 1. 新增 block 时由 `document_edit` 自动生成。
 2. 替换 block 时保留原 `block_id`。
 3. agent 不为新增 block 手写 id。
-4. `list` item 与 `table` cell 在 v1 中不单独建立 id。
+4. `list` item 与 `table` cell 不单独建立 id。
 
 ## 五、工具统一返回结构
 
@@ -348,7 +348,7 @@ search_blocks
 
 - `query` 为文本查询。
 - `section_id` 可选。
-- v1 可采用简单文本包含匹配。
+- 搜索采用简单文本包含匹配。
 
 成功输出：
 
@@ -451,7 +451,7 @@ section_replaced
 
 ### 支持的 edit op
 
-v1 支持：
+支持：
 
 ```text
 update_meta
@@ -462,7 +462,7 @@ append_child_section
 replace_section
 ```
 
-v1 不支持：
+不支持：
 
 ```text
 delete_block
@@ -608,7 +608,7 @@ merge_json_path
 说明：
 
 - 新 section 的 `id` 必须全文唯一。
-- v1 只支持两级章节。
+- 只支持两级章节。
 - 如果 section id 冲突，返回 `duplicate_section_id`。
 - `changed_section_ids` 包含父 section 和新 section。
 - `primary_section_id` 等于新 section id。
@@ -660,11 +660,11 @@ merge_json_path
 8. `list` 必须包含 `ordered` 和 `items`。
 9. `image` 必须包含 `src`，可选 `caption` 和 `alt`。
 10. `table` 必须包含 `columns` 和 `rows`。
-11. v1 不允许超过两级章节。
+11. 不允许超过两级章节。
 
 ## 九、document_edit 错误码
 
-v1 固定错误码：
+固定错误码：
 
 ```text
 invalid_action
@@ -687,7 +687,6 @@ io_error
 {
   "agent_id": "section_writer",
   "goal": "为 technical_solution 生成候选正文 blocks。",
-  "call_type": "rich_context_specialist",
   "target_section_id": "technical_solution",
   "target_block_id": null
 }
@@ -697,9 +696,16 @@ io_error
 
 - `agent_id`：调用哪个子 agent
 - `goal`：对子 agent 的自然语言任务描述
-- `call_type`：本次调用采用哪种上下文装配策略
 - `target_section_id`：可选，目标章节
 - `target_block_id`：可选，目标 block
+
+上下文装配规则：
+
+1. 主 agent 只提供任务意图和结构化目标。
+2. 上下文管理器自动装配子 agent 的 OpenAI-compatible `messages`。
+3. 子 agent 使用自己的 system prompt。
+4. 子 agent 继承调用方当前可见 `messages`，不继承调用方 system prompt。
+5. 子 agent 内部工具调用结果只进入本次子 agent run。
 
 ### 成功输出：子 agent 成功
 
@@ -708,7 +714,6 @@ io_error
   "status": "success",
   "output": {
     "agent_id": "section_writer",
-    "call_type": "rich_context_specialist",
     "target_section_id": "technical_solution",
     "target_block_id": null,
     "result": {
@@ -747,7 +752,6 @@ io_error
   "status": "success",
   "output": {
     "agent_id": "section_writer",
-    "call_type": "rich_context_specialist",
     "target_section_id": "technical_solution",
     "target_block_id": null,
     "result": {
@@ -785,7 +789,6 @@ io_error
 
 ```text
 subagent_not_found
-invalid_call_type
 permission_denied
 subagent_timeout
 subagent_runtime_error
@@ -884,7 +887,7 @@ review_report
 执行约定：
 
 - 默认工作目录为当前 project 工作区根目录。
-- 当前实现不做命令白名单限制。
+- 命令工具不做命令白名单限制。
 - 命令字符串按 shell 执行，支持管道、重定向、命令拼接等 shell 能力。
 - 命令本身执行失败仍返回 `status=success`，并通过 `output.exit_code` 表示。
 - 只有调用方无权限、`command` 缺失、运行时异常等工具层问题才返回 `status=failed`。
@@ -944,9 +947,9 @@ Changed blocks:
 Truncated: only top 10 changed block ids are shown, 4 more block ids omitted.
 ```
 
-## 十四、当前结论
+## 十四、设计结论
 
-v1 工具体系采用以下原则：
+工具体系采用以下原则：
 
 1. 文档定位基于 `section_id` 和 `block_id`。
 2. 文档读取统一走 `document_read`。

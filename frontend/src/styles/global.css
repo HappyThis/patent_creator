@@ -181,9 +181,9 @@ textarea:focus-visible {
 }
 
 .outline-children {
-  margin-left: 12px;
+  margin-left: 18px;
   margin-top: 2px;
-  padding-left: 8px;
+  padding-left: 10px;
   border-left: 1px solid rgba(117, 114, 106, 0.22);
 }
 
@@ -191,9 +191,9 @@ textarea:focus-visible {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 38px;
-  padding: 7px 8px;
+  padding: 7px 10px;
   border: 0;
   border-bottom: 1px solid rgba(92, 82, 68, 0.1);
   border-radius: 0;
@@ -216,43 +216,6 @@ textarea:focus-visible {
   border: 1px solid rgba(199, 159, 87, 0.42);
   border-radius: 7px;
   box-shadow: inset 3px 0 0 rgba(176, 130, 49, 0.56), 0 1px 0 rgba(60, 48, 35, 0.04);
-}
-
-.outline-button.recent .outline-icon {
-  color: var(--recent);
-  border-color: rgba(215, 163, 74, 0.36);
-  background: rgba(215, 163, 74, 0.08);
-}
-
-.outline-drag-handle {
-  width: 3px;
-  height: 20px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  opacity: 0.28;
-  background-image: radial-gradient(circle, #8a857b 1px, transparent 1.5px);
-  background-size: 3px 6px;
-}
-
-.outline-icon {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(92, 82, 68, 0.16);
-  border-radius: 8px;
-  color: #586366;
-  background: rgba(255, 255, 255, 0.28);
-  font-size: 13px;
-  line-height: 1;
-}
-
-.outline-icon-svg {
-  width: 15px;
-  height: 15px;
-  display: block;
 }
 
 .outline-copy {
@@ -308,12 +271,6 @@ textarea:focus-visible {
   color: #1f282d;
 }
 
-.outline-button.active .outline-icon {
-  color: #8a6426;
-  border-color: rgba(199, 159, 87, 0.48);
-  background: rgba(215, 163, 74, 0.12);
-}
-
 .preview-pane {
   min-height: 0;
   display: flex;
@@ -326,15 +283,15 @@ textarea:focus-visible {
 }
 
 .preview-scroll {
-  padding: 0;
+  padding: 26px 30px 72px;
 }
 
 .document-card {
   width: 100%;
-  max-width: none;
+  max-width: 920px;
   min-height: 100%;
-  margin: 0;
-  padding: 38px 58px 76px;
+  margin: 0 auto;
+  padding: 52px 72px 92px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -356,9 +313,10 @@ textarea:focus-visible {
 .preview-section h3 {
   display: flex;
   align-items: baseline;
-  gap: 16px;
-  margin: 20px 0 8px;
+  gap: 18px;
+  margin: 34px 0 16px;
   color: #0d1624;
+  line-height: 1.35;
   letter-spacing: 0;
 }
 
@@ -368,11 +326,11 @@ textarea:focus-visible {
 }
 
 .preview-section h2 {
-  font-size: 20px;
+  font-size: 24px;
 }
 
 .preview-section h3 {
-  font-size: 16px;
+  font-size: 19px;
 }
 
 .preview-heading-index {
@@ -383,9 +341,12 @@ textarea:focus-visible {
 }
 
 .preview-block {
-  margin: 0 0 16px;
-  font-size: 15px;
+  margin: 0 0 24px;
+  font-size: 16px;
+  line-height: 1.9;
   color: #2e3942;
+  text-align: justify;
+  overflow-wrap: anywhere;
 }
 
 .preview-empty-hint {
@@ -412,8 +373,12 @@ textarea:focus-visible {
   padding-left: 24px;
 }
 
+.preview-list li+li {
+  margin-top: 8px;
+}
+
 .preview-table {
-  margin: 14px 0 18px;
+  margin: 20px 0 28px;
 }
 
 .preview-table table {
@@ -434,8 +399,6 @@ textarea:focus-visible {
 }
 
 .document-status-bar {
-  position: sticky;
-  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;

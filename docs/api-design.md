@@ -1,8 +1,8 @@
-# API 设计规范 v1
+# API 设计规范
 
 ## 文档定位
 
-本文档定义前端 `TypeScript + React + Vite` 与后端 `Python 3.11 + FastAPI + Uvicorn` 之间的 V1 API 协议。
+本文档定义前端 `TypeScript + React + Vite` 与后端 `Python 3.11 + FastAPI + Uvicorn` 之间的 API 协议。
 
 本规范重点覆盖：
 
@@ -15,16 +15,16 @@
 
 相关文档：
 
-- [专利交底书结构方案 v1](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure-v1.md)
-- [Agent 基本设计原则 v1](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles-v1.md)
-- [Tools 设计 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tools-v1.md)
-- [Session 事件日志 Schema v1](/Users/yangchaoqun/myProj/patent_creator/docs/session-log-v1.md)
-- [工作区初始化规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init-v1.md)
-- [技术栈规范 v1](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack-v1.md)
+- [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
+- [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
+- [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
+- [Session 事件日志 Schema](/Users/yangchaoqun/myProj/patent_creator/docs/session-log.md)
+- [工作区初始化规范](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init.md)
+- [技术栈规范](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack.md)
 
 ## 目标
 
-V1 的 API 设计围绕三栏前端展开：
+API 设计围绕三栏前端展开：
 
 1. `目录区域`
 2. `渲染区`
@@ -96,7 +96,7 @@ API 中涉及文档定位时统一使用：
 
 ### 1. `GET /api/projects`
 
-获取项目列表。当前阶段采用单工作区约定：后端保证第一条 project 是所有前端页面共同使用的当前 project；如果尚无项目，后端会自动初始化一个默认项目。公开创建项目接口暂不提供，避免隐式产生多个 project。
+获取项目列表。系统采用单工作区约定：后端保证第一条 project 是所有前端页面共同使用的当前 project；如果尚无项目，后端会自动初始化一个默认项目。公开创建项目接口不提供，避免隐式产生多个 project。
 
 响应：
 
@@ -622,12 +622,12 @@ data: {
 
 说明：
 
-- 当前阶段 Markdown 主要作为导出格式
+- Markdown 主要作为导出格式
 - 用户如果需要手动编辑，可导出后在系统外自行处理
 
 ## 十、前端实际依赖的最小接口集
 
-V1 前端最小依赖如下接口：
+前端最小依赖如下接口：
 
 1. `GET /api/projects`
 2. `GET /api/projects/{project_id}`
@@ -680,9 +680,9 @@ V1 前端最小依赖如下接口：
 - chat 区回合状态
 - 最近修改章节或 block 定位
 
-## 十二、当前结论
+## 十二、设计结论
 
-V1 API 设计采用如下原则：
+API 设计采用如下原则：
 
 1. 前端以 `project` 为核心资源
 2. 渲染区消费 `render_ast`
