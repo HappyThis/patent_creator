@@ -27,6 +27,15 @@ def test_document_read_and_edit_protocol(tmp_path: Path) -> None:
     assert meta_result["status"] == "success"
     assert meta_result["output"]["meta"]["title"] == "一种图像检测方法"
 
+    context_result = executor.document_read(project_id, {"action": "get_project_context"})
+    assert context_result["status"] == "success"
+    context = context_result["output"]["context"]
+    assert context["kind"] == "project_context"
+    assert context["document"]["title"] == "一种图像检测方法"
+    assert context["document"]["outline"][0] == {"id": "title", "title": "发明名称", "children": []}
+    assert "blocks" not in context["document"]["outline"][0]
+    assert "anchor" not in context["document"]["outline"][0]
+
     edit_result = executor.document_edit(
         project_id,
         {

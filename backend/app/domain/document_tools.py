@@ -30,6 +30,18 @@ def read_document(disclosure: dict[str, Any], arguments: dict[str, Any]) -> Tool
     action = arguments.get("action")
     if action == "get_meta":
         return tool_success({"meta": disclosure["meta"]})
+    if action == "get_project_context":
+        return tool_success(
+            {
+                "context": {
+                    "kind": "project_context",
+                    "document": {
+                        "title": disclosure.get("meta", {}).get("title"),
+                        "outline": project_context_outline(disclosure["sections"]),
+                    },
+                }
+            }
+        )
     if action == "get_outline":
         return tool_success({"sections": [item.model_dump() for item in build_outline_items(disclosure["sections"])]})
     if action == "get_section":
@@ -61,6 +73,19 @@ def read_document(disclosure: dict[str, Any], arguments: dict[str, Any]) -> Tool
             return tool_failed("section_not_found", f"section_id 不存在：{section_id}")
         return tool_success({"matches": search_blocks(disclosure["sections"], query, section_id)})
     return tool_failed("invalid_action", f"不支持的 document_read action：{action}")
+
+
+def project_context_outline(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    outline: list[dict[str, Any]] = []
+    for section in sections:
+        outline.append(
+            {
+                "id": str(section.get("id") or ""),
+                "title": str(section.get("title") or ""),
+                "children": project_context_outline(section.get("children") or []),
+            }
+        )
+    return outline
 
 
 def apply_document_edit(disclosure: dict[str, Any], arguments: dict[str, Any]) -> ToolResult:

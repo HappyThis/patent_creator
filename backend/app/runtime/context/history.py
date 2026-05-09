@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from ...schemas import SessionEvent
+from .compression import restore_compressed_messages_from_events
 
 MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_output", "tool_call", "tool_result"}
 
@@ -16,25 +17,20 @@ def restore_main_chat_messages(
 ) -> list[dict[str, Any]]:
     anchor = context_anchor(events)
     messages: list[dict[str, Any]] = []
-    if anchor["summary"]:
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "以下是系统从本 session 早期上下文压缩得到的摘要，"
-                    "不是用户的新指令，也不是用户原文。\n"
-                    f"{anchor['summary']}"
-                ),
-            }
+    if anchor["compressed_messages"]:
+        messages.extend(
+            restore_compressed_messages_from_events(
+                anchor["compressed_messages"],
+                source_tool_blocks=_main_tool_blocks(events),
+            )
         )
-    messages.extend(_restore_preserved_tool_messages(events, anchor["preserved_tool_result_ids"]))
 
     visible = [
         event
         for event in events
         if event.scope == "main" and event.seq >= anchor["cursor_seq"] and event.type in MAIN_CONTEXT_EVENT_TYPES
     ]
-    messages.extend(_project_main_events(visible))
+    messages.extend(project_main_events(visible))
 
     if current_user_message is not None:
         if current_message_id and not any(
@@ -56,21 +52,19 @@ def context_anchor(events: list[SessionEvent]) -> dict[str, Any]:
         None,
     )
     if marker is None:
-        return {"cursor_seq": 1, "summary": None, "preserved_tool_result_ids": []}
+        return {"cursor_seq": 1, "compressed_messages": []}
     if marker.type == "context_summary":
         cursor_seq = int(marker.payload.get("cursor_seq_after") or marker.payload.get("covered_seq_end") or 0) + (
             0 if marker.payload.get("cursor_seq_after") else 1
         )
-        preserved = marker.payload.get("preserved_tool_result_ids")
+        compressed_messages = marker.payload.get("compressed_messages")
         return {
             "cursor_seq": max(1, cursor_seq),
-            "summary": str(marker.payload.get("summary") or ""),
-            "preserved_tool_result_ids": [str(item) for item in preserved if item] if isinstance(preserved, list) else [],
+            "compressed_messages": compressed_messages if isinstance(compressed_messages, list) else [],
         }
     return {
         "cursor_seq": max(1, int(marker.payload.get("new_cursor_seq") or 1)),
-        "summary": None,
-        "preserved_tool_result_ids": [],
+        "compressed_messages": [],
     }
 
 
@@ -92,33 +86,7 @@ def current_user_event(events: list[SessionEvent], current_message_id: str | Non
     )
 
 
-def compressible_event_payload(event: SessionEvent) -> dict[str, Any]:
-    if event.type in {"user_input", "agent_output"}:
-        return {
-            "seq": event.seq,
-            "role": "user" if event.type == "user_input" else "assistant",
-            "round_id": event.round_id,
-            "content": str(event.payload.get("text") or ""),
-        }
-    if event.type == "tool_call":
-        return {
-            "seq": event.seq,
-            "role": "assistant_tool_call_ref",
-            "round_id": event.round_id,
-            "call_id": event.call_id,
-            "tool": str(event.payload.get("tool") or ""),
-        }
-    return {
-        "seq": event.seq,
-        "role": "tool_result_ref",
-        "round_id": event.round_id,
-        "call_id": event.call_id,
-        "tool": str(event.payload.get("tool") or ""),
-        "status": str(event.payload.get("status") or ""),
-    }
-
-
-def _project_main_events(events: list[SessionEvent]) -> list[dict[str, Any]]:
+def project_main_events(events: list[SessionEvent]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     index = 0
     while index < len(events):
@@ -183,42 +151,6 @@ def _consume_tool_block(
     return messages, index
 
 
-def _restore_preserved_tool_messages(events: list[SessionEvent], call_ids: list[str]) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for call_id in call_ids:
-        if call_id in seen:
-            continue
-        seen.add(call_id)
-        call_event = next(
-            (
-                event
-                for event in events
-                if event.scope == "main" and event.type == "tool_call" and event.call_id == call_id
-            ),
-            None,
-        )
-        result_event = next(
-            (
-                event
-                for event in events
-                if event.scope == "main" and event.type == "tool_result" and event.call_id == call_id
-            ),
-            None,
-        )
-        if call_event is None or result_event is None:
-            continue
-        messages.append(
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [_assistant_tool_call(call_event)],
-            }
-        )
-        messages.append(_tool_result_message(result_event))
-    return messages
-
-
 def _assistant_tool_call(event: SessionEvent) -> dict[str, Any]:
     arguments = event.payload.get("arguments")
     if not isinstance(arguments, dict):
@@ -240,4 +172,18 @@ def _tool_result_message(event: SessionEvent) -> dict[str, Any]:
         "role": "tool",
         "tool_call_id": str(event.call_id or ""),
         "content": json.dumps(payload, ensure_ascii=False),
+    }
+
+
+def _main_tool_blocks(events: list[SessionEvent]) -> dict[str, dict[str, Any]]:
+    calls: dict[str, dict[str, Any]] = {}
+    results: dict[str, str] = {}
+    for event in events:
+        if event.scope == "main" and event.type == "tool_call" and event.call_id:
+            calls[str(event.call_id)] = _assistant_tool_call(event)
+        if event.scope == "main" and event.type == "tool_result" and event.call_id:
+            results[str(event.call_id)] = _tool_result_message(event)["content"]
+    return {
+        call_id: {"tool_call": calls[call_id], "tool_result": results[call_id]}
+        for call_id in calls.keys() & results.keys()
     }

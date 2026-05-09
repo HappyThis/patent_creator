@@ -47,6 +47,7 @@
 
 它负责：
 
+- 读取项目上下文
 - 读取文档元信息
 - 读取目录
 - 按 `section_id` 读取章节
@@ -202,6 +203,7 @@ blk_000003
 
 ```text
 get_meta
+get_project_context
 get_outline
 get_section
 get_block
@@ -233,7 +235,54 @@ search_blocks
 }
 ```
 
-### 2. get_outline
+### 2. get_project_context
+
+`get_project_context` 返回主 agent 决策所需的轻量项目上下文。
+
+输入：
+
+```json
+{
+  "action": "get_project_context"
+}
+```
+
+成功输出：
+
+```json
+{
+  "status": "success",
+  "output": {
+    "context": {
+      "kind": "project_context",
+      "document": {
+        "title": "一种图像检测方法",
+        "outline": [
+          {
+            "id": "technical_solution",
+            "title": "技术方案",
+            "children": [
+              {
+                "id": "processing_flow",
+                "title": "处理流程",
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- `outline` 是完全展开的章节树。
+- 章节节点只包含 `id`、`title` 和 `children`。
+- 返回内容不包含章节正文、block、前端 anchor、UI 焦点或填充状态。
+
+### 3. get_outline
 
 输入：
 
@@ -265,7 +314,7 @@ search_blocks
 }
 ```
 
-### 3. get_section
+### 4. get_section
 
 输入：
 
@@ -305,7 +354,7 @@ search_blocks
 }
 ```
 
-### 4. get_block
+### 5. get_block
 
 输入：
 
@@ -332,7 +381,7 @@ search_blocks
 }
 ```
 
-### 5. search_blocks
+### 6. search_blocks
 
 输入：
 
@@ -686,9 +735,7 @@ io_error
 ```json
 {
   "agent_id": "section_writer",
-  "goal": "为 technical_solution 生成候选正文 blocks。",
-  "target_section_id": "technical_solution",
-  "target_block_id": null
+  "goal": "为“技术方案”章节生成候选正文 blocks。"
 }
 ```
 
@@ -696,16 +743,15 @@ io_error
 
 - `agent_id`：调用哪个子 agent
 - `goal`：对子 agent 的自然语言任务描述
-- `target_section_id`：可选，目标章节
-- `target_block_id`：可选，目标 block
 
 上下文装配规则：
 
-1. 主 agent 只提供任务意图和结构化目标。
+1. 主 agent 只提供 `agent_id` 和自然语言 `goal`。
 2. 上下文管理器自动装配子 agent 的 OpenAI-compatible `messages`。
 3. 子 agent 使用自己的 system prompt。
-4. 子 agent 继承调用方当前可见 `messages`，不继承调用方 system prompt。
-5. 子 agent 内部工具调用结果只进入本次子 agent run。
+4. 子 agent 继承调用方当前可见且已闭合的 `messages`，不继承调用方 system prompt。
+5. 上下文管理器在继承消息之后追加由 `agent_task` barrier 渲染出的任务说明 message。
+6. 子 agent 内部工具调用结果只进入本次子 agent run。
 
 ### 成功输出：子 agent 成功
 
@@ -714,8 +760,6 @@ io_error
   "status": "success",
   "output": {
     "agent_id": "section_writer",
-    "target_section_id": "technical_solution",
-    "target_block_id": null,
     "result": {
       "status": "success",
       "summary": "已生成技术方案章节候选正文。",
@@ -752,8 +796,6 @@ io_error
   "status": "success",
   "output": {
     "agent_id": "section_writer",
-    "target_section_id": "technical_solution",
-    "target_block_id": null,
     "result": {
       "status": "failed",
       "summary": "当前信息不足，无法生成稳定候选正文。",
@@ -953,9 +995,10 @@ Truncated: only top 10 changed block ids are shown, 4 more block ids omitted.
 
 1. 文档定位基于 `section_id` 和 `block_id`。
 2. 文档读取统一走 `document_read`。
-3. 文档写入统一走 `document_edit`。
-4. `document_edit` 是 `disclosure.json` 的唯一写入入口。
-5. 子 agent 通过 `execute_subagent` 启动。
-6. 子 agent 返回 proposal，主 agent 决定是否采纳。
-7. 通用命令统一走 `exec_command`，但不直接修改交底书真相源。
-8. 自动提交基于 changed section ids 和 changed block ids 生成 commit message。
+3. 当前项目标题和完整目录树通过 `document_read(action=get_project_context)` 获取。
+4. 文档写入统一走 `document_edit`。
+5. `document_edit` 是 `disclosure.json` 的唯一写入入口。
+6. 子 agent 通过 `execute_subagent` 启动。
+7. 子 agent 返回 proposal，主 agent 决定是否采纳。
+8. 通用命令统一走 `exec_command`，但不直接修改交底书真相源。
+9. 自动提交基于 changed section ids 和 changed block ids 生成 commit message。

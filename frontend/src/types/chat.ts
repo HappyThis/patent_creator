@@ -40,8 +40,20 @@ export type RoundStatusEvent = {
   detail?: string;
 };
 
+export type ContextStatusEvent = {
+  id: string;
+  kind: 'context_status';
+  timestamp?: string;
+  round_id?: string;
+  message_id?: string;
+  seq?: number;
+  status: 'running' | 'done' | 'failed';
+  summary: string;
+  detail?: string;
+};
+
 export type ProcessEvent = ToolCallEvent;
-export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent;
+export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent | ContextStatusEvent;
 
 export type SessionEventRecord = {
   id: string;

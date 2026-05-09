@@ -2,7 +2,7 @@
 
 ```bash
 uv sync
-uv run uvicorn app.api.app:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn app.api.app:app --reload --host 127.0.0.1 --port 5172
 ```
 
 如果要启用真实 agent 写作能力，需要配置 OpenAI 兼容接口：

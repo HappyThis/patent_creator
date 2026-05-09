@@ -5,25 +5,6 @@ from typing import Any
 from ...core import ApiError
 
 
-def build_material_analyst_context(
-    *,
-    goal: str,
-    user_message: str,
-    outline: list[dict[str, Any]],
-    target_section: dict[str, Any] | None,
-    recent_user_inputs: list[str],
-) -> dict[str, Any]:
-    return {
-        "task": {
-            "goal": goal,
-            "user_message": user_message,
-        },
-        "outline": outline,
-        "target_section": target_section,
-        "recent_user_inputs": recent_user_inputs,
-    }
-
-
 def build_material_analyst_result(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("proposal_type") != "analysis_result":
         raise ApiError(502, "subagent_invalid_submit_result", "material_analyst 必须提交 analysis_result。")

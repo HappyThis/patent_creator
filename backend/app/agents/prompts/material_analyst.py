@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from ..types import SubagentDeclaration
 from .shared import DOCUMENT_ACCESS_RULES, MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE, SUBAGENT_TOOL_ARGUMENT_EXAMPLES
 
@@ -46,7 +43,3 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 
 {SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """
-
-
-def build_material_analyst_user_prompt(context: dict[str, Any]) -> str:
-    return json.dumps(context, ensure_ascii=False, indent=2)

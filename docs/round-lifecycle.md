@@ -59,7 +59,7 @@
 
 ## 三、总体时序
 
-推荐的一轮内部时序如下：
+一轮内部时序如下：
 
 ```text
 user_input
@@ -109,9 +109,12 @@ user_input
 2. 输入包括：
    - 系统提示词
    - 当前用户输入
-   - 默认上下文
-   - 必要时补充的相关历史
+   - 历史 messages
+   - 压缩历史 messages
+   - 主流程工具调用与工具结果
 3. 主 agent 开始本轮 loop。
+
+主 agent 需要当前项目标题和完整目录树时，通过 `document_read(action=get_project_context)` 获取。
 
 主 agent loop 的基本模式为：
 
@@ -167,10 +170,10 @@ user_input
 子 agent 接收：
 
 - 自己的 system prompt
-- `goal`
-- `target_section_id`
-- `target_block_id`
-- 继承自调用方当前可见 `messages` 的任务上下文
+- 继承自调用方当前可见且已闭合的 `messages`
+- 由 `agent_task` barrier 渲染出的任务说明 message
+
+当前正在执行的 `execute_subagent` tool call 尚未闭合，不会被继承到该子 agent 的初始 `messages`。
 
 ## 八、子 agent loop
 
@@ -236,7 +239,7 @@ user_input
 
 ## 十、文档修改后的即时行为
 
-文档一旦发生修改，建议立即刷新预览，不等整轮结束。
+文档一旦发生修改，立即刷新预览，不等整轮结束。
 
 具体动作：
 

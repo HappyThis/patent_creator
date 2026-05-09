@@ -2,23 +2,13 @@ from __future__ import annotations
 
 from app.agents.workers import (
     build_consistency_reviewer_result,
-    build_consistency_reviewer_context,
     build_material_analyst_result,
-    build_material_analyst_context,
     build_solution_refiner_result,
-    build_solution_refiner_context,
+    build_section_writer_result,
 )
 
 
-def test_material_analyst_context_and_envelope() -> None:
-    context = build_material_analyst_context(
-        goal="整理当前聊天材料",
-        user_message="我们在低算力设备上做图像识别",
-        outline=[],
-        target_section=None,
-        recent_user_inputs=[],
-    )
-    assert context["task"]["goal"] == "整理当前聊天材料"
+def test_material_analyst_envelope() -> None:
     result = build_material_analyst_result(
         {
             "summary": "已整理事实。",
@@ -50,15 +40,7 @@ def test_material_analyst_context_and_envelope() -> None:
     assert result["questions"] == ["需要明确硬件型号吗？"]
 
 
-def test_solution_refiner_context_and_envelope() -> None:
-    context = build_solution_refiner_context(
-        goal="收敛方案",
-        user_message="请整理技术方案",
-        outline=[],
-        target_section=None,
-        recent_user_inputs=[],
-    )
-    assert context["task"]["user_message"] == "请整理技术方案"
+def test_solution_refiner_envelope() -> None:
     result = build_solution_refiner_result(
         {
             "summary": "方案骨架。",
@@ -89,16 +71,7 @@ def test_solution_refiner_context_and_envelope() -> None:
     assert proposal["open_questions"] == ["是否需要离线模型？"]
 
 
-def test_consistency_reviewer_context_and_envelope() -> None:
-    context = build_consistency_reviewer_context(
-        goal="审查一致性",
-        user_message="请检查",
-        outline=[],
-        target_section=None,
-        target_section_id="technical_effects",
-        recent_user_inputs=[],
-    )
-    assert context["task"]["target_section_id"] == "technical_effects"
+def test_consistency_reviewer_envelope() -> None:
     result = build_consistency_reviewer_result(
         {
             "summary": "已审查。",
@@ -130,3 +103,33 @@ def test_consistency_reviewer_context_and_envelope() -> None:
     assert proposal["issues"][0]["severity"] == "high"
     assert proposal["issues"][1]["severity"] == "medium"
     assert proposal["issues"][1]["section_id"] is None
+
+
+def test_section_writer_envelope_uses_proposal_target_not_task_context() -> None:
+    result = build_section_writer_result(
+        {
+            "summary": "已生成。",
+            "reply": "已生成。",
+            "rationale": "根据任务生成。",
+            "proposal_type": "document_edit_proposal",
+            "proposal": {
+                "target_section_id": "technical_solution",
+                "target_block_id": None,
+                "intent": "replace_section_blocks",
+                "confidence": 0.8,
+                "operations": [
+                    {
+                        "op": "replace_section_blocks",
+                        "section_id": "technical_solution",
+                        "blocks": [{"type": "paragraph", "text": "候选正文。"}],
+                    }
+                ],
+            },
+            "questions": [],
+            "warnings": [],
+        }
+    )
+
+    assert result["status"] == "success"
+    assert result["proposal"]["target_section_id"] == "technical_solution"
+    assert result["proposal"]["operations"][0]["section_id"] == "technical_solution"

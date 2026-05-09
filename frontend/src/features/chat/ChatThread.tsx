@@ -10,7 +10,8 @@ type ChatThreadProps = {
 type RenderBlock =
   | { kind: 'message'; event: ChatMessageEvent }
   | { kind: 'process'; items: ProcessEvent[] }
-  | { kind: 'round_status'; event: Extract<ChatEvent, { kind: 'round_status' }> };
+  | { kind: 'round_status'; event: Extract<ChatEvent, { kind: 'round_status' }> }
+  | { kind: 'context_status'; event: Extract<ChatEvent, { kind: 'context_status' }> };
 
 export function ChatThread({ events }: ChatThreadProps) {
   const blocks = buildRenderBlocks(events);
@@ -43,6 +44,17 @@ export function ChatThread({ events }: ChatThreadProps) {
 
         if (block.kind === 'process') {
           return <TimelineList key={`process_${index}`} items={block.items} />;
+        }
+
+        if (block.kind === 'context_status') {
+          return (
+            <article key={block.event.id} className={`context-divider ${block.event.status}`}>
+              <span>
+                {block.event.summary}
+                {block.event.detail ? <small>{block.event.detail}</small> : null}
+              </span>
+            </article>
+          );
         }
 
         return (
@@ -81,6 +93,11 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
     if (event.kind === 'round_status') {
       flushProcess();
       blocks.push({ kind: 'round_status', event });
+      continue;
+    }
+    if (event.kind === 'context_status') {
+      flushProcess();
+      blocks.push({ kind: 'context_status', event });
     }
   }
   flushProcess();

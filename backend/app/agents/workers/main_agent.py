@@ -46,8 +46,8 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["get_section", "get_block", "search_blocks"],
-                        "description": "读取动作。get_section 按章节 id，get_block 按 block id，search_blocks 按关键词搜索正文。",
+                        "enum": ["get_meta", "get_project_context", "get_outline", "get_section", "get_block", "search_blocks"],
+                        "description": "读取动作。get_project_context 返回标题和完整目录树；get_section 按章节 id；get_block 按 block id；search_blocks 按关键词搜索正文。",
                     },
                     "section_id": {
                         "type": "string",
@@ -106,33 +106,12 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
                         ],
                         "description": "目标子 agent 的 id。",
                     },
-                    "call_type": {
-                        "type": "string",
-                        "enum": [
-                            "rich_context_specialist",
-                            "task_only_specialist",
-                            "forked_context",
-                        ],
-                        "description": "上下文装配策略，常用 rich_context_specialist。",
-                    },
                     "goal": {
                         "type": "string",
-                        "description": "面向子 agent 的任务描述，尽量具体。",
-                    },
-                    "target_section_id": {
-                        "type": "string",
-                        "description": "目标章节 id。section_writer 必填。",
-                    },
-                    "target_block_id": {
-                        "type": "string",
-                        "description": "目标 block id（可选）。",
-                    },
-                    "user_message": {
-                        "type": "string",
-                        "description": "用户本轮原始输入文本，用于给子 agent 提供一手材料。",
+                        "description": "面向子 agent 的自然语言任务目标；目标范围、输出要求和注意事项都写在这里。",
                     },
                 },
-                "required": ["agent_id", "call_type", "goal"],
+                "required": ["agent_id", "goal"],
             },
         },
     },

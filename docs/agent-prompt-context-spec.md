@@ -31,9 +31,9 @@
 
 ## 一、基本原则
 
-1. 默认不注入完整交底书全文。
-2. 默认只注入最小必要信息。
-3. 正文内容按需读取。
+1. 默认不注入项目上下文。
+2. 默认不注入完整交底书全文。
+3. 项目标题、目录树和正文内容按需读取。
 4. 修改后如有必要，再回读目标章节确认。
 5. 主 agent 与子 agent 的上下文都应尽量收敛。
 6. prompt 既要按角色拆分，也要按稳定性拆分。
@@ -83,8 +83,8 @@
 - 可用工具清单
 - 可用子 agent 清单
 - 当前工作区
-- 交底书 meta
-- 交底书目录结构
+- 历史 messages
+- 本轮工具读取结果
 
 ### 3. 子 Agent 模板
 
@@ -132,8 +132,6 @@
 - 当前工作区
 - 可用工具清单
 - 可用子 agent 清单
-- 交底书 meta
-- 交底书目录结构
 
 特点：
 
@@ -192,30 +190,29 @@
 
 ### 3. 默认上下文
 
-默认上下文建议包含：
+默认上下文包含：
 
-1. 当前交底书目录
-2. 当前 session 中与本轮任务直接相邻的少量历史
-3. 当前 session 可见窗口内 `scope=main` 的工具调用与工具返回结果
-
-其中“交底书目录”建议至少包含：
-
-- 一级章节列表
-- 某些章节下的二级子章节列表
+1. 当前 session 可见窗口内的历史用户输入。
+2. 当前 session 可见窗口内的主 agent 回复。
+3. 当前 session 可见窗口内 `scope=main` 的工具调用与工具返回结果。
+4. 上下文压缩产生的压缩历史 messages。
+5. 当前用户输入。
 
 默认不包含：
 
+- 当前交底书标题
+- 当前交底书目录树
 - 完整正文
 - 大量历史事件
 - 无关章节全文
 
 说明：
 
-- `当前用户任务`
-- `最近少量修改摘要`
-- `最近少量 session 摘要`
+- 当前用户输入始终是最后一条真实 `role=user` message。
+- 主 agent 需要标题和完整目录树时，调用 `document_read(action=get_project_context)`。
+- 主 agent 需要正文时，调用 `document_read(action=get_section|get_block|search_blocks)`。
 
-如果已经自然存在于当前上下文中，则不需要重复注入；只有在上下文被裁剪、压缩或切换调用环境时，才作为补充信息显式加入。
+读取结果作为主流程工具结果进入当前上下文，并按主流程历史恢复规则进入后续上下文窗口。
 
 ### 4. 按需读取结果
 
@@ -292,21 +289,25 @@
 
 读取结果进入该子 agent 的本轮工作上下文。
 
-## 七、默认注入内容与按需读取内容的边界
+## 七、默认上下文与按需读取边界
 
-### 默认注入
+### 默认上下文
 
-默认注入内容应尽量稳定、紧凑。
+默认上下文由 `ContextManager` 从 session log 投影恢复。
 
-建议包括：
+它包含：
 
-- 当前交底书目录
-- 当前 session 中与本轮任务直接相邻的少量上下文
+- 历史用户输入
+- 历史主 agent 回复
+- 主流程工具调用与工具结果
+- 压缩历史 messages
+- 当前用户输入
 
 ### 按需读取
 
 以下内容适合按需读取：
 
+- 当前项目标题和完整目录树
 - 某个一级章节正文
 - 某个二级子章节正文
 - 某张图的说明
@@ -376,12 +377,6 @@
 - `agent_id`
 - `goal`
 
-可选参数：
-
-- `target_section_id`
-- `target_block_id`
-- `user_message`
-
 示例：
 
 ```json
@@ -390,10 +385,7 @@
   "name": "execute_subagent",
   "arguments": {
     "agent_id": "solution_refiner",
-    "goal": "将当前讨论内容整理成一个更完整的技术方案，并指出仍需用户确认的关键决策。",
-    "target_section_id": "technical_solution",
-    "target_block_id": null,
-    "user_message": null
+    "goal": "将当前讨论内容整理成一个更完整的技术方案，并指出仍需用户确认的关键决策。"
   }
 }
 ```
@@ -402,16 +394,12 @@
 
 - `agent_id`：调用哪个子 agent
 - `goal`：对子 agent 的自然语言任务描述，也是最核心的任务语义输入
-- `target_section_id`：目标章节，可选
-- `target_block_id`：目标 block，可选
-- `user_message`：本次子任务需要显式强调的用户原始表达或任务材料，可选
 
 说明：
 
 1. `goal` 负责描述“要做什么”
-2. `target_section_id` 和 `target_block_id` 负责提供结构化目标
-3. `user_message` 只用于承载本次子任务需要强调的用户表达，不承担上下文搬运职责
-4. 上下文管理器根据当前调用方可见 `messages`、子 agent 声明和任务参数装配实际上下文
+2. 目标范围、输出要求和注意事项都写入 `goal` 的自然语言任务描述
+3. 上下文管理器根据当前调用方可见 `messages`、子 agent 声明和 `goal` 装配实际上下文
 
 因此，核心原则是：
 
@@ -422,12 +410,13 @@
 上下文管理器为子 agent 装配 `messages` 时遵循以下规则：
 
 1. 使用子 agent 自己的 system prompt 作为第一条系统消息。
-2. 继承调用方当前可见的 OpenAI-compatible `messages`。
+2. 继承调用方当前可见且已闭合的 OpenAI-compatible `messages`。
 3. 继承对象是模型可见消息，不是 session raw events。
 4. 不继承调用方的 system prompt。
-5. 在继承消息之后追加本次子任务消息，包含 `agent_id`、`goal`、目标章节或目标 block。
-6. 子 agent 内部工具调用和工具结果只进入本次子 agent run。
-7. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
+5. 在继承消息之后追加由 `agent_task` barrier 渲染出的任务说明 message。
+6. 任务说明 message 只说明继承上下文的含义和本次执行目标。
+7. 子 agent 内部工具调用和工具结果只进入本次子 agent run。
+8. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
 
 如果子 agent 需要更多正文信息，应在权限范围内调用 `document_read`。主 agent 不通过参数手工拼接正文全文。
 
@@ -546,14 +535,13 @@
 - 当前工作区
 - 工具列表
 - 子 agent 列表
-- 交底书 meta
-- 交底书目录结构
 
 ### 动态后缀
 
 - 当前时间
 - 当前用户输入
 - 当前任务
+- 本轮读取到的项目标题与目录树
 - 本轮读取结果
 - 本轮执行结果
 - 最近几次 git 提交信息
@@ -581,8 +569,7 @@
 ### 半稳定前缀
 
 - 当前工作区
-- 必要的少量 meta
-- 必要的目录信息
+- 必要的少量任务参数
 
 ### 动态后缀
 
@@ -652,7 +639,6 @@
 - `base_agent_prompt`
 - `main_agent_prompt`
 - `subagent_prompt_<agent_id>`
-- `project_context_fragment`
 - `runtime_context_fragment`
 
 再由系统在调用前按顺序拼装。
@@ -668,13 +654,13 @@
 
 本项目的 prompt 与上下文设计原则如下：
 
-1. 默认不注入完整交底书全文
-2. 默认只注入目录、任务和少量必要摘要
-3. 正文内容按需读取
+1. 默认不注入项目上下文
+2. 默认不注入完整交底书全文
+3. 项目标题、目录树和正文内容按需读取
 4. 主 agent 面向系统的控制输出必须结构化
 5. 子 agent 统一通过 `execute_subagent` 工具触发
 6. `execute_subagent` 的最小参数为 `agent_id + goal`
-7. `execute_subagent` 可携带 `target_section_id`、`target_block_id` 和 `user_message`
+7. 子 agent 的任务边界由 `agent_task` barrier 渲染为自然语言 user message
 8. 子 agent 的统一输出协议为 `status + summary + proposal + questions + warnings`
 9. prompt 同时按角色和稳定性两个维度拆分
 10. 稳定规则尽量前置，以利用 prefix cache
@@ -682,6 +668,6 @@
 12. 主 agent 与子 agent 不共享同一套完整模板
 13. 子 agent 使用更窄、更专注的模板
 14. git 提交信息和当前时间属于动态后缀
-15. 修改后如有必要，只回读目标章节或目标 block 确认
+15. 修改后如有必要，只回读项目上下文、目标章节或目标 block 确认
 
 这套规则用于指导后续主 agent 与子 agent prompt 的实现。

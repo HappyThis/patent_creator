@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from ..types import SubagentDeclaration
 from .shared import (
     DOCUMENT_ACCESS_RULES,
@@ -54,7 +51,3 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 
 {SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """
-
-
-def build_solution_refiner_user_prompt(context: dict[str, Any]) -> str:
-    return json.dumps(context, ensure_ascii=False, indent=2)

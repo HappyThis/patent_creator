@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react';
 import {
   applyAssistantDelta,
+  applyContextCompressionEvent,
   applyRunningToolEvent,
   finalizeRoundEvents,
   formatTimestamp,
@@ -135,6 +136,21 @@ export function useWorkspaceStream({
             typeof payload.message_id === 'string' ? payload.message_id : undefined,
           ),
         );
+        return;
+      }
+
+      if (
+        eventName === 'context_compression_started' ||
+        eventName === 'context_compression_completed' ||
+        eventName === 'context_compression_failed'
+      ) {
+        const status =
+          eventName === 'context_compression_started'
+            ? 'running'
+            : eventName === 'context_compression_completed'
+              ? 'done'
+              : 'failed';
+        setEvents((current) => applyContextCompressionEvent(current, payload, status));
         return;
       }
 

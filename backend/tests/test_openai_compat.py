@@ -64,6 +64,20 @@ def test_generate_json_omits_provider_thinking_when_disabled(tmp_path: Path) -> 
     assert "extra_body" not in fake.completions.calls[0]
 
 
+def test_generate_json_can_override_timeout(tmp_path: Path) -> None:
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))],
+        usage=None,
+    )
+    fake = FakeOpenAIClient(completion)
+    client = OpenAICompatibleClient(make_settings(tmp_path, thinking_enabled=False), client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(client.generate_json(system_prompt="system", user_prompt="user", timeout=180))
+
+    assert result == {"ok": True}
+    assert fake.completions.calls[0]["timeout"] == 180
+
+
 def test_generate_with_tools_stream_sends_provider_thinking_when_enabled(tmp_path: Path) -> None:
     fake = FakeOpenAIClient(FakeStream("ok"))
     client = OpenAICompatibleClient(make_settings(tmp_path, thinking_enabled=True), client=fake)  # type: ignore[arg-type]

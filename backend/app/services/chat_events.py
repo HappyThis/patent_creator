@@ -150,6 +150,7 @@ class ChatEventEmitter:
         *,
         arguments: dict[str, Any],
         call_id: str,
+        caller_messages: list[dict[str, Any]],
     ) -> dict[str, Any]:
         agent_id = str(arguments.get("agent_id") or "")
         self.store.append_session_event(
@@ -183,6 +184,7 @@ class ChatEventEmitter:
             round_id=state.round_id,
             message_id=state.message_id,
             parent_call_id=call_id,
+            caller_messages=caller_messages,
             on_tool_event=lambda event_name, event_payload: self.bus.publish(
                 (project_id, state.session_id),
                 event_name,

@@ -63,7 +63,31 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       continue;
     }
 
-    if (event.type === 'context_summary' || event.type === 'context_pruned') {
+    if (event.type === 'context_summary') {
+      events.push({
+        id: event.id,
+        kind: 'context_status',
+        timestamp: formatTimestamp(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
+        status: 'done',
+        summary: '上下文压缩已完成',
+      });
+      continue;
+    }
+
+    if (event.type === 'context_pruned') {
+      events.push({
+        id: event.id,
+        kind: 'context_status',
+        timestamp: formatTimestamp(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
+        status: 'failed',
+        summary: '上下文压缩失败',
+      });
       continue;
     }
 
@@ -124,6 +148,33 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
   }
 
   return events;
+}
+
+export function applyContextCompressionEvent(
+  current: ChatEvent[],
+  payload: Record<string, unknown>,
+  status: 'running' | 'done' | 'failed',
+): ChatEvent[] {
+  const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
+  const id = `context_compression_${roundId ?? 'active'}`;
+  const fallbackSummary =
+    status === 'running' ? '上下文正在压缩' : status === 'done' ? '上下文压缩已完成' : '上下文压缩失败';
+  const nextEvent: ChatEvent = {
+    id,
+    kind: 'context_status',
+    timestamp: formatTimestamp(),
+    round_id: roundId,
+    message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+    status,
+    summary: typeof payload.summary === 'string' ? payload.summary : fallbackSummary,
+  };
+  const existingIndex = current.findIndex((item) => item.kind === 'context_status' && item.id === id);
+  if (existingIndex === -1) {
+    return [...current, nextEvent];
+  }
+  const next = [...current];
+  next[existingIndex] = nextEvent;
+  return next;
 }
 
 export function applyRunningToolEvent(

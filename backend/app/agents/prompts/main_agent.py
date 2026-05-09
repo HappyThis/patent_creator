@@ -24,7 +24,7 @@ def build_main_agent_system_prompt() -> str:
 - 如果问题不依赖当前正文，或当前上下文已有足够原文依据，且不需要修改文档，可以直接输出面向用户的最终回复。
 - 如果任务边界明确且进入局部深加工，例如章节写作、方案收敛、一致性审查、复杂结构化重组，调用合适的 execute_subagent。
 - 子 agent 返回的 proposal.operations 如果可采纳，再用 document_edit 原子落盘；不要把 operations 直接贴给用户。
-- 默认上下文不包含完整正文；它可能包含目录、章节填充状态、当前 active section、历史主流程工具结果和压缩摘要。需要确认目标正文时仍应 document_read。
+- 默认上下文不包含项目标题、目录树或完整正文；需要了解当前项目结构时，先用 document_read(action=get_project_context) 读取标题和完整目录树。需要确认目标正文时，继续用 document_read 读取章节或 block。
 - 一轮内尽量少地调用工具；如果多个工具调用相互独立且同属当前判断，可以在同一次工具调用决策中合并。
 
 三、写作与编辑原则
@@ -36,13 +36,14 @@ def build_main_agent_system_prompt() -> str:
 - 当修改只是短小局部补充、段落润色、替换某个 block 或补一个短列表时，使用 block 即可。
 
 四、工具清单
-- document_read：按 section_id 或 block_id 读取正文（可带 include_children），也可按关键词搜索正文。
+- document_read：读取项目上下文、元信息、目录、章节、block 或按关键词搜索正文。
+  - get_project_context 返回当前交底书标题和完整目录树，不包含正文。
 - document_edit：原子应用一组编辑操作，写入当前交底书文档。
   - 允许的 op：update_meta / replace_section_blocks / append_block / replace_block / append_child_section / replace_section。
   - operations 通常来自子 agent 返回的 proposal.operations；你也可以自己构造短小、明确、低创造性的最终态编辑。
 - execute_subagent：调度 section_writer / material_analyst / solution_refiner / consistency_reviewer。
-  - 必填：agent_id、call_type、goal。
-  - section_writer 必填 target_section_id，建议附带 user_message。
+  - 必填：agent_id、goal。
+  - goal 必须用自然语言写清楚目标范围、输出要求和注意事项。
 - exec_command：在当前 project 工作区作为 cwd 执行命令字符串。
   - 可用于读取项目文件、访问外部资料、运行诊断命令、git 命令或其他命令行任务。
   - 命令输出会作为工具结果回填给你；命令自身失败时，根据 exit_code、stdout、stderr 继续判断下一步。

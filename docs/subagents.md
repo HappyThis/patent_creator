@@ -79,14 +79,15 @@
 
 子 agent 采用统一上下文装配策略：
 
-1. 主 agent 通过 `execute_subagent` 提供 `agent_id`、`goal` 和必要目标参数。
+1. 主 agent 通过 `execute_subagent` 提供 `agent_id` 和 `goal`。
 2. 上下文管理器自动装配子 agent 的 OpenAI-compatible `messages`。
 3. 子 agent 使用自己的 system prompt。
 4. 子 agent 不继承主 agent 的 system prompt。
-5. 子 agent 继承调用方当前可见 `messages`，这里的 `messages` 不是 session raw events。
-6. 上下文管理器在继承消息之后追加本次子任务消息。
-7. 子 agent 内部工具调用与工具结果只服务于本次子 agent run。
-8. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
+5. 子 agent 继承调用方当前可见且已闭合的 `messages`，这里的 `messages` 不是 session raw events。
+6. 上下文管理器在继承消息之后追加由 `agent_task` barrier 渲染出的任务说明 message。
+7. 任务说明 message 只说明继承上下文的含义和本次执行目标。
+8. 子 agent 内部工具调用与工具结果只服务于本次子 agent run。
+9. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
 
 如果子 agent 判断上下文不足，应在权限范围内调用 `document_read`，或在统一 envelope 中返回需要补充确认的问题。
 

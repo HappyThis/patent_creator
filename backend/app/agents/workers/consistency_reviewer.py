@@ -7,27 +7,6 @@ from ...core import ApiError
 _ALLOWED_SEVERITIES = {"low", "medium", "high"}
 
 
-def build_consistency_reviewer_context(
-    *,
-    goal: str,
-    user_message: str,
-    outline: list[dict[str, Any]],
-    target_section: dict[str, Any] | None,
-    target_section_id: str | None,
-    recent_user_inputs: list[str],
-) -> dict[str, Any]:
-    return {
-        "task": {
-            "goal": goal,
-            "user_message": user_message,
-            "target_section_id": target_section_id,
-        },
-        "outline": outline,
-        "target_section": target_section,
-        "recent_user_inputs": recent_user_inputs,
-    }
-
-
 def build_consistency_reviewer_result(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("proposal_type") != "review_report":
         raise ApiError(502, "subagent_invalid_submit_result", "consistency_reviewer 必须提交 review_report。")

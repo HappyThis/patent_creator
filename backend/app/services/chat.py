@@ -133,6 +133,18 @@ class ChatService:
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
         system_prompt = build_main_agent_system_prompt()
+
+        async def on_context_event(event_name: str, event_payload: dict[str, Any]) -> None:
+            await self.bus.publish(
+                key,
+                event_name,
+                {
+                    **event_payload,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+
         messages = await self.context_manager.prepare_main_agent_messages(
             project_id,
             state.session_id,
@@ -142,6 +154,7 @@ class ChatService:
             current_message_id=state.message_id,
             round_id=state.round_id,
             llm_client=self.llm_client,
+            on_context_event=on_context_event,
         )
         changed_payload: dict[str, Any] = dict(DEFAULT_CHANGED_PAYLOAD)
         changed_payload["active_section_id"] = payload.active_section_id
@@ -208,7 +221,7 @@ class ChatService:
                     await self.events.agent_output(project_id, state, tool_preamble)
 
                 for tool_call in tool_calls:
-                    result = await self._execute_tool_call(project_id, state, tool_call)
+                    result = await self._execute_tool_call(project_id, state, tool_call, caller_messages=messages)
 
                     if tool_call.tool == "document_edit" and result.get("status") == "success":
                         output = result["output"]
@@ -237,7 +250,10 @@ class ChatService:
                     )
                 await self._sleep()
             else:
-                final_reply = "本轮步数已达上限，请继续补充信息或重试。"
+                final_reply = (
+                    "本轮已达到安全执行步数上限，系统已停止继续调用工具以避免循环。"
+                    "当前上下文和工具结果已保留，你可以直接要求我继续完成。"
+                )
                 logger.warning(
                     "round max_steps_reached project=%s session=%s max_steps=%d",
                     project_id,
@@ -303,6 +319,7 @@ class ChatService:
         tool_name: str,
         arguments: dict[str, Any],
         call_id: str,
+        caller_messages: list[dict[str, Any]],
     ) -> dict[str, Any]:
         if tool_name == "document_read":
             result = self.executor.document_read(project_id, arguments)
@@ -334,7 +351,13 @@ class ChatService:
             return result
 
         if tool_name == "execute_subagent":
-            return await self.events.execute_subagent(project_id, state, arguments=arguments, call_id=call_id)
+            return await self.events.execute_subagent(
+                project_id,
+                state,
+                arguments=arguments,
+                call_id=call_id,
+                caller_messages=caller_messages,
+            )
 
         if tool_name == "exec_command":
             result = self.executor.exec_command(project_id, arguments)
@@ -357,6 +380,8 @@ class ChatService:
         project_id: str,
         state: RoundState,
         tool_call: MainAgentToolCall,
+        *,
+        caller_messages: list[dict[str, Any]],
     ) -> dict[str, Any]:
         logger.info(
             "round tool_call id=%s tool=%s arguments=%s",
@@ -380,7 +405,14 @@ class ChatService:
                 result.get("status"),
             )
             return result
-        result = await self._dispatch_tool(project_id, state, tool_call.tool, tool_call.arguments, tool_call.tool_call_id)
+        result = await self._dispatch_tool(
+            project_id,
+            state,
+            tool_call.tool,
+            tool_call.arguments,
+            tool_call.tool_call_id,
+            caller_messages,
+        )
         logger.info(
             "round tool_call id=%s tool=%s status=%s",
             tool_call.tool_call_id,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.agents import get_subagent
 from app.agents.prompts import build_main_agent_system_prompt, build_section_writer_system_prompt
 from app.agents.prompts.consistency_reviewer import build_consistency_reviewer_system_prompt
@@ -8,7 +10,8 @@ from app.agents.prompts.material_analyst import build_material_analyst_system_pr
 from app.agents.prompts.section_writer import build_section_writer_system_prompt as build_split_section_writer_system_prompt
 from app.agents.prompts.solution_refiner import build_solution_refiner_system_prompt
 from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
-from app.agents.workers.section_writer import build_section_writer_context
+from app.runtime.context.barrier import render_barrier_message
+from app.runtime.context.prompts import context_compressor_system_prompt
 
 
 def test_agent_prompts_are_split_by_agent_module() -> None:
@@ -114,8 +117,8 @@ def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> 
     assert "你具备写作能力" in prompt
     assert "复杂章节写作" in prompt
     assert "短小、明确、低创造性的最终态正文编辑" in prompt
-    assert "默认上下文不包含完整正文" in prompt
-    assert "历史主流程工具结果" in prompt
+    assert "默认上下文不包含项目标题、目录树或完整正文" in prompt
+    assert "document_read(action=get_project_context)" in prompt
 
 
 def test_main_agent_document_read_supports_search_blocks() -> None:
@@ -123,21 +126,57 @@ def test_main_agent_document_read_supports_search_blocks() -> None:
     properties = document_read["function"]["parameters"]["properties"]
 
     assert "search_blocks" in properties["action"]["enum"]
+    assert "get_project_context" in properties["action"]["enum"]
     assert "query" in properties
 
 
 def test_section_writer_context_prefers_children_for_complex_sections() -> None:
-    context = build_section_writer_context(
-        target_section_id="technical_solution",
-        target_block_id=None,
-        goal="补充整体架构和处理流程",
-        user_message="请补充整体架构和处理流程",
-        outline=[],
-        section=None,
-        recent_user_inputs=[],
-    )
+    prompt = build_section_writer_system_prompt(get_subagent("section_writer"))
 
-    constraints = context["document_constraints"]
-    assert "replace_section" in constraints["allowed_ops"]
-    assert "优先使用 replace_section 生成 children" in constraints["preferred_write_strategy"]
-    assert "最终态文本" in constraints["final_text_policy"]
+    assert "replace_section" in prompt
+    assert "使用 replace_section 生成 section.children" in prompt
+    assert "最终态文本" in prompt
+
+
+def test_execute_subagent_schema_only_uses_agent_id_and_goal() -> None:
+    tool = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "execute_subagent")
+    params = tool["function"]["parameters"]
+
+    assert params["required"] == ["agent_id", "goal"]
+    assert set(params["properties"]) == {"agent_id", "goal"}
+
+
+def test_barrier_renderer_outputs_user_messages() -> None:
+    compressed = render_barrier_message({"kind": "compressed_context"})
+    task = render_barrier_message({"kind": "agent_task", "task": "检查提示词冲突"})
+
+    assert compressed["role"] == "user"
+    assert "系统压缩后的历史上下文" in compressed["content"]
+    assert task["role"] == "user"
+    assert "从调用方继承的历史上下文" in task["content"]
+    assert "检查提示词冲突" in task["content"]
+
+
+def test_context_compressor_prompt_contains_parseable_json_examples() -> None:
+    prompt = context_compressor_system_prompt()
+
+    assert "换行写成 \\n" in prompt
+    assert "双引号写成 \\\"" in prompt
+    assert "反斜杠写成 \\\\" in prompt
+    assert "target_estimated_tokens" not in prompt
+    assert "25%" not in prompt
+
+    minimal_label = "高密度项目记忆示例：\n"
+    tool_label = "\n需要保留工具证据时的合法输出示例：\n"
+    minimal_example = prompt.split(minimal_label, 1)[1].split(tool_label, 1)[0]
+    tool_example = prompt.split(tool_label, 1)[1]
+
+    minimal = json.loads(minimal_example)
+    with_tool = json.loads(tool_example)
+
+    assert set(minimal) == {"compressed_messages", "warnings"}
+    assert set(with_tool) == {"compressed_messages", "warnings"}
+    assert with_tool["compressed_messages"][-1] == {
+        "role": "assistant",
+        "preserved_tool_call_ids": ["call_read_context_doc"],
+    }

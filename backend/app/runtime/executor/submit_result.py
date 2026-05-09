@@ -21,19 +21,18 @@ def invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
     return tool_failed("invalid_tool_arguments_json", message)
 
 
-def submit_subagent_result(agent_id: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def submit_subagent_result(agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        result = build_subagent_result(agent_id, payload, context)
+        result = build_subagent_result(agent_id, payload)
     except ApiError as exc:
         return tool_failed(exc.code, exc.message)
     return tool_success({"result": result})
 
 
-def build_subagent_result(agent_id: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def build_subagent_result(agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     validate_submit_result_envelope(agent_id, payload)
     if agent_id == "section_writer":
-        task = context["task"]
-        return build_section_writer_result(payload, task["target_section_id"], task.get("target_block_id"))
+        return build_section_writer_result(payload)
     if agent_id == "material_analyst":
         return build_material_analyst_result(payload)
     if agent_id == "solution_refiner":

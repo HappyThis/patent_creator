@@ -120,6 +120,9 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 
 - 子 agent 作为 `execute_subagent` 被调用。
 - 子 agent 过程通过 `scope`、`call_id` 和 `parent_call_id` 记录。
+- barrier 是上下文装配阶段的内部抽象，不作为独立 event 写入 session log。
+- `compressed_context` barrier 渲染后的 message 写入 `context_summary.compressed_messages`。
+- `agent_task` barrier 渲染后的 message 只进入子 agent 本次运行的 `messages`，不作为主流程 event 写入。
 
 ## 五、公共字段
 
@@ -254,9 +257,7 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
     "tool": "execute_subagent",
     "arguments": {
       "agent_id": "material_analyst",
-      "goal": "从当前用户输入中提炼技术方向、目标和待确认信息。",
-      "target_section_id": null,
-      "target_block_id": null
+      "goal": "从当前用户输入中提炼技术方向、目标和待确认信息。"
     }
   }
 }
@@ -287,10 +288,8 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
   "payload": {
     "tool": "execute_subagent",
     "status": "success",
-      "output": {
-        "agent_id": "material_analyst",
-        "target_section_id": null,
-        "target_block_id": null,
+    "output": {
+      "agent_id": "material_analyst",
       "result": {
         "status": "success",
         "summary": "已提炼出技术方向和待确认问题。",
@@ -381,10 +380,10 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 
 ```jsonl
 {"id":"evt_000001","ts":"2026-04-23T15:30:00+08:00","type":"user_input","seq":1,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":null,"parent_call_id":null,"payload":{"text":"我想写一个图像检测方向的专利交底书。"}}
-{"id":"evt_000002","ts":"2026-04-23T15:30:10+08:00","type":"tool_call","seq":2,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","arguments":{"agent_id":"material_analyst","goal":"从当前用户输入中提炼技术方向、目标和待确认信息。","target_section_id":null,"target_block_id":null}}}
+{"id":"evt_000002","ts":"2026-04-23T15:30:10+08:00","type":"tool_call","seq":2,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","arguments":{"agent_id":"material_analyst","goal":"从当前用户输入中提炼技术方向、目标和待确认信息。"}}}
 {"id":"evt_000003","ts":"2026-04-23T15:30:11+08:00","type":"tool_call","seq":3,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","arguments":{"action":"get_outline"}}}
 {"id":"evt_000004","ts":"2026-04-23T15:30:11+08:00","type":"tool_result","seq":4,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","status":"success","output":{"sections":[]}}}
-{"id":"evt_000005","ts":"2026-04-23T15:30:12+08:00","type":"tool_result","seq":5,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","status":"success","output":{"agent_id":"material_analyst","target_section_id":null,"target_block_id":null,"result":{"status":"success","summary":"已提炼出技术方向和待确认问题。","proposal":{"type":"analysis_result","facts":[{"kind":"technical_direction","text":"当前主题可归纳为图像检测方向。"}],"candidate_terms":["图像检测"],"recommended_next_actions":[]},"questions":["是否强调低算力实时性？"],"warnings":[]}}}}
+{"id":"evt_000005","ts":"2026-04-23T15:30:12+08:00","type":"tool_result","seq":5,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","status":"success","output":{"agent_id":"material_analyst","result":{"status":"success","summary":"已提炼出技术方向和待确认问题。","proposal":{"type":"analysis_result","facts":[{"kind":"technical_direction","text":"当前主题可归纳为图像检测方向。"}],"candidate_terms":["图像检测"],"recommended_next_actions":[]},"questions":["是否强调低算力实时性？"],"warnings":[]}}}}
 ```
 
 ## 十一、设计结论

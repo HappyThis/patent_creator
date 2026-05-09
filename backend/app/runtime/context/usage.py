@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from typing import Any
 
 from ...core import Settings
 
@@ -27,12 +28,12 @@ class ContextUsage:
         }
 
 
-def estimate_messages_tokens(messages: list[dict[str, str]]) -> int:
+def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     text = json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
     return max(1, math.ceil(len(text) / 2))
 
 
-def usage_for_messages(messages: list[dict[str, str]], settings: Settings) -> ContextUsage:
+def usage_for_messages(messages: list[dict[str, Any]], settings: Settings) -> ContextUsage:
     used_tokens = estimate_messages_tokens(messages)
     max_tokens = settings.context_max_tokens
     threshold_tokens = max(

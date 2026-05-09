@@ -28,6 +28,7 @@ class ScriptedLLMClient:
         self._script = list(script)
         self._cursor = 0
         self._script_subagents = script_subagents
+        self.generated_json_payloads: list[dict[str, Any]] = []
 
     async def generate_with_tools_stream(
         self,
@@ -39,8 +40,8 @@ class ScriptedLLMClient:
         response_format_json: bool = False,
     ) -> dict[str, Any]:
         if "子 agent：" in system_prompt and not self._script_subagents:
-            context = json.loads(messages[0]["content"])
-            target_section_id = context["task"]["target_section_id"]
+            task_content = str(messages[-1].get("content") or "")
+            target_section_id = "technical_effects" if "技术效果" in task_content else "technical_solution"
             arguments = {
                 "summary": "已生成候选正文。",
                 "reply": "已补充目标章节。",
@@ -106,27 +107,30 @@ class ScriptedLLMClient:
             }
         return {"role": "assistant", "content": ""}
 
-    async def generate_json(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> dict[str, Any]:
+    async def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         if "上下文压缩 agent" in system_prompt:
             context = json.loads(user_prompt)
-            event_count = len(context.get("events") or [])
+            context["_timeout"] = timeout
+            self.generated_json_payloads.append(context)
+            message_count = len(context.get("compressible_messages") or [])
             return {
-                "summary": f"系统压缩摘要：此前共有 {event_count} 条主 agent 历史消息，用户正在延续同一任务。",
+                "compressed_messages": [
+                    {
+                        "role": "user",
+                        "content": f"我前面已经提供了 {message_count} 条历史消息相关的信息，现在继续同一任务。",
+                    }
+                ],
                 "warnings": [],
             }
-        context = json.loads(user_prompt)
-        target_section_id = context["task"]["target_section_id"]
         return {
-            "summary": "已生成候选正文。",
-            "reply": "已补充目标章节。",
-            "rationale": "根据用户输入生成候选。",
-            "operations": [
-                {
-                    "op": "replace_section_blocks",
-                    "section_id": target_section_id,
-                    "blocks": [{"type": "paragraph", "text": "正文占位。"}],
-                }
-            ],
+            "compressed_messages": [{"role": "user", "content": "压缩后的历史。"}],
             "questions": [],
             "warnings": [],
         }
@@ -264,10 +268,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
                     "execute_subagent",
                     {
                         "agent_id": "section_writer",
-                        "call_type": "rich_context_specialist",
                         "goal": "补充技术效果章节",
-                        "target_section_id": "technical_effects",
-                        "user_message": "请补充技术效果。",
                     },
                     "call_2",
                 )
@@ -307,13 +308,13 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     assert main_tool_calls.count("document_read") == 1
     assert main_tool_calls.count("execute_subagent") == 1
     assert main_tool_calls.count("document_edit") == 1
-    # 子 agent 作用域应额外产生 document_read 事件（文档规定的子 agent 读文档行为）
+    # 子 agent 不再由调度器自动预读章节；需要正文时由子 agent 自行调用 document_read。
     sub_tool_calls = [
         event.payload.get("tool")
         for event in events
         if event.type == "tool_call" and event.scope.startswith("subagent:")
     ]
-    assert "document_read" in sub_tool_calls
+    assert sub_tool_calls == ["submit_result"]
     assert "agent_output" in event_types
     assert event_types[-1] == "agent_output"
 
@@ -425,7 +426,6 @@ async def test_execute_subagent_unknown_agent_returns_tool_failure(tmp_path: Pat
                     "execute_subagent",
                     {
                         "agent_id": "missing_writer",
-                        "call_type": "rich_context_specialist",
                         "goal": "测试不存在的子 agent。",
                     },
                     "call_missing_subagent",
@@ -613,7 +613,8 @@ async def test_main_agent_loop_max_steps_limit_response(tmp_path: Path) -> None:
     names = [name for name, _ in bus_events]
     assert names[-1] == "round_finished"
     round_finished_payload = bus_events[-1][1]
-    assert "本轮步数已达上限" in round_finished_payload["reply"]
+    assert "本轮已达到安全执行步数上限" in round_finished_payload["reply"]
+    assert "避免循环" in round_finished_payload["reply"]
     assert round_finished_payload["changed"] is False
 
 
@@ -745,17 +746,23 @@ async def test_main_agent_restores_execute_subagent_result_without_subagent_inte
                     "execute_subagent",
                     {
                         "agent_id": "section_writer",
-                        "call_type": "task_only_specialist",
                         "goal": "读取并总结背景技术。",
-                        "target_section_id": "background_technology",
-                        "user_message": "读取背景技术",
                     },
                     "call_restore_subagent",
                 )
             ],
         }
 
-    def subagent_read(_: list[dict[str, Any]]) -> dict[str, Any]:
+    def subagent_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1]["role"] == "user"
+        assert "【任务说明】" in messages[-1]["content"]
+        assert "读取并总结背景技术" in messages[-1]["content"]
+        assert {"role": "user", "content": "让子 agent 读背景技术"} in messages
+        assert not any(
+            call.get("id") == "call_restore_subagent"
+            for message in messages
+            for call in (message.get("tool_calls") or [])
+        )
         return {
             "type": "tool_calls",
             "tool_calls": [
@@ -826,6 +833,61 @@ async def test_main_agent_restores_execute_subagent_result_without_subagent_inte
 
 
 @pytest.mark.anyio
+async def test_execute_subagent_compresses_run_local_messages(tmp_path: Path) -> None:
+    def subagent_submit(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [str(message.get("content") or "") for message in messages]
+        assert any("我前面已经提供了" in content for content in contents)
+        assert any("【上下文说明】" in content for content in contents)
+        assert messages[-1]["role"] == "user"
+        assert "【任务说明】" in messages[-1]["content"]
+        arguments = {
+            "summary": "已完成分析。",
+            "reply": "已完成分析。",
+            "rationale": "基于压缩后的上下文分析。",
+            "proposal_type": "analysis_result",
+            "proposal": {"facts": [{"kind": "technical_problem", "text": "历史内容已被压缩保留。"}]},
+            "questions": [],
+            "warnings": [],
+        }
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_compressed")],
+        }
+
+    settings = make_settings(tmp_path)
+    settings.context_max_tokens = 120
+    settings.context_reserved_output_tokens = 0
+    settings.context_compress_threshold_ratio = 0.5
+    settings.context_compression_timeout = 123
+    llm = ScriptedLLMClient([subagent_submit], script_subagents=True)
+    services = AppServices(settings, llm_client=llm)
+    project_id = await create_project(services)
+    session_id = "sess_subagent_compress"
+
+    result = await services.executor.execute_subagent(
+        project_id,
+        {"agent_id": "material_analyst", "goal": "提炼压缩后的历史事实。"},
+        session_id=session_id,
+        round_id="round_subagent_compress",
+        message_id="msg_subagent_compress",
+        parent_call_id="call_parent",
+        caller_messages=[
+            {"role": "user", "content": "历史技术细节" * 120},
+            {"role": "assistant", "content": "历史处理结论" * 120},
+        ],
+    )
+
+    assert result["status"] == "success"
+    events = services.store.read_session_events(project_id, session_id)
+    summary_event = next(event for event in events if event.type == "context_summary")
+    compression_payload = llm.generated_json_payloads[-1]
+    assert compression_payload["_timeout"] == 123
+    assert "target_estimated_tokens" not in compression_payload
+    assert summary_event.scope == "subagent:material_analyst"
+    assert summary_event.payload["compressed_messages"][-1]["content"].startswith("【上下文说明】")
+
+
+@pytest.mark.anyio
 async def test_context_manager_compresses_old_session_history(tmp_path: Path) -> None:
     long_text = "历史技术细节" * 80
 
@@ -835,17 +897,18 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
 
     def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [message["content"] for message in messages]
-        assert any("系统压缩摘要" in content for content in contents)
+        assert any("我前面已经提供了" in content for content in contents)
         assert not any(content == long_text for content in contents[:-1])
         assert messages[-1] == {"role": "user", "content": "继续完善"}
         return {"type": "respond", "text": "继续处理。"}
 
     llm = ScriptedLLMClient([first_round, second_round])
     settings = make_settings(tmp_path)
-    settings.context_max_tokens = 900
-    settings.context_reserved_output_tokens = 100
+    settings.context_max_tokens = 200
+    settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.5
     settings.context_recent_full_rounds = 1
+    settings.context_compression_timeout = 123
     services = AppServices(settings, llm_client=llm)
     project_id = await create_project(services)
 
@@ -859,7 +922,17 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
     await wait_until_idle(services, project_id)
 
     events = services.store.read_session_events(project_id, first.session_id)
-    assert any(event.type == "context_summary" for event in events)
+    summary_event = next(event for event in events if event.type == "context_summary")
+    compressed_messages = summary_event.payload["compressed_messages"]
+    bus_events, _ = await services.bus.subscribe((project_id, first.session_id))
+    bus_event_names = [name for name, _payload in bus_events]
+    assert "context_compression_started" in bus_event_names
+    assert "context_compression_completed" in bus_event_names
+    compression_payload = llm.generated_json_payloads[-1]
+    assert compression_payload["_timeout"] == 123
+    assert "target_estimated_tokens" not in compression_payload
+    assert "summary" not in summary_event.payload
+    assert compressed_messages[-1]["content"].startswith("【上下文说明】")
     usage = services.context_manager.context_usage(project_id, first.session_id)
     assert usage is not None
     assert usage.used_tokens > 0
@@ -875,13 +948,13 @@ async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(
 
     def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [message["content"] for message in messages]
-        assert any("系统压缩摘要" in content for content in contents)
+        assert any("我前面已经提供了" in content for content in contents)
         assert messages[-1] == {"role": "user", "content": "继续完善"}
         return {"type": "respond", "text": "继续处理。"}
 
     llm = ScriptedLLMClient([first_round, second_round])
     settings = make_settings(tmp_path)
-    settings.context_max_tokens = 10000
+    settings.context_max_tokens = 1000
     settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.5
     settings.context_recent_full_rounds = 1
@@ -898,7 +971,8 @@ async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(
     await wait_until_idle(services, project_id)
 
     events = services.store.read_session_events(project_id, first.session_id)
-    assert any(event.type == "context_summary" for event in events)
+    summary_event = next(event for event in events if event.type == "context_summary")
+    assert summary_event.payload["compressed_messages"][-1]["content"].startswith("【上下文说明】")
 
 
 @pytest.mark.anyio
@@ -911,10 +985,7 @@ async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: P
                     "execute_subagent",
                     {
                         "agent_id": "section_writer",
-                        "call_type": "rich_context_specialist",
                         "goal": "补充背景技术",
-                        "target_section_id": "background_technology",
-                        "user_message": "补充背景技术",
                     },
                     "call_bad_json",
                 )
@@ -985,10 +1056,7 @@ async def test_subagent_submit_result_validation_failure_can_retry(tmp_path: Pat
                     "execute_subagent",
                     {
                         "agent_id": "section_writer",
-                        "call_type": "rich_context_specialist",
                         "goal": "补充背景技术",
-                        "target_section_id": "background_technology",
-                        "user_message": "补充背景技术",
                     },
                     "call_bad_submit",
                 )
@@ -1075,10 +1143,7 @@ async def test_subagent_submit_result_invalid_arguments_json_can_retry(tmp_path:
                     "execute_subagent",
                     {
                         "agent_id": "section_writer",
-                        "call_type": "rich_context_specialist",
                         "goal": "补充背景技术",
-                        "target_section_id": "background_technology",
-                        "user_message": "补充背景技术",
                     },
                     "call_bad_submit_json",
                 )

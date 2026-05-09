@@ -48,14 +48,16 @@ class OpenAICompatibleClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         client = self._require_client()
         if self.settings.log_llm_payload:
             logger.debug(
-                "generate_json request model=%s system_len=%d user_len=%d",
+                "generate_json request model=%s system_len=%d user_len=%d timeout=%s",
                 self.settings.openai_model,
                 len(system_prompt),
                 len(user_prompt),
+                timeout if timeout is not None else self.settings.llm_timeout,
             )
         started = time.monotonic()
         try:
@@ -72,6 +74,7 @@ class OpenAICompatibleClient:
                 request_payload["extra_body"] = extra_body
             completion = await client.chat.completions.create(
                 **request_payload,
+                timeout=timeout,
             )
         except APIStatusError as exc:
             logger.warning("generate_json http_error status=%s body=%s", exc.status_code, _describe_api_error(exc))
@@ -83,9 +86,10 @@ class OpenAICompatibleClient:
         elapsed = time.monotonic() - started
         usage = getattr(completion, "usage", None)
         logger.info(
-            "generate_json done model=%s elapsed=%.2fs usage=%s",
+            "generate_json done model=%s elapsed=%.2fs timeout=%s usage=%s",
             self.settings.openai_model,
             elapsed,
+            timeout if timeout is not None else self.settings.llm_timeout,
             _describe_usage(usage),
         )
         content = self._extract_text(completion)
@@ -189,9 +193,9 @@ class OpenAICompatibleClient:
                 call_id = getattr(tool_call, "id", None)
                 if call_id:
                     item["id"] = str(call_id)
-                call_type = getattr(tool_call, "type", None)
-                if call_type:
-                    item["type"] = str(call_type)
+                tool_kind = getattr(tool_call, "type", None)
+                if tool_kind:
+                    item["type"] = str(tool_kind)
                 function = getattr(tool_call, "function", None)
                 if function is None:
                     continue

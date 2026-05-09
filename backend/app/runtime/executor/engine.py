@@ -7,24 +7,28 @@ from typing import Any, Awaitable, Callable
 from ...agents import get_subagent
 from ...agents.prompts import (
     build_consistency_reviewer_system_prompt,
-    build_consistency_reviewer_user_prompt,
     build_material_analyst_system_prompt,
-    build_material_analyst_user_prompt,
     build_section_writer_system_prompt,
-    build_section_writer_user_prompt,
     build_solution_refiner_system_prompt,
-    build_solution_refiner_user_prompt,
 )
 from ...agents.runtime.openai_compat import OpenAICompatibleClient
 from ...agents.workers import (
     MainAgentToolCall,
 )
-from ...core import ApiError, Settings, generate_id
+from ...core import ApiError, Settings
 from ...domain.document_tools import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
 from ..context import ContextManager
+from ..context.barrier import render_barrier_message
+from ..context.compression import (
+    build_compression_payload,
+    prepare_compressed_messages_with_warnings,
+    restore_compressed_messages_from_messages,
+)
+from ..context.messages import closed_message_prefix
+from ..context.prompts import context_compressor_system_prompt
+from ..context.usage import estimate_messages_tokens, usage_for_messages
 from .registry import can_use_tool
-from .subagent_context import SubagentContextBuilder
 from .submit_result import invalid_tool_arguments_json_result, submit_subagent_result, subagent_tool_summary
 from .tools.document import document_edit, document_read
 from .tools.shell import exec_command
@@ -45,7 +49,7 @@ SUBAGENT_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["get_meta", "get_outline", "get_section", "get_block", "search_blocks"],
+                        "enum": ["get_meta", "get_project_context", "get_outline", "get_section", "get_block", "search_blocks"],
                     },
                     "section_id": {"type": "string"},
                     "block_id": {"type": "string"},
@@ -116,11 +120,6 @@ class ExecutorEngine:
         self.context_manager = context_manager
         self.llm_client = llm_client
         self.settings = settings
-        self.subagent_contexts = SubagentContextBuilder(
-            context_manager,
-            self._subagent_read_section,
-            self._recent_session_events,
-        )
 
     def document_read(self, project_id: str, arguments: dict[str, Any], scope: AgentScope = "main_agent") -> dict[str, Any]:
         return document_read(self.store, project_id, arguments, scope)
@@ -142,6 +141,7 @@ class ExecutorEngine:
         parent_call_id: str | None = None,
         scope: AgentScope = "main_agent",
         on_tool_event: ToolEventSink | None = None,
+        caller_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not can_use_tool(scope, "execute_subagent"):
             return tool_failed("permission_denied", "子 agent 不允许调用 execute_subagent。")
@@ -151,31 +151,24 @@ class ExecutorEngine:
         except ApiError as exc:
             return tool_failed(exc.code, exc.message)
 
-        call_type = arguments.get("call_type")
-        if call_type not in declaration.allowed_types:
-            return tool_failed("invalid_call_type", f"{declaration.id} 不支持 call_type：{call_type}")
+        goal = str(arguments.get("goal") or "").strip()
+        if not goal:
+            return tool_failed("missing_goal", "execute_subagent.goal 不能为空。")
 
-        target_section_id = arguments.get("target_section_id")
-        if declaration.id == "section_writer" and not target_section_id:
-            return tool_failed("missing_target_section_id", "section_writer 必须提供 target_section_id。")
+        try:
+            inherited_messages = closed_message_prefix(caller_messages or [])
+            task_message = render_barrier_message({"kind": "agent_task", "task": goal})
+        except (ApiError, ValueError) as exc:
+            message = exc.message if isinstance(exc, ApiError) else str(exc)
+            code = exc.code if isinstance(exc, ApiError) else "subagent_task_error"
+            return tool_failed(code, message)
 
-        context = await self.subagent_contexts.build(
-            project_id=project_id,
-            agent_id=declaration.id,
-            call_type=str(call_type),
-            arguments=arguments,
-            session_id=session_id,
-            round_id=round_id,
-            message_id=message_id,
-            parent_call_id=parent_call_id,
-            on_tool_event=on_tool_event,
-        )
         try:
             result = await self._run_subagent_loop(
                 project_id=project_id,
                 agent_id=declaration.id,
-                call_type=str(call_type),
-                context=context,
+                goal=goal,
+                initial_messages=[*inherited_messages, task_message],
                 session_id=session_id,
                 round_id=round_id,
                 message_id=message_id,
@@ -191,9 +184,6 @@ class ExecutorEngine:
         return tool_success(
             {
                 "agent_id": declaration.id,
-                "call_type": call_type,
-                "target_section_id": target_section_id,
-                "target_block_id": arguments.get("target_block_id"),
                 "result": result,
             }
         )
@@ -203,19 +193,29 @@ class ExecutorEngine:
         *,
         project_id: str,
         agent_id: str,
-        call_type: str,
-        context: dict[str, Any],
+        goal: str,
+        initial_messages: list[dict[str, Any]],
         session_id: str | None,
         round_id: str | None,
         message_id: str | None,
         parent_call_id: str | None,
         on_tool_event: ToolEventSink | None,
     ) -> dict[str, Any]:
-        system_prompt, user_prompt = self._subagent_prompts(agent_id, context)
-        messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
+        system_prompt = self._subagent_system_prompt(agent_id)
+        messages: list[dict[str, Any]] = [dict(message) for message in initial_messages]
         max_steps = max(1, self.settings.subagent_max_steps)
 
         for _step in range(max_steps):
+            messages = await self._prepare_subagent_run_messages(
+                project_id=project_id,
+                agent_id=agent_id,
+                goal=goal,
+                messages=messages,
+                session_id=session_id,
+                round_id=round_id,
+                message_id=message_id,
+                parent_call_id=parent_call_id,
+            )
             action = await self.llm_client.generate_with_tools_stream(
                 system_prompt=system_prompt,
                 messages=messages,
@@ -260,7 +260,6 @@ class ExecutorEngine:
                     project_id=project_id,
                     agent_id=agent_id,
                     tool_call=tool_call,
-                    context=context,
                     session_id=session_id,
                     round_id=round_id,
                     message_id=message_id,
@@ -289,7 +288,6 @@ class ExecutorEngine:
         project_id: str,
         agent_id: str,
         tool_call: MainAgentToolCall,
-        context: dict[str, Any],
         session_id: str | None,
         round_id: str | None,
         message_id: str | None,
@@ -331,7 +329,7 @@ class ExecutorEngine:
         elif tool_call.tool == "exec_command":
             result = self.exec_command(project_id, tool_call.arguments, scope="subagent")
         elif tool_call.tool == "submit_result":
-            result = submit_subagent_result(agent_id, tool_call.arguments, context)
+            result = submit_subagent_result(agent_id, tool_call.arguments)
         else:
             result = tool_failed("permission_denied", f"子 agent 不允许调用 {tool_call.tool}。")
 
@@ -361,57 +359,141 @@ class ExecutorEngine:
             )
         return result
 
-    async def _subagent_read_section(
+    async def _prepare_subagent_run_messages(
         self,
         *,
         project_id: str,
-        section_id: str,
         agent_id: str,
+        goal: str,
+        messages: list[dict[str, Any]],
         session_id: str | None,
         round_id: str | None,
         message_id: str | None,
         parent_call_id: str | None,
-        on_tool_event: ToolEventSink | None,
-    ) -> dict[str, Any] | None:
-        """以子 agent 身份真实调用 document_read，并同步写入 session 事件。"""
+    ) -> list[dict[str, Any]]:
+        usage = usage_for_messages(messages, self.settings)
+        if usage.used_tokens <= usage.threshold_tokens or len(messages) < 2:
+            return messages
 
-        arguments = {"action": "get_section", "section_id": section_id, "include_children": True}
-        result = await self._execute_subagent_tool(
-            project_id=project_id,
-            agent_id=agent_id,
-            tool_call=MainAgentToolCall(
-                tool="document_read",
-                arguments=arguments,
-                tool_call_id=generate_id("call"),
-            ),
-            context={},
-            session_id=session_id,
-            round_id=round_id,
-            message_id=message_id,
-            parent_call_id=parent_call_id,
-            on_tool_event=on_tool_event,
+        source_estimated_tokens = estimate_messages_tokens(messages)
+        logger.info(
+            "context compression triggered scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s used_tokens=%s threshold_tokens=%s message_count=%s",
+            agent_id,
+            project_id,
+            session_id,
+            round_id,
+            message_id,
+            parent_call_id,
+            usage.used_tokens,
+            usage.threshold_tokens,
+            len(messages),
         )
+        logger.info(
+            "context compression started scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s source_messages=%s estimated_tokens_before=%s source_estimated_tokens=%s model=%s",
+            agent_id,
+            project_id,
+            session_id,
+            round_id,
+            message_id,
+            parent_call_id,
+            len(messages),
+            usage.used_tokens,
+            source_estimated_tokens,
+            self.settings.openai_model,
+        )
+        payload = build_compression_payload(
+            current_user_message=goal,
+            compressible_messages=messages,
+        )
+        try:
+            result = await self.llm_client.generate_json(
+                system_prompt=context_compressor_system_prompt(),
+                user_prompt=json.dumps(payload, ensure_ascii=False, indent=2),
+                temperature=0.1,
+                timeout=self.settings.context_compression_timeout,
+            )
+            compressed_messages, compression_warnings = prepare_compressed_messages_with_warnings(
+                result.get("compressed_messages"),
+                source_messages=messages,
+            )
+            restored_messages = restore_compressed_messages_from_messages(
+                compressed_messages,
+                source_messages=messages,
+            )
+            task_message = render_barrier_message({"kind": "agent_task", "task": goal})
+            next_messages = [*restored_messages, task_message]
+            warnings = _combined_compression_warnings(result.get("warnings"), compression_warnings)
+            estimated_tokens_after = estimate_messages_tokens(next_messages)
+            if session_id:
+                self.store.append_session_event(
+                    project_id,
+                    session_id,
+                    event_type="context_summary",
+                    scope=f"subagent:{agent_id}",
+                    round_id=round_id,
+                    message_id=message_id or "",
+                    parent_call_id=parent_call_id,
+                    payload={
+                        "agent_scope": f"subagent:{agent_id}",
+                        "covered_message_count": len(messages),
+                        "compressed_messages": compressed_messages,
+                        "estimated_tokens_before": usage.used_tokens,
+                        "estimated_tokens_after": estimated_tokens_after,
+                        "compression_model": self.settings.openai_model,
+                        "warnings": warnings,
+                    },
+                )
+            else:
+                logger.info(
+                    "context compression event skipped scope=subagent reason=no_session agent_id=%s project_id=%s round_id=%s message_id=%s parent_call_id=%s",
+                    agent_id,
+                    project_id,
+                    round_id,
+                    message_id,
+                    parent_call_id,
+                )
+            logger.info(
+                "context compression completed scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s compressed_messages=%s estimated_tokens_before=%s estimated_tokens_after=%s warnings=%s",
+                agent_id,
+                project_id,
+                session_id,
+                round_id,
+                message_id,
+                parent_call_id,
+                len(compressed_messages),
+                usage.used_tokens,
+                estimated_tokens_after,
+                len(warnings),
+            )
+            return next_messages
+        except Exception:
+            logger.exception(
+                "context compression failed scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s used_tokens=%s threshold_tokens=%s message_count=%s",
+                agent_id,
+                project_id,
+                session_id,
+                round_id,
+                message_id,
+                parent_call_id,
+                usage.used_tokens,
+                usage.threshold_tokens,
+                len(messages),
+            )
+            raise
 
-        if result.get("status") != "success":
-            return None
-        output = result.get("output") or {}
-        section = output.get("section")
-        return section if isinstance(section, dict) else None
-
-    def _subagent_prompts(self, agent_id: str, context: dict[str, Any]) -> tuple[str, str]:
+    def _subagent_system_prompt(self, agent_id: str) -> str:
         declaration = get_subagent(agent_id)
         if agent_id == "section_writer":
-            return build_section_writer_system_prompt(declaration), build_section_writer_user_prompt(context)
+            return build_section_writer_system_prompt(declaration)
         if agent_id == "material_analyst":
-            return build_material_analyst_system_prompt(declaration), build_material_analyst_user_prompt(context)
+            return build_material_analyst_system_prompt(declaration)
         if agent_id == "solution_refiner":
-            return build_solution_refiner_system_prompt(declaration), build_solution_refiner_user_prompt(context)
+            return build_solution_refiner_system_prompt(declaration)
         if agent_id == "consistency_reviewer":
-            return build_consistency_reviewer_system_prompt(declaration), build_consistency_reviewer_user_prompt(context)
+            return build_consistency_reviewer_system_prompt(declaration)
         raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
 
-    def _recent_session_events(self, project_id: str, session_id: str | None, limit: int = 8) -> list[dict[str, Any]]:
-        if not session_id or not self.store.session_exists(project_id, session_id):
-            return []
-        events = self.store.read_session_events(project_id, session_id)
-        return [event.model_dump() for event in events[-limit:]]
+
+def _combined_compression_warnings(raw_warnings: Any, generated_warnings: list[dict[str, Any]]) -> list[Any]:
+    warnings = raw_warnings if isinstance(raw_warnings, list) else []
+    return [*warnings, *generated_warnings]
