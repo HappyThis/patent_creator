@@ -22,7 +22,7 @@ def test_material_analyst_envelope() -> None:
                 ],
                 "candidate_terms": ["低算力", "", "特征提取"],
                 "recommended_next_actions": [
-                    {"action": "write_section", "section_id": "technical_problem"},
+                    {"action": "write_section", "section_id": "sec_000006"},
                     {"action": ""},
                 ],
             },
@@ -82,7 +82,7 @@ def test_consistency_reviewer_envelope() -> None:
                 "issues": [
                     {
                         "severity": "high",
-                        "section_id": "technical_effects",
+                        "section_id": "sec_000010",
                         "block_id": None,
                         "message": "效果未呼应问题中的实时性。",
                         "suggested_fix": "补充低延迟描述。",
@@ -113,14 +113,14 @@ def test_section_writer_envelope_uses_proposal_target_not_task_context() -> None
             "rationale": "根据任务生成。",
             "proposal_type": "document_edit_proposal",
             "proposal": {
-                "target_section_id": "technical_solution",
+                "target_section_id": "sec_000007",
                 "target_block_id": None,
                 "intent": "replace_section_blocks",
                 "confidence": 0.8,
                 "operations": [
                     {
                         "op": "replace_section_blocks",
-                        "section_id": "technical_solution",
+                        "section_id": "sec_000007",
                         "blocks": [{"type": "paragraph", "text": "候选正文。"}],
                     }
                 ],
@@ -131,5 +131,5 @@ def test_section_writer_envelope_uses_proposal_target_not_task_context() -> None
     )
 
     assert result["status"] == "success"
-    assert result["proposal"]["target_section_id"] == "technical_solution"
-    assert result["proposal"]["operations"][0]["section_id"] == "technical_solution"
+    assert result["proposal"]["target_section_id"] == "sec_000007"
+    assert result["proposal"]["operations"][0]["section_id"] == "sec_000007"

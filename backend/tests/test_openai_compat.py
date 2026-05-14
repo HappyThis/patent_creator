@@ -40,28 +40,31 @@ class FakeStream:
         )
 
 
-def make_settings(tmp_path: Path, *, thinking_enabled: bool) -> Settings:
+def make_settings(tmp_path: Path, *, provider: str = "mimo", thinking: str = "disabled") -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
         openai_compat_api_key="test-key",
-        openai_compat_enable_thinking=thinking_enabled,
+        openai_compat_provider=provider,
+        openai_compat_thinking=thinking,
+        openai_compat_max_completion_tokens=8192,
     )
 
 
-def test_generate_json_omits_provider_thinking_when_disabled(tmp_path: Path) -> None:
+def test_generate_json_sends_mimo_disabled_thinking(tmp_path: Path) -> None:
     completion = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))],
         usage=None,
     )
     fake = FakeOpenAIClient(completion)
-    client = OpenAICompatibleClient(make_settings(tmp_path, thinking_enabled=False), client=fake)  # type: ignore[arg-type]
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="mimo", thinking="disabled"), client=fake)  # type: ignore[arg-type]
 
     result = asyncio.run(client.generate_json(system_prompt="system", user_prompt="user"))
 
     assert result == {"ok": True}
-    assert "extra_body" not in fake.completions.calls[0]
+    assert fake.completions.calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert fake.completions.calls[0]["max_completion_tokens"] == 8192
 
 
 def test_generate_json_can_override_timeout(tmp_path: Path) -> None:
@@ -70,7 +73,7 @@ def test_generate_json_can_override_timeout(tmp_path: Path) -> None:
         usage=None,
     )
     fake = FakeOpenAIClient(completion)
-    client = OpenAICompatibleClient(make_settings(tmp_path, thinking_enabled=False), client=fake)  # type: ignore[arg-type]
+    client = OpenAICompatibleClient(make_settings(tmp_path), client=fake)  # type: ignore[arg-type]
 
     result = asyncio.run(client.generate_json(system_prompt="system", user_prompt="user", timeout=180))
 
@@ -78,9 +81,9 @@ def test_generate_json_can_override_timeout(tmp_path: Path) -> None:
     assert fake.completions.calls[0]["timeout"] == 180
 
 
-def test_generate_with_tools_stream_sends_provider_thinking_when_enabled(tmp_path: Path) -> None:
+def test_generate_with_tools_stream_sends_deepseek_disabled_thinking(tmp_path: Path) -> None:
     fake = FakeOpenAIClient(FakeStream("ok"))
-    client = OpenAICompatibleClient(make_settings(tmp_path, thinking_enabled=True), client=fake)  # type: ignore[arg-type]
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="deepseek", thinking="disabled"), client=fake)  # type: ignore[arg-type]
 
     result = asyncio.run(
         client.generate_with_tools_stream(
@@ -91,7 +94,61 @@ def test_generate_with_tools_stream_sends_provider_thinking_when_enabled(tmp_pat
     )
 
     assert result["type"] == "respond"
-    assert fake.completions.calls[0]["extra_body"] == {
-        "thinking": {"type": "enabled"},
-        "reasoning_effort": "high",
-    }
+    assert fake.completions.calls[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert fake.completions.calls[0]["max_tokens"] == 8192
+    assert "reasoning_effort" not in fake.completions.calls[0]
+
+
+def test_generate_with_tools_stream_sends_deepseek_enabled_thinking(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream("ok"))
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="deepseek", thinking="enabled"), client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[],
+        )
+    )
+
+    assert result["type"] == "respond"
+    assert fake.completions.calls[0]["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert fake.completions.calls[0]["reasoning_effort"] == "high"
+
+
+def test_generate_with_tools_stream_filters_reasoning_for_mimo_disabled(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream("ok"))
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="mimo", thinking="disabled"), client=fake)  # type: ignore[arg-type]
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[
+                {"role": "assistant", "content": "上一轮", "reasoning_content": "不应回放"},
+                {"role": "user", "content": "继续"},
+            ],
+            tools=[],
+        )
+    )
+
+    request_messages = fake.completions.calls[0]["messages"]
+    assert request_messages[1] == {"role": "assistant", "content": "上一轮"}
+
+
+def test_generate_with_tools_stream_replays_reasoning_for_deepseek_enabled(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream("ok"))
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="deepseek", thinking="enabled"), client=fake)  # type: ignore[arg-type]
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[
+                {"role": "assistant", "content": "上一轮", "reasoning_content": "需要回放"},
+                {"role": "user", "content": "继续"},
+            ],
+            tools=[],
+        )
+    )
+
+    request_messages = fake.completions.calls[0]["messages"]
+    assert request_messages[1]["reasoning_content"] == "需要回放"

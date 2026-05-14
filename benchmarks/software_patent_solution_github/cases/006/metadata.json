@@ -1,0 +1,86 @@
+{
+  "id": "006",
+  "title": "Durable agent chat 中客户端清理与服务端取消解耦控制机制",
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "cloudflare/agents",
+    "repo_url": "https://github.com/cloudflare/agents",
+    "snapshot_commit": "7090e9eec337ae1496afce1a544044d9c765a021",
+    "snapshot_date": "2026-05-11",
+    "issue_urls": [],
+    "pr_urls": [
+      "https://github.com/cloudflare/agents/pull/1484"
+    ],
+    "solution_merge_commit": "364a45da3efb7418ecf1dd0da1c21cb3d4059b27",
+    "solution_merged_at": "2026-05-11T21:27:18Z"
+  },
+  "project": {
+    "source_project_id": "cloudflare_agents",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Cloudflare Workers",
+      "Durable Objects",
+      "React",
+      "WebSocket"
+    ],
+    "snapshot_descriptor": "snapshot.json",
+    "runtime_checkout_dir": "repo",
+    "focus_paths": [
+      "packages/ai-chat/src/ws-chat-transport.ts",
+      "packages/ai-chat/src/react.tsx",
+      "packages/ai-chat/src/tests/ws-transport-abort.test.ts",
+      "packages/ai-chat/src/tests/ws-transport-resume.test.ts",
+      "docs/resumable-streaming.md",
+      "docs/chat-agents.md",
+      "packages/ai-chat/README.md"
+    ],
+    "excluded_paths": [
+      "PR #1484 final implementation",
+      "packages/ai-chat/src/tests/ws-transport-cancellation-policy.test.ts from PR #1484",
+      ".changeset/durable-chat-cancellation.md from PR #1484"
+    ]
+  },
+  "case": {
+    "difficulty": "medium",
+    "difficulty_score": 3,
+    "difficulty_reason": "取消语义解耦聚焦在客户端 stream 生命周期与服务端 turn 生命周期，虽然要兼容 resume 和工具 continuation，但技术面相对集中。",
+    "context_shape": "prepared_project_environment",
+    "source_project_id": "cloudflare_agents",
+    "source_kind": "feature_iteration",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "streaming_lifecycle_design",
+      "agent_runtime_control",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "agent_chat",
+      "durable_streaming",
+      "cancellation_policy",
+      "websocket",
+      "resumable_streaming",
+      "client_lifecycle"
+    ]
+  },
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "hidden_from_agent": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "PR #1484 final diff",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  }
+}

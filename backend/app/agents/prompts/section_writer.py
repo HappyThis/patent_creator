@@ -36,9 +36,11 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 - submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
 - proposal_type 必须是 document_edit_proposal。
 - proposal.operations 必须是 document_edit 支持的操作数组。
+- section_id 必须来自 document_read 返回的系统生成 id，例如 sec_000007；不要把 technical_solution、technical_effects 等章节语义当作 section_id。
 - 你必须严格使用以下字段名，不能自创别名：
-  - operation 中只能使用 `section_id`、`block_id`、`blocks`、`block`、`section`、`child_section`
+  - operation 中只能使用 `section_id`、`parent_section_id`、`block_id`、`blocks`、`block`、`section`
   - 不能使用 `target_id`、`target_section_id`、`target_block_id`
+- append_child_section 必须使用 `parent_section_id` 指定父章节，使用 `section` 指定新增子章节；不能使用 `section_id`、`child` 或 `child_section`。
 - 允许的 op 只有：
   - update_meta
   - replace_section_blocks
@@ -46,7 +48,9 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
   - replace_block
   - append_child_section
   - replace_section
-- 新增 block 时不要手写 id。
+- 新增 block 和新增 section 时都不要手写 id。
+- replace_section 的 section 对象也不要携带 id；只保留目标章节原有 type，并用 title / blocks / children 表达内容。
+- 子章节必须使用 `type:"custom"`，用 `title` 表达“整体架构”“处理流程”“技术效果”等语义。
 - 如果目标章节只需要短小正文块，使用 replace_section_blocks。
 - 如果目标章节需要结构化表达，使用 replace_section 生成 section.children；不要把多个应有标题的内容平铺成 blocks。
 - paragraph block 必须严格写成：{{"type":"paragraph","text":"..."}}。

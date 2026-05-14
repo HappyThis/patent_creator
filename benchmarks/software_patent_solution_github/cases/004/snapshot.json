@@ -1,0 +1,28 @@
+{
+  "snapshot_version": "1.0.0",
+  "type": "git_checkout",
+  "repo": "campfirein/byterover-cli",
+  "repo_url": "https://github.com/campfirein/byterover-cli",
+  "commit": "d3c297e4d20d8006938a5acf54ed5ae1b4c054c2",
+  "date": "2026-04-20",
+  "checkout_policy": {
+    "fetch_depth": 1,
+    "include_submodules": false,
+    "materialize_directory": "repo"
+  },
+  "focus_paths": [
+    "src/server/core/domain/knowledge/markdown-writer.ts",
+    "src/server/core/domain/knowledge/memory-scoring.ts",
+    "src/agent/infra/tools/implementations/search-knowledge-service.ts",
+    "src/agent/infra/tools/implementations/search-knowledge-tool.ts",
+    "src/agent/infra/tools/implementations/memory-symbol-tree.ts",
+    "src/agent/infra/tools/implementations/curate-tool.ts",
+    "src/server/infra/context-tree/file-context-tree-archive-service.ts",
+    "src/server/infra/context-tree/file-context-tree-manifest-service.ts",
+    "src/server/infra/dream/operations/consolidate.ts",
+    "src/server/infra/dream/operations/prune.ts",
+    "src/server/infra/dream/operations/synthesize.ts",
+    "src/server/infra/executor/dream-executor.ts",
+    "src/agent/infra/agent/service-initializer.ts"
+  ]
+}

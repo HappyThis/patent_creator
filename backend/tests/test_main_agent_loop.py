@@ -41,7 +41,7 @@ class ScriptedLLMClient:
     ) -> dict[str, Any]:
         if "子 agent：" in system_prompt and not self._script_subagents:
             task_content = str(messages[-1].get("content") or "")
-            target_section_id = "technical_effects" if "技术效果" in task_content else "technical_solution"
+            target_section_id = "sec_000010" if "技术效果" in task_content else "sec_000007"
             arguments = {
                 "summary": "已生成候选正文。",
                 "reply": "已补充目标章节。",
@@ -144,7 +144,6 @@ def make_settings(tmp_path: Path) -> Settings:
         openai_compat_api_key="test-key",
         round_step_delay=0.0,
         round_finish_delay=0.0,
-        main_agent_max_steps=10,
     )
 
 
@@ -254,7 +253,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
             "tool_calls": [
                 tool_call(
                     "document_read",
-                    {"action": "get_section", "section_id": "technical_effects", "include_children": True},
+                    {"action": "get_section", "section_id": "sec_000010", "include_children": True},
                     "call_1",
                 )
             ],
@@ -327,7 +326,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     assert round_finished_payload["changed"] is True
 
     disclosure = services.store.get_disclosure(project_id)
-    technical_effects = next(s for s in disclosure["sections"] if s["id"] == "technical_effects")
+    technical_effects = next(s for s in disclosure["sections"] if s["type"] == "technical_effects")
     assert len(technical_effects["blocks"]) >= 1
 
 
@@ -337,8 +336,8 @@ async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_mess
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "technical_field"}, "call_a"),
-                tool_call("document_read", {"action": "get_section", "section_id": "background_technology"}, "call_b"),
+                tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "call_a"),
+                tool_call("document_read", {"action": "get_section", "section_id": "sec_000003"}, "call_b"),
             ],
         }
 
@@ -371,7 +370,7 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "technical_field"}, "call_preamble")
+                tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "call_preamble")
             ],
             "assistant_message": {
                 "role": "assistant",
@@ -383,7 +382,7 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
                         "function": {
                             "name": "document_read",
                             "arguments": json.dumps(
-                                {"action": "get_section", "section_id": "technical_field"},
+                                {"action": "get_section", "section_id": "sec_000002"},
                                 ensure_ascii=False,
                             ),
                         },
@@ -407,12 +406,15 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
     round_events = [event for event in events if event.round_id == response.round_id]
     assert [event.type for event in round_events] == [
         "user_input",
+        "agent_message",
         "agent_output",
         "tool_call",
         "tool_result",
+        "agent_message",
         "agent_output",
     ]
-    assert round_events[1].payload["text"] == "我先读取技术领域，然后继续判断。"
+    assert round_events[1].payload["message"]["content"] == "我先读取技术领域，然后继续判断。"
+    assert round_events[2].payload["text"] == "我先读取技术领域，然后继续判断。"
     assert round_events[-1].payload["text"] == "读取完成。"
 
 
@@ -542,14 +544,14 @@ async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_ca
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "technical_field"}, "valid_call_1"),
+                tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "valid_call_1"),
                 {
                     "tool": "document_edit",
                     "arguments": {},
                     "tool_call_id": "bad_call",
                     "arguments_error": error_message,
                 },
-                tool_call("document_read", {"action": "get_section", "section_id": "background_technology"}, "valid_call_2"),
+                tool_call("document_read", {"action": "get_section", "section_id": "sec_000003"}, "valid_call_2"),
             ],
         }
 
@@ -584,38 +586,6 @@ async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_ca
     assert "round_failed" not in names
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "已收到完整工具结果。"
-
-
-@pytest.mark.anyio
-async def test_main_agent_loop_max_steps_limit_response(tmp_path: Path) -> None:
-    """主 agent 持续 read 不 respond，达到 max_steps 后用兜底回复结束。"""
-
-    def step_read(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("document_read", {"action": "get_section", "section_id": "technical_effects"}, "call_infinite")],
-        }
-
-    max_steps = 3
-    llm = ScriptedLLMClient([step_read] * (max_steps + 2))
-    settings = make_settings(tmp_path)
-    settings.main_agent_max_steps = max_steps
-    services = AppServices(settings, llm_client=llm)
-    project_id = await create_project(services)
-
-    response = await services.chat.start_round(
-        project_id,
-        ChatMessageRequest(message="hi"),
-    )
-    await wait_until_idle(services, project_id)
-
-    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
-    names = [name for name, _ in bus_events]
-    assert names[-1] == "round_finished"
-    round_finished_payload = bus_events[-1][1]
-    assert "本轮已达到安全执行步数上限" in round_finished_payload["reply"]
-    assert "避免循环" in round_finished_payload["reply"]
-    assert round_finished_payload["changed"] is False
 
 
 @pytest.mark.anyio
@@ -680,6 +650,56 @@ async def test_main_agent_restores_session_history_between_rounds(tmp_path: Path
 
 
 @pytest.mark.anyio
+async def test_main_agent_saves_reasoning_but_filters_mimo_replay(tmp_path: Path) -> None:
+    def first_round(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"type": "respond", "text": "第一轮回答"}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        restored_assistant = next(message for message in messages if message.get("role") == "assistant")
+        assert restored_assistant["content"] == "第一轮回答"
+        assert "reasoning_content" not in restored_assistant
+        return {"type": "respond", "text": "第二轮回答"}
+
+    llm = ScriptedLLMClient([first_round, second_round])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message="第一轮问题"))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, first.session_id)
+    agent_message = next(event for event in events if event.type == "agent_message")
+    assert agent_message.payload["message"]["reasoning_content"] == "测试推理内容。"
+
+
+@pytest.mark.anyio
+async def test_main_agent_replays_reasoning_for_deepseek_enabled(tmp_path: Path) -> None:
+    def first_round(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"type": "respond", "text": "第一轮回答"}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        restored_assistant = next(message for message in messages if message.get("role") == "assistant")
+        assert restored_assistant["reasoning_content"] == "测试推理内容。"
+        return {"type": "respond", "text": "第二轮回答"}
+
+    settings = make_settings(tmp_path)
+    settings.openai_compat_provider = "deepseek"
+    settings.openai_compat_thinking = "enabled"
+    llm = ScriptedLLMClient([first_round, second_round])
+    services = AppServices(settings, llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message="第一轮问题"))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
+    await wait_until_idle(services, project_id)
+
+
+@pytest.mark.anyio
 async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Path) -> None:
     def first_round_read(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -687,7 +707,7 @@ async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Pa
             "tool_calls": [
                 tool_call(
                     "document_read",
-                    {"action": "get_section", "section_id": "technical_field"},
+                    {"action": "get_section", "section_id": "sec_000002"},
                     "call_restore_read",
                 )
             ],
@@ -768,7 +788,7 @@ async def test_main_agent_restores_execute_subagent_result_without_subagent_inte
             "tool_calls": [
                 tool_call(
                     "document_read",
-                    {"action": "get_section", "section_id": "background_technology"},
+                    {"action": "get_section", "section_id": "sec_000003"},
                     "sub_internal_read",
                 )
             ],
@@ -1008,7 +1028,7 @@ async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: P
                 "operations": [
                     {
                         "op": "replace_section_blocks",
-                        "section_id": "background_technology",
+                        "section_id": "sec_000003",
                         "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
                     }
                 ],
@@ -1025,7 +1045,7 @@ async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: P
         last_tool = [message for message in messages if message.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
         assert result["status"] == "success"
-        assert result["output"]["result"]["proposal"]["operations"][0]["section_id"] == "background_technology"
+        assert result["output"]["result"]["proposal"]["operations"][0]["section_id"] == "sec_000003"
         return {"type": "respond", "text": "子 agent 已按 submit_result 重新提交。"}
 
     llm = ScriptedLLMClient(
@@ -1044,6 +1064,50 @@ async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: P
     ]
     assert main_tool_results[-1].payload["status"] == "success"
     assert [event.payload.get("text") for event in events if event.type == "agent_output"][-1] == "子 agent 已按 submit_result 重新提交。"
+
+
+@pytest.mark.anyio
+async def test_subagent_repeated_plain_response_fails_fast(tmp_path: Path) -> None:
+    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {"agent_id": "section_writer", "goal": "补充背景技术章节"},
+                    "call_subagent_plain_repeat",
+                )
+            ],
+        }
+
+    def step_subagent_plain_response(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"type": "respond", "text": "这不是 submit_result。"}
+
+    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "subagent_plain_response"
+        return {"type": "respond", "text": "子 agent 未按协议提交。"}
+
+    llm = ScriptedLLMClient(
+        [step_call_subagent, step_subagent_plain_response, step_subagent_plain_response, step_main_recover],
+        script_subagents=True,
+    )
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="测试子 agent 连续直接回复。"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    main_tool_results = [
+        event
+        for event in events
+        if event.type == "tool_result" and event.scope == "main" and event.payload.get("tool") == "execute_subagent"
+    ]
+    assert main_tool_results[-1].payload["status"] == "failed"
+    assert main_tool_results[-1].payload["output"]["code"] == "subagent_plain_response"
 
 
 @pytest.mark.anyio
@@ -1093,7 +1157,7 @@ async def test_subagent_submit_result_validation_failure_can_retry(tmp_path: Pat
                 "operations": [
                     {
                         "op": "replace_section_blocks",
-                        "section_id": "background_technology",
+                        "section_id": "sec_000003",
                         "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
                     }
                 ],
@@ -1183,7 +1247,7 @@ async def test_subagent_submit_result_invalid_arguments_json_can_retry(tmp_path:
                 "operations": [
                     {
                         "op": "replace_section_blocks",
-                        "section_id": "background_technology",
+                        "section_id": "sec_000003",
                         "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
                     }
                 ],

@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from openai import APIError, APIStatusError, AsyncOpenAI
 
 from ...core import ApiError, Settings
+from .model_profiles import resolve_model_profile
 
 logger = logging.getLogger("patent_creator.llm")
 
@@ -64,14 +65,14 @@ class OpenAICompatibleClient:
             request_payload: dict[str, Any] = {
                 "model": self.settings.openai_model,
                 "response_format": {"type": "json_object"},
+                "temperature": temperature,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            extra_body = self._thinking_extra_body()
-            if extra_body:
-                request_payload["extra_body"] = extra_body
+            profile = resolve_model_profile(self.settings)
+            profile.apply_chat_parameters(request_payload)
             completion = await client.chat.completions.create(
                 **request_payload,
                 timeout=timeout,
@@ -120,19 +121,18 @@ class OpenAICompatibleClient:
         )
         started = time.monotonic()
         try:
+            profile = resolve_model_profile(self.settings)
             request_payload: dict[str, Any] = {
                 "model": self.settings.openai_model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    *messages,
+                    *profile.prepare_messages_for_request(messages),
                 ],
                 "tools": tools,
                 "tool_choice": "auto",
                 "stream": True,
             }
-            extra_body = self._thinking_extra_body()
-            if extra_body:
-                request_payload["extra_body"] = extra_body
+            profile.apply_chat_parameters(request_payload)
             if response_format_json:
                 request_payload["response_format"] = {"type": "json_object"}
             stream = await client.chat.completions.create(
@@ -260,11 +260,6 @@ class OpenAICompatibleClient:
         if tool_calls:
             message["tool_calls"] = tool_calls
         return message
-
-    def _thinking_extra_body(self) -> dict[str, Any] | None:
-        if not self.settings.openai_compat_enable_thinking:
-            return None
-        return {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
 
     @classmethod
     def _parse_tool_call(cls, raw_call: dict[str, Any], index: int) -> dict[str, Any]:

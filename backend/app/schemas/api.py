@@ -10,7 +10,7 @@ class ProjectRecord(BaseModel):
     title: str
     created_at: str
     updated_at: str
-    schema_version: str = "v1"
+    schema_version: str = "v2"
     active_session_id: str | None = None
     running_session_id: str | None = None
     running_round_id: str | None = None
@@ -44,6 +44,7 @@ class ProjectListResponse(BaseModel):
 
 class OutlineItem(BaseModel):
     id: str
+    type: str
     title: str
     level: int
     anchor: str
@@ -79,7 +80,15 @@ class ChatMessageResponse(BaseModel):
 class SessionEvent(BaseModel):
     id: str
     ts: str
-    type: Literal["user_input", "agent_output", "tool_call", "tool_result", "context_summary", "context_pruned"]
+    type: Literal[
+        "user_input",
+        "agent_message",
+        "agent_output",
+        "tool_call",
+        "tool_result",
+        "context_summary",
+        "context_pruned",
+    ]
     seq: int
     scope: str
     round_id: str

@@ -1,0 +1,27 @@
+{
+  "snapshot_version": "1.0.0",
+  "type": "git_checkout",
+  "repo": "cloudflare/agents",
+  "repo_url": "https://github.com/cloudflare/agents",
+  "commit": "5373f5ca246e756c8c36df915380fbc5319c5162",
+  "date": "2026-05-12",
+  "checkout_policy": {
+    "fetch_depth": 1,
+    "include_submodules": false,
+    "materialize_directory": "repo"
+  },
+  "focus_paths": [
+    "packages/think/src/think.ts",
+    "packages/think/src/tests/agents/think-session.ts",
+    "packages/agents/src/observability/agent.ts",
+    "packages/agents/src/observability/base.ts",
+    "packages/agents/src/observability/index.ts",
+    "docs/server-driven-messages.md",
+    "docs/think/client-tools.md",
+    "docs/think/index.md",
+    "docs/webhooks.md",
+    "docs/workflows.md",
+    "design/think.md",
+    "design/README.md"
+  ]
+}

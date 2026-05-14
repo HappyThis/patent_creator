@@ -1,0 +1,87 @@
+{
+  "id": "002",
+  "title": "Agent 执行过程的结构化运行记录与评估附着机制",
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "builderz-labs/mission-control",
+    "repo_url": "https://github.com/builderz-labs/mission-control",
+    "snapshot_commit": "7ba1e7765779d8e1e7724df68675a1cb89c42380",
+    "snapshot_date": "2026-03-23",
+    "issue_urls": [],
+    "pr_urls": [
+      "https://github.com/builderz-labs/mission-control/pull/487"
+    ],
+    "solution_merge_commit": "d4f55dd3030419a0eef5e3054d9e0148ad44f0d0",
+    "solution_merged_at": "2026-03-23T11:27:31Z"
+  },
+  "project": {
+    "source_project_id": "builderz_labs_mission_control",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Next.js",
+      "SQLite",
+      "MCP"
+    ],
+    "snapshot_descriptor": "snapshot.json",
+    "runtime_checkout_dir": "repo",
+    "focus_paths": [
+      "src/lib/spawn-history.ts",
+      "src/lib/event-bus.ts",
+      "src/lib/migrations.ts",
+      "scripts/mc-mcp-server.cjs",
+      "src/app/api/agents/evals/route.ts",
+      "src/app/api/tasks/outcomes/route.ts",
+      "src/app/api/tasks/regression/route.ts",
+      "src/app/api/tasks/route.ts"
+    ],
+    "excluded_paths": [
+      "PR #487 final implementation",
+      "src/lib/runs.ts from PR #487",
+      "src/app/api/v1/runs/* from PR #487",
+      "src/app/api/v1/evals/leaderboard/route.ts from PR #487"
+    ]
+  },
+  "case": {
+    "difficulty": "hard",
+    "difficulty_score": 4,
+    "difficulty_reason": "AgentRun 机制覆盖数据模型、provenance、eval 附着、事件流、API 和 MCP 工具访问，跨面较广；但本质是结构化观测与评估沉淀，状态恢复压力不如最高档。",
+    "context_shape": "prepared_project_environment",
+    "source_project_id": "builderz_labs_mission_control",
+    "source_kind": "feature_iteration",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "agent_runtime_observability_design",
+      "api_boundary_analysis",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "agent_run",
+      "provenance",
+      "evals",
+      "event_stream",
+      "mcp_tools",
+      "agent_observability"
+    ]
+  },
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "hidden_from_agent": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "PR #487 final diff",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  }
+}

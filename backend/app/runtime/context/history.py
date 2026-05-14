@@ -6,7 +6,7 @@ from typing import Any
 from ...schemas import SessionEvent
 from .compression import restore_compressed_messages_from_events
 
-MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_output", "tool_call", "tool_result"}
+MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_message", "agent_output", "tool_call", "tool_result"}
 
 
 def restore_main_chat_messages(
@@ -96,6 +96,11 @@ def project_main_events(events: list[SessionEvent]) -> list[dict[str, Any]]:
             index += 1
             continue
 
+        if event.type == "agent_message":
+            agent_messages, index = _consume_agent_message(events, index)
+            messages.extend(agent_messages)
+            continue
+
         if event.type == "agent_output":
             preamble = str(event.payload.get("text") or "")
             next_event = events[index + 1] if index + 1 < len(events) else None
@@ -114,6 +119,53 @@ def project_main_events(events: list[SessionEvent]) -> list[dict[str, Any]]:
 
         index += 1
     return messages
+
+
+def _consume_agent_message(events: list[SessionEvent], start_index: int) -> tuple[list[dict[str, Any]], int]:
+    event = events[start_index]
+    message = _agent_message(event)
+    if message is None:
+        return [], start_index + 1
+
+    messages = [message]
+    index = start_index + 1
+    while (
+        index < len(events)
+        and events[index].type == "agent_output"
+        and events[index].round_id == event.round_id
+        and events[index].message_id == event.message_id
+    ):
+        index += 1
+
+    raw_calls = message.get("tool_calls")
+    if not isinstance(raw_calls, list) or not raw_calls:
+        return messages, index
+
+    call_ids = {str(call.get("id") or "") for call in raw_calls if isinstance(call, dict) and call.get("id")}
+    while index < len(events) and events[index].type in {"tool_call", "tool_result"}:
+        next_event = events[index]
+        if next_event.round_id != event.round_id or next_event.message_id != event.message_id:
+            break
+        if next_event.type == "tool_result" and next_event.call_id and str(next_event.call_id) in call_ids:
+            messages.append(_tool_result_message(next_event))
+        index += 1
+    return messages, index
+
+
+def _agent_message(event: SessionEvent) -> dict[str, Any] | None:
+    raw_message = event.payload.get("message")
+    if not isinstance(raw_message, dict):
+        return None
+    role = raw_message.get("role")
+    if role != "assistant":
+        return None
+    message = dict(raw_message)
+    content = message.get("content")
+    if content is None:
+        message["content"] = ""
+    elif not isinstance(content, str):
+        message["content"] = str(content)
+    return message
 
 
 def _consume_tool_block(
@@ -176,14 +228,35 @@ def _tool_result_message(event: SessionEvent) -> dict[str, Any]:
 
 
 def _main_tool_blocks(events: list[SessionEvent]) -> dict[str, dict[str, Any]]:
+    assistant_messages: dict[str, dict[str, Any]] = {}
     calls: dict[str, dict[str, Any]] = {}
     results: dict[str, str] = {}
     for event in events:
+        if event.scope == "main" and event.type == "agent_message":
+            message = _agent_message(event)
+            if message is not None:
+                for call in message.get("tool_calls") or []:
+                    if isinstance(call, dict) and call.get("id"):
+                        assistant_messages[str(call["id"])] = message
         if event.scope == "main" and event.type == "tool_call" and event.call_id:
             calls[str(event.call_id)] = _assistant_tool_call(event)
         if event.scope == "main" and event.type == "tool_result" and event.call_id:
             results[str(event.call_id)] = _tool_result_message(event)["content"]
     return {
-        call_id: {"tool_call": calls[call_id], "tool_result": results[call_id]}
+        call_id: {
+            "tool_call": calls[call_id],
+            "tool_result": results[call_id],
+            **_assistant_metadata_for_call(assistant_messages.get(call_id)),
+        }
         for call_id in calls.keys() & results.keys()
     }
+
+
+def _assistant_metadata_for_call(message: dict[str, Any] | None) -> dict[str, Any]:
+    if not message:
+        return {}
+    metadata: dict[str, Any] = {"assistant_content": str(message.get("content") or "")}
+    reasoning_content = message.get("reasoning_content")
+    if isinstance(reasoning_content, str) and reasoning_content:
+        metadata["reasoning_content"] = reasoning_content
+    return metadata

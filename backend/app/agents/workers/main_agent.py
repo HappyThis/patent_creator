@@ -51,7 +51,7 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "section_id": {
                         "type": "string",
-                        "description": "章节 id，例如 technical_solution。action=get_section 时必填。",
+                        "description": "系统生成的章节 id，例如 sec_000007。action=get_section 时必填；标准章节语义看 outline 中的 type。",
                     },
                     "block_id": {
                         "type": "string",
@@ -80,7 +80,7 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "operations": {
                         "type": "array",
-                        "description": "按顺序应用的编辑操作。每个操作必须包含 op 字段。",
+                        "description": "按顺序应用的编辑操作。每个操作必须包含 op 字段。append_child_section 必须使用 parent_section_id 和 section；新增或替换 section 的 section 对象不允许携带 id。",
                         "items": {"type": "object"},
                     },
                 },

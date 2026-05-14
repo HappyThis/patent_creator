@@ -1,0 +1,93 @@
+{
+  "id": "005",
+  "title": "外部调用方触发 agent 对话任务的持久接收与幂等恢复控制机制",
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "cloudflare/agents",
+    "repo_url": "https://github.com/cloudflare/agents",
+    "snapshot_commit": "5373f5ca246e756c8c36df915380fbc5319c5162",
+    "snapshot_date": "2026-05-12",
+    "issue_urls": [],
+    "pr_urls": [
+      "https://github.com/cloudflare/agents/pull/1511"
+    ],
+    "solution_merge_commit": "bf3860c20412b70a4c5c3d514d9ad62f41bb4e80",
+    "solution_merged_at": "2026-05-12T18:10:19Z"
+  },
+  "project": {
+    "source_project_id": "cloudflare_agents",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Cloudflare Workers",
+      "Durable Objects",
+      "SQLite",
+      "React"
+    ],
+    "snapshot_descriptor": "snapshot.json",
+    "runtime_checkout_dir": "repo",
+    "focus_paths": [
+      "packages/think/src/think.ts",
+      "packages/think/src/tests/agents/think-session.ts",
+      "packages/agents/src/observability/agent.ts",
+      "packages/agents/src/observability/base.ts",
+      "packages/agents/src/observability/index.ts",
+      "docs/server-driven-messages.md",
+      "docs/think/client-tools.md",
+      "docs/think/index.md",
+      "docs/webhooks.md",
+      "docs/workflows.md",
+      "design/think.md",
+      "design/README.md"
+    ],
+    "excluded_paths": [
+      "PR #1511 final implementation",
+      "design/think-durable-submissions.md from PR #1511",
+      "docs/think/programmatic-submissions.md from PR #1511",
+      "packages/think/src/tests/submissions.test.ts from PR #1511",
+      "examples/think-submissions from PR #1511"
+    ]
+  },
+  "case": {
+    "difficulty": "very_hard",
+    "difficulty_score": 5,
+    "difficulty_reason": "Durable submissions 需要设计持久提交 ledger、幂等键、后台领取、Session 消息应用边界、恢复判定、取消和终态更新，是深 runtime 状态机问题。",
+    "context_shape": "prepared_project_environment",
+    "source_project_id": "cloudflare_agents",
+    "source_kind": "feature_iteration",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "agent_runtime_design",
+      "durable_execution_analysis",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "agent_runtime",
+      "durable_submission",
+      "idempotency",
+      "chat_recovery",
+      "external_rpc",
+      "state_machine"
+    ]
+  },
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "hidden_from_agent": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "PR #1511 final diff",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  }
+}

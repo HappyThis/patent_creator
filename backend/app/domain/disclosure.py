@@ -1,37 +1,50 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..schemas import OutlineItem
 
 STANDARD_SECTIONS: list[dict[str, Any]] = [
-    {"id": "title", "title": "发明名称"},
-    {"id": "technical_field", "title": "技术领域"},
-    {"id": "background_technology", "title": "背景技术"},
-    {"id": "existing_solution", "title": "现有技术方案"},
-    {"id": "existing_solution_defects", "title": "现有技术缺陷"},
-    {"id": "technical_problem", "title": "要解决的技术问题"},
-    {"id": "technical_solution", "title": "技术方案"},
-    {"id": "key_innovations", "title": "关键创新点"},
-    {"id": "embodiments", "title": "具体实施方式"},
-    {"id": "technical_effects", "title": "技术效果"},
-    {"id": "drawings", "title": "附图说明"},
-    {"id": "claim_suggestions", "title": "权利要求建议"},
+    {"type": "title", "title": "发明名称"},
+    {"type": "technical_field", "title": "技术领域"},
+    {"type": "background_technology", "title": "背景技术"},
+    {"type": "existing_solution", "title": "现有技术方案"},
+    {"type": "existing_solution_defects", "title": "现有技术缺陷"},
+    {"type": "technical_problem", "title": "要解决的技术问题"},
+    {"type": "technical_solution", "title": "技术方案"},
+    {"type": "key_innovations", "title": "关键创新点"},
+    {"type": "embodiments", "title": "具体实施方式"},
+    {"type": "technical_effects", "title": "技术效果"},
+    {"type": "drawings", "title": "附图说明"},
+    {"type": "claim_suggestions", "title": "权利要求建议"},
 ]
+STANDARD_SECTION_TYPES = {section["type"] for section in STANDARD_SECTIONS}
+SECTION_TYPES = {*STANDARD_SECTION_TYPES, "custom"}
+SECTION_ID_PATTERN = re.compile(r"^sec_\d{6}$")
+BLOCK_ID_PATTERN = re.compile(r"^blk_\d{6}$")
 
 
 def build_initial_disclosure(title: str) -> dict[str, Any]:
+    sections = []
+    for index, item in enumerate(STANDARD_SECTIONS, start=1):
+        sections.append(
+            {
+                "id": f"sec_{index:06d}",
+                "type": item["type"],
+                "title": item["title"],
+                "blocks": [],
+                "children": [],
+            }
+        )
     return {
         "meta": {
             "document_type": "patent_disclosure",
-            "schema_version": "v1",
+            "schema_version": "v2",
             "title": title,
-            "id_counters": {"block": 0},
+            "id_counters": {"section": len(STANDARD_SECTIONS), "block": 0},
         },
-        "sections": [
-            {"id": item["id"], "title": item["title"], "blocks": [], "children": []}
-            for item in STANDARD_SECTIONS
-        ],
+        "sections": sections,
     }
 
 
@@ -42,6 +55,7 @@ def build_outline_items(sections: list[dict[str, Any]], level: int = 2) -> list[
         items.append(
             OutlineItem(
                 id=section["id"],
+                type=section["type"],
                 title=section["title"],
                 level=level,
                 anchor=section["id"],
@@ -74,6 +88,7 @@ def render_section(section: dict[str, Any], level: int) -> dict[str, Any]:
     return {
         "type": "section",
         "id": section["id"],
+        "section_type": section["type"],
         "title": section["title"],
         "level": level,
         "anchor": section["id"],
@@ -110,6 +125,16 @@ def find_section(sections: list[dict[str, Any]], section_id: str) -> dict[str, A
     return None
 
 
+def find_section_by_type(sections: list[dict[str, Any]], section_type: str) -> dict[str, Any] | None:
+    for section in sections:
+        if section.get("type") == section_type:
+            return section
+        found = find_section_by_type(section.get("children", []), section_type)
+        if found:
+            return found
+    return None
+
+
 def find_block(sections: list[dict[str, Any]], block_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     for section in sections:
         for block in section.get("blocks", []):
@@ -119,6 +144,12 @@ def find_block(sections: list[dict[str, Any]], block_id: str) -> tuple[dict[str,
         if found:
             return found
     return None
+
+
+def next_section_id(disclosure: dict[str, Any]) -> str:
+    counter = int(disclosure["meta"]["id_counters"]["section"]) + 1
+    disclosure["meta"]["id_counters"]["section"] = counter
+    return f"sec_{counter:06d}"
 
 
 def next_block_id(disclosure: dict[str, Any]) -> str:

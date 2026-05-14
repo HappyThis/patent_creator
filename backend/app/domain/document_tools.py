@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
-from .disclosure import build_outline_items, find_block, find_section, next_block_id
+from .disclosure import (
+    BLOCK_ID_PATTERN,
+    SECTION_ID_PATTERN,
+    SECTION_TYPES,
+    build_outline_items,
+    find_block,
+    find_section,
+    next_block_id,
+    next_section_id,
+)
 
 ToolResult = dict[str, Any]
 
@@ -81,6 +91,7 @@ def project_context_outline(sections: list[dict[str, Any]]) -> list[dict[str, An
         outline.append(
             {
                 "id": str(section.get("id") or ""),
+                "type": str(section.get("type") or ""),
                 "title": str(section.get("title") or ""),
                 "children": project_context_outline(section.get("children") or []),
             }
@@ -89,9 +100,10 @@ def project_context_outline(sections: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def apply_document_edit(disclosure: dict[str, Any], arguments: dict[str, Any]) -> ToolResult:
-    operations = arguments.get("operations")
-    if not isinstance(operations, list) or not operations:
-        return tool_failed("invalid_operation", "document_edit 需要非空 operations。")
+    operations_result = normalize_operations(arguments.get("operations"))
+    if operations_result["status"] == "failed":
+        return operations_result
+    operations = operations_result["output"]["operations"]
 
     draft = copy.deepcopy(disclosure)
     validation_error = validate_disclosure(draft)
@@ -140,6 +152,24 @@ def apply_document_edit(disclosure: dict[str, Any], arguments: dict[str, Any]) -
             "change_scope": change_scope,
         }
     )
+
+
+def normalize_operations(raw_operations: Any) -> ToolResult:
+    operations = raw_operations
+    if isinstance(raw_operations, str):
+        try:
+            operations = json.loads(raw_operations)
+        except json.JSONDecodeError:
+            return tool_failed(
+                "invalid_operation",
+                "document_edit.operations 必须是非空数组；当前收到的是字符串，且无法解析为 JSON 数组。",
+            )
+
+    if not isinstance(operations, list) or not operations:
+        return tool_failed("invalid_operation", "document_edit.operations 必须是非空数组。")
+    if not all(isinstance(operation, dict) for operation in operations):
+        return tool_failed("invalid_operation", "document_edit.operations 中的每一项都必须是对象。")
+    return tool_success({"operations": operations})
 
 
 def apply_operation(disclosure: dict[str, Any], operation: dict[str, Any]) -> ToolResult:
@@ -200,17 +230,17 @@ def apply_operation(disclosure: dict[str, Any], operation: dict[str, Any]) -> To
         return edit_output([section["id"]], [block_id], section["id"], block_id, "block_replaced")
 
     if op == "append_child_section":
+        if not isinstance(operation.get("parent_section_id"), str) or not isinstance(operation.get("section"), dict):
+            return tool_failed("invalid_operation", "append_child_section 需要 parent_section_id 和 section。")
         parent = get_required_section(disclosure, operation.get("parent_section_id"))
         if isinstance(parent, dict) and "status" in parent:
             return parent
         if section_depth(disclosure["sections"], parent["id"]) >= 2:
-            return tool_failed("schema_validation_failed", "v1 不允许超过两级章节。")
-        section_result = prepare_section(disclosure, operation.get("section"))
+            return tool_failed("schema_validation_failed", "v2 不允许超过两级章节。")
+        section_result = prepare_section(disclosure, operation.get("section"), depth=2)
         if section_result["status"] == "failed":
             return section_result
         section = section_result["output"]["section"]
-        if find_section(disclosure["sections"], section["id"]):
-            return tool_failed("duplicate_section_id", f"section_id 已存在：{section['id']}")
         parent.setdefault("children", []).append(section)
         block_ids = collect_block_ids([section])
         return edit_output(
@@ -226,13 +256,17 @@ def apply_operation(disclosure: dict[str, Any], operation: dict[str, Any]) -> To
     if isinstance(current, dict) and "status" in current:
         return current
     section_payload = operation.get("section")
-    if not isinstance(section_payload, dict) or section_payload.get("id") != section_id:
-        return tool_failed("invalid_operation", "replace_section 的 section.id 必须与 section_id 一致。")
+    if not isinstance(section_payload, dict):
+        return tool_failed("invalid_operation", "replace_section 需要 section。")
+    if "id" in section_payload:
+        return tool_failed("invalid_operation", "replace_section 的 section 不允许携带 id；section_id 由工具保留。")
+    if section_payload.get("type") != current.get("type"):
+        return tool_failed("invalid_operation", "replace_section 的 section.type 必须与原章节 type 一致。")
     section_result = prepare_section(
         disclosure,
         section_payload,
-        replacing_section_id=section_id,
-        allowed_existing_section_ids=set(collect_section_ids([current])),
+        existing_section_id=section_id,
+        depth=section_depth(disclosure["sections"], section_id),
     )
     if section_result["status"] == "failed":
         return section_result
@@ -262,21 +296,22 @@ def edit_output(
 def prepare_section(
     disclosure: dict[str, Any],
     payload: Any,
-    replacing_section_id: str | None = None,
-    allowed_existing_section_ids: set[str] | None = None,
+    existing_section_id: str | None = None,
+    depth: int = 1,
 ) -> ToolResult:
-    allowed_existing_section_ids = allowed_existing_section_ids or set()
     if not isinstance(payload, dict):
         return tool_failed("schema_validation_failed", "section 必须是对象。")
-    section_id = payload.get("id")
-    if not isinstance(section_id, str) or not section_id:
-        return tool_failed("schema_validation_failed", "section 缺少 id。")
-    if (
-        replacing_section_id is None
-        and section_id not in allowed_existing_section_ids
-        and find_section(disclosure["sections"], section_id)
-    ):
-        return tool_failed("duplicate_section_id", f"section_id 已存在：{section_id}")
+    if "id" in payload:
+        return tool_failed("schema_validation_failed", "section 不允许携带 id；section_id 由系统生成或保留。")
+    section_type = payload.get("type")
+    if section_type not in SECTION_TYPES:
+        return tool_failed("schema_validation_failed", f"不支持的 section.type：{section_type}")
+    if depth > 1 and section_type != "custom":
+        return tool_failed("schema_validation_failed", "子章节 section.type 必须为 custom。")
+    title = payload.get("title")
+    if not isinstance(title, str) or not title:
+        return tool_failed("schema_validation_failed", "section 缺少 title。")
+    section_id = existing_section_id or next_section_id(disclosure)
     blocks_result = prepare_blocks(disclosure, payload.get("blocks", []))
     if blocks_result["status"] == "failed":
         return blocks_result
@@ -288,7 +323,7 @@ def prepare_section(
         child_result = prepare_section(
             disclosure,
             child,
-            allowed_existing_section_ids=allowed_existing_section_ids,
+            depth=depth + 1,
         )
         if child_result["status"] == "failed":
             return child_result
@@ -297,7 +332,8 @@ def prepare_section(
         {
             "section": {
                 "id": section_id,
-                "title": payload.get("title", section_id),
+                "type": section_type,
+                "title": title,
                 "blocks": blocks_result["output"]["blocks"],
                 "children": prepared_children,
             }
@@ -352,23 +388,41 @@ def prepare_block(disclosure: dict[str, Any], payload: Any, existing_block_id: s
 def validate_disclosure(disclosure: dict[str, Any]) -> ToolResult | None:
     if set(disclosure.keys()) != {"meta", "sections"}:
         return tool_failed("schema_validation_failed", "disclosure 顶层只能包含 meta 和 sections。")
+    meta = disclosure.get("meta", {})
+    if meta.get("schema_version") != "v2":
+        return tool_failed("schema_validation_failed", "disclosure.schema_version 必须为 v2。")
+    id_counters = meta.get("id_counters")
+    if not isinstance(id_counters, dict) or "section" not in id_counters or "block" not in id_counters:
+        return tool_failed("schema_validation_failed", "meta.id_counters 必须包含 section 和 block。")
     section_ids: set[str] = set()
     block_ids: set[str] = set()
 
     def validate_sections(sections: list[dict[str, Any]], depth: int) -> ToolResult | None:
         for section in sections:
             if depth > 2:
-                return tool_failed("schema_validation_failed", "v1 不允许超过两级章节。")
-            for key in ("id", "title", "blocks", "children"):
+                return tool_failed("schema_validation_failed", "v2 不允许超过两级章节。")
+            for key in ("id", "type", "title", "blocks", "children"):
                 if key not in section:
                     return tool_failed("schema_validation_failed", f"section 缺少 {key} 字段。")
+            if not isinstance(section["id"], str) or not SECTION_ID_PATTERN.match(section["id"]):
+                return tool_failed("schema_validation_failed", f"section.id 格式错误：{section['id']}")
+            if section["type"] not in SECTION_TYPES:
+                return tool_failed("schema_validation_failed", f"不支持的 section.type：{section['type']}")
+            if depth > 1 and section["type"] != "custom":
+                return tool_failed("schema_validation_failed", "子章节 section.type 必须为 custom。")
+            if not isinstance(section["title"], str) or not section["title"]:
+                return tool_failed("schema_validation_failed", "section 缺少 title。")
             if section["id"] in section_ids:
                 return tool_failed("duplicate_section_id", f"section_id 重复：{section['id']}")
             section_ids.add(section["id"])
+            if not isinstance(section["blocks"], list):
+                return tool_failed("schema_validation_failed", "section.blocks 必须是数组。")
             for block in section["blocks"]:
                 block_error = validate_block(block, block_ids)
                 if block_error:
                     return block_error
+            if not isinstance(section["children"], list):
+                return tool_failed("schema_validation_failed", "section.children 必须是数组。")
             child_error = validate_sections(section["children"], depth + 1)
             if child_error:
                 return child_error
@@ -379,7 +433,7 @@ def validate_disclosure(disclosure: dict[str, Any]) -> ToolResult | None:
 
 def validate_block(block: dict[str, Any], seen_block_ids: set[str]) -> ToolResult | None:
     block_id = block.get("id")
-    if not isinstance(block_id, str):
+    if not isinstance(block_id, str) or not BLOCK_ID_PATTERN.match(block_id):
         return tool_failed("schema_validation_failed", "block 缺少 id 字段。")
     if block_id in seen_block_ids:
         return tool_failed("duplicate_block_id", f"block_id 重复：{block_id}")

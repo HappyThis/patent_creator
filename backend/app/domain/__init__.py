@@ -5,7 +5,9 @@ from .disclosure import (
     disclosure_to_markdown,
     find_block,
     find_section,
+    find_section_by_type,
     next_block_id,
+    next_section_id,
 )
 from .message_intent import MessageIntent, derive_message_intent
 from .document_tools import apply_document_edit, read_document
@@ -20,6 +22,8 @@ __all__ = [
     "disclosure_to_markdown",
     "find_block",
     "find_section",
+    "find_section_by_type",
     "next_block_id",
+    "next_section_id",
     "read_document",
 ]

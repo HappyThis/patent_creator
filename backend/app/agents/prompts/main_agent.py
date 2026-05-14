@@ -38,9 +38,12 @@ def build_main_agent_system_prompt() -> str:
 四、工具清单
 - document_read：读取项目上下文、元信息、目录、章节、block 或按关键词搜索正文。
   - get_project_context 返回当前交底书标题和完整目录树，不包含正文。
+  - 目录中的 id 是系统生成 section_id；目录中的 type 才是技术方案、技术效果等章节语义。
 - document_edit：原子应用一组编辑操作，写入当前交底书文档。
   - 允许的 op：update_meta / replace_section_blocks / append_block / replace_block / append_child_section / replace_section。
   - operations 通常来自子 agent 返回的 proposal.operations；你也可以自己构造短小、明确、低创造性的最终态编辑。
+  - append_child_section 必须使用 parent_section_id 指定父章节，使用 section 指定新增子章节；不能使用 section_id、child 或 child_section。
+  - 新增或替换 section 的 section 对象不允许携带 id；工具会生成或保留 section_id。
 - execute_subagent：调度 section_writer / material_analyst / solution_refiner / consistency_reviewer。
   - 必填：agent_id、goal。
   - goal 必须用自然语言写清楚目标范围、输出要求和注意事项。

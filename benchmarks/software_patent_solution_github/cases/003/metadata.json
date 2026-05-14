@@ -1,0 +1,87 @@
+{
+  "id": "003",
+  "title": "面向 agent 任务的 Git-native 协作镜像同步机制",
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "builderz-labs/mission-control",
+    "repo_url": "https://github.com/builderz-labs/mission-control",
+    "snapshot_commit": "d87307a4f8764248f818add539b5c30db7701d68",
+    "snapshot_date": "2026-03-16",
+    "issue_urls": [
+      "https://github.com/builderz-labs/mission-control/issues/374",
+      "https://github.com/builderz-labs/mission-control/issues/389"
+    ],
+    "pr_urls": [
+      "https://github.com/builderz-labs/mission-control/pull/396"
+    ],
+    "solution_merge_commit": "85b4184aa9c849fd4b41000b34b853d83c80d892",
+    "solution_merged_at": "2026-03-16T05:07:39Z"
+  },
+  "project": {
+    "source_project_id": "builderz_labs_mission_control",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Next.js",
+      "SQLite",
+      "Git"
+    ],
+    "snapshot_descriptor": "snapshot.json",
+    "runtime_checkout_dir": "repo",
+    "focus_paths": [
+      "src/app/api/tasks/route.ts",
+      "src/app/api/tasks/[id]/route.ts",
+      "src/components/panels/task-board-panel.tsx",
+      "src/lib/config.ts",
+      "src/lib/github-sync-engine.ts"
+    ],
+    "excluded_paths": [
+      "PR #396 final implementation",
+      "src/lib/gnap-sync.ts from PR #396",
+      "src/app/api/gnap/route.ts from PR #396",
+      "src/lib/__tests__/gnap-sync.test.ts from PR #396"
+    ]
+  },
+  "case": {
+    "difficulty": "medium",
+    "difficulty_score": 3,
+    "difficulty_reason": "Git-native 任务同步涉及外部格式映射、非阻塞同步和 Git 操作，但核心边界较集中，需求也更容易抽象为主存储到镜像仓库的同步机制。",
+    "context_shape": "prepared_project_environment",
+    "source_project_id": "builderz_labs_mission_control",
+    "source_kind": "feature_iteration",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "data_sync_design",
+      "task_lifecycle_analysis",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "task_sync",
+      "git_native",
+      "agent_protocol",
+      "semantic_mapping",
+      "non_blocking_sync",
+      "task_persistence"
+    ]
+  },
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "hidden_from_agent": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "PR #396 final diff",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  }
+}

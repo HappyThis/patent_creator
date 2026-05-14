@@ -1,0 +1,23 @@
+{
+  "snapshot_version": "1.0.0",
+  "type": "git_checkout",
+  "repo": "builderz-labs/mission-control",
+  "repo_url": "https://github.com/builderz-labs/mission-control",
+  "commit": "7ba1e7765779d8e1e7724df68675a1cb89c42380",
+  "date": "2026-03-23",
+  "checkout_policy": {
+    "fetch_depth": 1,
+    "include_submodules": false,
+    "materialize_directory": "repo"
+  },
+  "focus_paths": [
+    "src/lib/spawn-history.ts",
+    "src/lib/event-bus.ts",
+    "src/lib/migrations.ts",
+    "scripts/mc-mcp-server.cjs",
+    "src/app/api/agents/evals/route.ts",
+    "src/app/api/tasks/outcomes/route.ts",
+    "src/app/api/tasks/regression/route.ts",
+    "src/app/api/tasks/route.ts"
+  ]
+}

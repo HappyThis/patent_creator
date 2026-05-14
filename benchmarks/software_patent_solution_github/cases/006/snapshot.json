@@ -1,0 +1,22 @@
+{
+  "snapshot_version": "1.0.0",
+  "type": "git_checkout",
+  "repo": "cloudflare/agents",
+  "repo_url": "https://github.com/cloudflare/agents",
+  "commit": "7090e9eec337ae1496afce1a544044d9c765a021",
+  "date": "2026-05-11",
+  "checkout_policy": {
+    "fetch_depth": 1,
+    "include_submodules": false,
+    "materialize_directory": "repo"
+  },
+  "focus_paths": [
+    "packages/ai-chat/src/ws-chat-transport.ts",
+    "packages/ai-chat/src/react.tsx",
+    "packages/ai-chat/src/tests/ws-transport-abort.test.ts",
+    "packages/ai-chat/src/tests/ws-transport-resume.test.ts",
+    "docs/resumable-streaming.md",
+    "docs/chat-agents.md",
+    "packages/ai-chat/README.md"
+  ]
+}

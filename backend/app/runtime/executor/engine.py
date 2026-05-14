@@ -204,6 +204,7 @@ class ExecutorEngine:
         system_prompt = self._subagent_system_prompt(agent_id)
         messages: list[dict[str, Any]] = [dict(message) for message in initial_messages]
         max_steps = max(1, self.settings.subagent_max_steps)
+        plain_response_count = 0
 
         for _step in range(max_steps):
             messages = await self._prepare_subagent_run_messages(
@@ -229,6 +230,13 @@ class ExecutorEngine:
             messages.append(assistant_message)
 
             if action.get("type") == "respond":
+                plain_response_count += 1
+                if plain_response_count > 1:
+                    raise ApiError(
+                        502,
+                        "subagent_plain_response",
+                        f"{agent_id} 连续直接回复文本，未按协议调用 submit_result。",
+                    )
                 messages.append(
                     {
                         "role": "user",

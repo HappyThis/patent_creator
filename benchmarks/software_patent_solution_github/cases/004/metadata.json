@@ -1,0 +1,93 @@
+{
+  "id": "004",
+  "title": "共享知识文件与运行时动态信号的分层存储及读取融合机制",
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "campfirein/byterover-cli",
+    "repo_url": "https://github.com/campfirein/byterover-cli",
+    "snapshot_commit": "d3c297e4d20d8006938a5acf54ed5ae1b4c054c2",
+    "snapshot_date": "2026-04-20",
+    "issue_urls": [],
+    "pr_urls": [
+      "https://github.com/campfirein/byterover-cli/pull/456"
+    ],
+    "solution_merge_commit": "0770c295c6ace2c2c802a71bb0ee34120bc473fd",
+    "solution_merged_at": "2026-04-20T02:44:10Z"
+  },
+  "project": {
+    "source_project_id": "campfirein_byterover_cli",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Node.js",
+      "Oclif",
+      "Zod"
+    ],
+    "snapshot_descriptor": "snapshot.json",
+    "runtime_checkout_dir": "repo",
+    "focus_paths": [
+      "src/server/core/domain/knowledge/markdown-writer.ts",
+      "src/server/core/domain/knowledge/memory-scoring.ts",
+      "src/agent/infra/tools/implementations/search-knowledge-service.ts",
+      "src/agent/infra/tools/implementations/search-knowledge-tool.ts",
+      "src/agent/infra/tools/implementations/memory-symbol-tree.ts",
+      "src/agent/infra/tools/implementations/curate-tool.ts",
+      "src/server/infra/context-tree/file-context-tree-archive-service.ts",
+      "src/server/infra/context-tree/file-context-tree-manifest-service.ts",
+      "src/server/infra/dream/operations/consolidate.ts",
+      "src/server/infra/dream/operations/prune.ts",
+      "src/server/infra/dream/operations/synthesize.ts",
+      "src/server/infra/executor/dream-executor.ts",
+      "src/agent/infra/agent/service-initializer.ts"
+    ],
+    "excluded_paths": [
+      "PR #456 final implementation",
+      "src/server/core/domain/knowledge/runtime-signals-schema.ts from PR #456",
+      "src/server/infra/context-tree/runtime-signal-store.ts from PR #456",
+      "src/server/core/interfaces/storage/i-runtime-signal-store.ts from PR #456",
+      "runtime signal sidecar tests from PR #456"
+    ]
+  },
+  "case": {
+    "difficulty": "hard",
+    "difficulty_score": 4,
+    "difficulty_reason": "ByteRover 运行时信号 sidecar 需要理解知识写入、检索排序、curate、dream/prune/synthesize 等路径，并处理迁移、读取融合和失败隔离，领域上下文较重。",
+    "context_shape": "prepared_project_environment",
+    "source_project_id": "campfirein_byterover_cli",
+    "source_kind": "mechanism_enhancement",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "knowledge_storage_design",
+      "retrieval_signal_analysis",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "agent_memory",
+      "context_tree",
+      "runtime_signals",
+      "sidecar_store",
+      "retrieval_ranking",
+      "version_control_cleanliness"
+    ]
+  },
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "hidden_from_agent": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "PR #456 final diff",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  }
+}

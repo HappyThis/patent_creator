@@ -1,0 +1,46 @@
+{
+  "case_id": "008",
+  "title": "浏览器侧隔离执行 LLM 生成代码并调度动态客户端工具的机制",
+  "project_id": "cloudflare_agents",
+  "repo": "https://github.com/cloudflare/agents",
+  "source_kind": "feature_iteration",
+  "source_pr": "https://github.com/cloudflare/agents/pull/1468",
+  "source_commit": "186a2a45700fbd9680b69e8b72ea062fd325d077",
+  "snapshot_commit": "ab2b1db31971ac2d2ddab9d962986f208c69a422",
+  "date": "2026-05-06",
+  "difficulty": "hard",
+  "difficulty_score": 4,
+  "difficulty_reason": "Browser iframe executor 虽然实现面较集中，但需要同时设计浏览器隔离执行、动态工具描述、跨上下文消息协议、安全控制、超时和清理，不能退化为简单 eval。",
+  "domain_tags": [
+    "agent",
+    "codemode",
+    "browser",
+    "sandbox",
+    "client-tools",
+    "postmessage"
+  ],
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "judge_hidden": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  },
+  "selection_notes": "该 case 来源于 codemode 浏览器执行器新功能，涉及浏览器侧隔离执行、动态客户端工具描述、跨隔离环境工具调用协议和安全清理，属于机制型功能迭代。",
+  "context_shape": "prepared_project_environment",
+  "expected_capabilities": [
+    "codebase_reading",
+    "requirement_understanding",
+    "technical_problem_abstraction",
+    "technical_architecture_design",
+    "browser_sandbox_design",
+    "client_tool_protocol_analysis",
+    "software_patent_solution_generation"
+  ]
+}

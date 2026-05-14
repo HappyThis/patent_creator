@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any
 
 from ..agents.prompts import build_main_agent_system_prompt
+from ..agents.runtime.model_profiles import resolve_model_profile
 from ..agents.runtime.openai_compat import OpenAICompatibleClient
 from ..agents.workers import MainAgentAction, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
@@ -170,16 +171,18 @@ class ChatService:
 
         try:
             await self._sleep()
-            max_steps = max(1, self.settings.main_agent_max_steps)
+            step_index = 0
+            model_profile = resolve_model_profile(self.settings)
 
-            for step_index in range(max_steps):
+            while True:
+                step_index += 1
                 logger.info(
-                    "round step=%d/%d project=%s session=%s",
-                    step_index + 1,
-                    max_steps,
+                    "round step=%d project=%s session=%s",
+                    step_index,
                     project_id,
                     state.session_id,
                 )
+
                 async def on_text_delta(delta: str) -> None:
                     if not delta:
                         return
@@ -203,19 +206,35 @@ class ChatService:
 
                 if action.type == "respond":
                     final_reply = action.text or ""
+                    await self.events.agent_message(
+                        project_id,
+                        state,
+                        message=action.assistant_message,
+                        model=self.settings.openai_model,
+                        provider=model_profile.provider,
+                        thinking=model_profile.thinking,
+                    )
                     logger.info(
                         "round step=%d action=respond text_len=%d",
-                        step_index + 1,
+                        step_index,
                         len(final_reply),
                     )
-                    messages.append(action.assistant_message)
+                    messages.append(model_profile.prepare_messages_for_request([action.assistant_message])[0])
                     await self.events.agent_output(project_id, state, final_reply)
                     break
 
                 # tool_calls 分支：DeepSeek 要求 assistant(tool_calls) 后紧跟每个 tool_call_id 的 tool 结果。
                 tool_calls = action.tool_calls or []
-                logger.info("round step=%d action=tool_calls count=%d", step_index + 1, len(tool_calls))
-                messages.append(action.assistant_message)
+                logger.info("round step=%d action=tool_calls count=%d", step_index, len(tool_calls))
+                await self.events.agent_message(
+                    project_id,
+                    state,
+                    message=action.assistant_message,
+                    model=self.settings.openai_model,
+                    provider=model_profile.provider,
+                    thinking=model_profile.thinking,
+                )
+                messages.append(model_profile.prepare_messages_for_request([action.assistant_message])[0])
                 tool_preamble = assistant_message_text(action.assistant_message)
                 if tool_preamble:
                     await self.events.agent_output(project_id, state, tool_preamble)
@@ -249,18 +268,6 @@ class ChatService:
                         }
                     )
                 await self._sleep()
-            else:
-                final_reply = (
-                    "本轮已达到安全执行步数上限，系统已停止继续调用工具以避免循环。"
-                    "当前上下文和工具结果已保留，你可以直接要求我继续完成。"
-                )
-                logger.warning(
-                    "round max_steps_reached project=%s session=%s max_steps=%d",
-                    project_id,
-                    state.session_id,
-                    max_steps,
-                )
-                await self.events.agent_output(project_id, state, final_reply)
 
             await self._sleep(self.settings.round_finish_delay)
             committed, commit_error = await self._commit(project_id, changed_payload)
@@ -299,13 +306,29 @@ class ChatService:
                 state.session_id,
                 state.round_id,
             )
+            failure_code = exc.code if isinstance(exc, ApiError) else "round_runtime_error"
+            failure_message = exc.message if isinstance(exc, ApiError) else str(exc)
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="agent_output",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload={
+                    "text": "本轮未完成，请重试或补充信息。",
+                    "status": "failed",
+                    "code": failure_code,
+                    "message": failure_message,
+                },
+            )
             await self._set_project_idle(project_id)
             await self.bus.publish(
                 key,
                 "round_failed",
                 {
-                    "code": "round_runtime_error",
-                    "message": str(exc),
+                    "code": failure_code,
+                    "message": failure_message,
                     "reply": "本轮未完成，请重试或补充信息。",
                     "round_id": state.round_id,
                     "message_id": state.message_id,

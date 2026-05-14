@@ -7,7 +7,7 @@ SUBAGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - document_read 读取兼容目录：
   {"action":"get_outline"}
 - document_read 读取章节：
-  {"action":"get_section","section_id":"technical_solution","include_children":true}
+  {"action":"get_section","section_id":"sec_000007","include_children":true}
 - document_read 读取 block：
   {"action":"get_block","block_id":"blk_000001"}
 - document_read 搜索正文：
@@ -29,17 +29,19 @@ MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - document_read 读取项目上下文：
   {"action":"get_project_context"}
 - document_read 读取章节：
-  {"action":"get_section","section_id":"existing_solution","include_children":true}
+  {"action":"get_section","section_id":"sec_000004","include_children":true}
 - document_read 读取 block：
   {"action":"get_block","block_id":"blk_000001"}
 - document_read 搜索正文：
   {"action":"search_blocks","query":"候选区域"}
 - document_edit 替换章节正文：
-  {"operations":[{"op":"replace_section_blocks","section_id":"existing_solution","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]}
+  {"operations":[{"op":"replace_section_blocks","section_id":"sec_000004","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]}
 - document_edit 重组章节和子章节：
-  {"operations":[{"op":"replace_section","section_id":"technical_solution","section":{"id":"technical_solution","title":"技术方案","blocks":[{"type":"paragraph","text":"这里写入章节总述。"}],"children":[{"id":"overall_architecture","title":"整体架构","blocks":[{"type":"paragraph","text":"这里写入架构说明。"}],"children":[]},{"id":"processing_flow","title":"处理流程","blocks":[{"type":"list","ordered":true,"items":["步骤一。","步骤二。"]}],"children":[]}]}}]}
+  {"operations":[{"op":"replace_section","section_id":"sec_000007","section":{"type":"technical_solution","title":"技术方案","blocks":[{"type":"paragraph","text":"这里写入章节总述。"}],"children":[{"type":"custom","title":"整体架构","blocks":[{"type":"paragraph","text":"这里写入架构说明。"}],"children":[]},{"type":"custom","title":"处理流程","blocks":[{"type":"list","ordered":true,"items":["步骤一。","步骤二。"]}],"children":[]}]}}]}
 - document_edit 追加段落：
-  {"operations":[{"op":"append_block","section_id":"technical_solution","block":{"type":"paragraph","text":"这里写入追加段落。"}}]}
+  {"operations":[{"op":"append_block","section_id":"sec_000007","block":{"type":"paragraph","text":"这里写入追加段落。"}}]}
+- document_edit 追加子章节：
+  {"operations":[{"op":"append_child_section","parent_section_id":"sec_000007","section":{"type":"custom","title":"关键模块","blocks":[{"type":"paragraph","text":"这里写入子章节正文。"}],"children":[]}}]}
 - execute_subagent 调度章节写作：
   {"agent_id":"section_writer","goal":"基于已继承的上下文，为“技术方案”章节生成最终态候选正文，并通过 proposal.operations 指定写入的 section_id。"}
 - execute_subagent 调度资料分析：
@@ -52,6 +54,9 @@ MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - JSON 字符串必须使用双引号；不能使用单引号、注释、尾随逗号或未转义换行。
 - 中文正文中的双引号、反斜杠和换行必须正确转义。
 - document_edit 的 blocks/block 正文只能放在 text 字段，不要使用 content 字段。
+- append_child_section 只能使用 parent_section_id 和 section 字段，不得使用 section_id、child 或 child_section 表示父章节或子章节。
+- section_id 必须使用 document_read 返回的系统生成 id；不要把 technical_solution、technical_effects 等章节语义当作 section_id。
+- 新增或替换 section 的 section 对象不允许携带 id；新增子章节使用 type:"custom" 和 title 表达语义。
 """
 
 
@@ -71,21 +76,21 @@ DOCUMENT_ACCESS_RULES = """- 你会看到从调用方继承的历史 messages，
 
 STRUCTURED_WRITING_RULES = """- 章节负责结构，block 负责具体正文；复杂内容不要只用多个 paragraph block 平铺。
 - 当目标内容包含多个独立部分，或用户要求“整体架构 / 处理流程 / 实现方式 / 步骤 / 模块 / 原理 / 拓展方案”时，优先生成子章节。
-- 当目标章节是 technical_solution、embodiment、system_architecture、processing_flow 等复杂章节，且内容超过 3 个自然段或包含模块与流程时，优先使用 replace_section 生成 children。
+- 当目标章节的 type 是 technical_solution、embodiments 等复杂标准章节，或内容超过 3 个自然段并包含模块与流程时，优先使用 replace_section 生成 children。
 - 适合拆成子章节的常见标题包括：整体架构、处理流程、核心模块、关键规则、数据处理、异常处理、实施步骤、效果说明。
 - 只有当修改短小、局部、没有独立标题价值时，才只使用 block，例如补一段说明、改写一个段落、补一个短列表。"""
 
 
 SECTION_WRITER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已生成候选正文。","reply":"已补充目标章节候选内容。","rationale":"根据用户诉求和当前章节内容生成。","proposal_type":"document_edit_proposal","proposal":{"intent":"replace_section_content","confidence":0.75,"operations":[{"op":"replace_section_blocks","section_id":"technical_solution","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]},"questions":[],"warnings":[]}
+{"summary":"已生成候选正文。","reply":"已补充目标章节候选内容。","rationale":"根据用户诉求和当前章节内容生成。","proposal_type":"document_edit_proposal","proposal":{"intent":"replace_section_content","confidence":0.75,"operations":[{"op":"replace_section_blocks","section_id":"sec_000007","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]},"questions":[],"warnings":[]}
 
 结构化章节示例：
-{"summary":"已生成结构化技术方案候选正文。","reply":"已补充技术方案结构化内容。","rationale":"目标章节包含整体架构和处理流程，适合拆分子章节。","proposal_type":"document_edit_proposal","proposal":{"intent":"structure_section_content","confidence":0.78,"operations":[{"op":"replace_section","section_id":"technical_solution","section":{"id":"technical_solution","title":"技术方案","blocks":[{"type":"paragraph","text":"本方案采用端侧轻量化检测架构，对输入图像进行候选区域筛选、轻量特征提取和结果校正。"}],"children":[{"id":"overall_architecture","title":"整体架构","blocks":[{"type":"paragraph","text":"系统包括图像获取模块、候选区域筛选模块、轻量推理模块和结果校正模块。"}],"children":[]},{"id":"processing_flow","title":"处理流程","blocks":[{"type":"list","ordered":true,"items":["获取待检测图像。","筛选高价值候选区域。","对候选区域执行轻量化检测。","结合时序信息校正检测结果。"]}],"children":[]}]}}]},"questions":[],"warnings":[]}
+{"summary":"已生成结构化技术方案候选正文。","reply":"已补充技术方案结构化内容。","rationale":"目标章节包含整体架构和处理流程，适合拆分子章节。","proposal_type":"document_edit_proposal","proposal":{"intent":"structure_section_content","confidence":0.78,"operations":[{"op":"replace_section","section_id":"sec_000007","section":{"type":"technical_solution","title":"技术方案","blocks":[{"type":"paragraph","text":"本方案采用端侧轻量化检测架构，对输入图像进行候选区域筛选、轻量特征提取和结果校正。"}],"children":[{"type":"custom","title":"整体架构","blocks":[{"type":"paragraph","text":"系统包括图像获取模块、候选区域筛选模块、轻量推理模块和结果校正模块。"}],"children":[]},{"type":"custom","title":"处理流程","blocks":[{"type":"list","ordered":true,"items":["获取待检测图像。","筛选高价值候选区域。","对候选区域执行轻量化检测。","结合时序信息校正检测结果。"]}],"children":[]}]}}]},"questions":[],"warnings":[]}
 """
 
 
 MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已完成材料分析。","reply":"已提炼技术事实和待确认项。","rationale":"依据用户材料和当前文档提炼。","proposal_type":"analysis_result","proposal":{"facts":[{"kind":"technical_problem","text":"低算力设备上推理延迟高。"}],"candidate_terms":["低算力设备"],"recommended_next_actions":[{"action":"write_section","section_id":"technical_problem"}]},"questions":[],"warnings":[]}
+{"summary":"已完成材料分析。","reply":"已提炼技术事实和待确认项。","rationale":"依据用户材料和当前文档提炼。","proposal_type":"analysis_result","proposal":{"facts":[{"kind":"technical_problem","text":"低算力设备上推理延迟高。"}],"candidate_terms":["低算力设备"],"recommended_next_actions":[{"action":"write_section","section_id":"sec_000006"}]},"questions":[],"warnings":[]}
 """
 
 
@@ -95,5 +100,5 @@ SOLUTION_REFINER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
 
 
 CONSISTENCY_REVIEWER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已完成一致性审查。","reply":"已列出术语和逻辑问题。","rationale":"对照目标章节与上下游章节检查。","proposal_type":"review_report","proposal":{"issues":[{"severity":"medium","section_id":"technical_effects","block_id":null,"message":"技术效果未呼应实时性问题。","suggested_fix":"补充低延迟收益描述。"}]},"questions":[],"warnings":[]}
+{"summary":"已完成一致性审查。","reply":"已列出术语和逻辑问题。","rationale":"对照目标章节与上下游章节检查。","proposal_type":"review_report","proposal":{"issues":[{"severity":"medium","section_id":"sec_000010","block_id":null,"message":"技术效果未呼应实时性问题。","suggested_fix":"补充低延迟收益描述。"}]},"questions":[],"warnings":[]}
 """

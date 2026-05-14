@@ -1,0 +1,699 @@
+# API 设计规范
+
+## 文档定位
+
+本文档定义前端 `TypeScript + React + Vite` 与后端 `Python 3.11 + FastAPI + Uvicorn` 之间的 API 协议。
+
+本规范重点覆盖：
+
+1. 项目初始化
+2. 目录读取
+3. 文档渲染
+4. Agent Chat
+5. Session 日志读取
+6. Markdown 导出
+
+相关文档：
+
+- [专利交底书结构方案](patent-disclosure-structure.md)
+- [Agent 基本设计原则](../core/agent-principles.md)
+- [Tools 设计](../core/tools.md)
+- [Session 事件日志 Schema](session-log.md)
+- [工作区初始化规范](workspace-init.md)
+- [技术栈规范](tech-stack.md)
+
+## 目标
+
+API 设计围绕三栏前端展开：
+
+1. `目录区域`
+2. `渲染区`
+3. `Agent Chat 区`
+
+因此 API 只围绕以下核心能力设计：
+
+- 新建项目
+- 获取目录
+- 获取渲染数据
+- 发送 chat 消息
+- 接收流式 chat 结果
+- 导出 Markdown
+
+## 一、基本原则
+
+### 1. 项目是前端核心资源
+
+前端以 `project` 作为主要资源对象。
+
+每个 `project` 在系统内部对应一个独立工作区。
+
+### 2. 后端维护真相源
+
+后端维护：
+
+- `disclosure.json`
+- session 事件日志
+- 工作区目录
+
+前端不直接理解底层工作区结构。
+
+### 3. 渲染区消费 render_ast
+
+渲染区消费的是后端生成的 `render_ast`。
+
+说明：
+
+- `Markdown` 主要用于导出
+- 前端渲染主要基于结构化展示模型
+
+### 4. Chat 过程采用 SSE
+
+普通请求用 HTTP。
+
+chat 过程中的持续输出、状态变化和文档更新通知，统一通过 `SSE` 传递。
+
+### 5. 对外定位使用 id
+
+API 中涉及文档定位时统一使用：
+
+- `section_id`
+- `block_id`
+- `changed_section_ids`
+- `changed_block_ids`
+
+## 二、核心资源模型
+
+一个 `project` 对外主要暴露以下对象：
+
+- 基本信息
+- 交底书目录
+- 当前渲染结果
+- chat 会话
+- session 日志
+- Markdown 导出结果
+
+## 三、项目接口
+
+### 1. `GET /api/projects`
+
+获取项目列表。系统采用单工作区约定：后端保证第一条 project 是所有前端页面共同使用的当前 project；如果尚无项目，后端会自动初始化一个默认项目。公开创建项目接口不提供，避免隐式产生多个 project。
+
+响应：
+
+```json
+{
+  "projects": [
+    {
+      "project_id": "proj_001",
+      "title": "一种图像检测方法",
+      "created_at": "2026-04-23T21:00:00+08:00",
+      "updated_at": "2026-04-23T21:10:00+08:00",
+      "active_session_id": "sess_001",
+      "running_session_id": null,
+      "running_round_id": null,
+      "is_busy": false,
+      "active_session_context": null
+    }
+  ]
+}
+```
+
+### 2. `GET /api/projects/{project_id}`
+
+获取项目基础信息。
+
+响应：
+
+```json
+{
+  "project_id": "proj_001",
+  "title": "一种图像检测方法",
+  "created_at": "2026-04-23T21:00:00+08:00",
+  "updated_at": "2026-04-23T21:10:00+08:00",
+  "active_session_id": "sess_003",
+  "running_session_id": null,
+  "running_round_id": null,
+  "is_busy": false,
+  "active_session_context": null
+}
+```
+
+字段说明：
+
+- `active_session_id`：当前活跃 session，定义为最近聊过天的 session
+- `running_session_id`：当前正在执行的 session，没有则为 `null`
+- `running_round_id`：当前正在执行的 round，没有则为 `null`
+- `is_busy`：当前 project 是否有正在执行的 round
+
+## 四、目录接口
+
+### `GET /api/projects/{project_id}/outline`
+
+返回当前交底书目录树。
+
+该接口直接服务于左侧目录区域。
+
+响应：
+
+```json
+{
+  "sections": [
+    {
+      "id": "sec_000002",
+      "section_type": "technical_field",
+      "title": "技术领域",
+      "level": 2,
+      "anchor": "sec_000002",
+      "children": []
+    },
+    {
+      "id": "sec_000007",
+      "section_type": "technical_solution",
+      "title": "技术方案",
+      "level": 2,
+      "anchor": "sec_000007",
+      "children": [
+        {
+          "id": "sec_000013",
+          "section_type": "custom",
+          "title": "处理流程",
+          "level": 3,
+          "anchor": "sec_000013"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## 五、渲染接口
+
+### `GET /api/projects/{project_id}/render`
+
+返回当前交底书的 `render_ast`。
+
+这个接口直接服务于渲染区。
+
+可选查询参数：
+
+- `focus_section_id`
+- `focus_block_id`
+
+说明：
+
+- 不传时，返回整篇渲染数据。
+- 传入时，返回整篇渲染数据，并附带当前聚焦位置。
+
+响应：
+
+```json
+{
+  "render_ast": {
+    "type": "document",
+    "title": "一种图像检测方法",
+    "children": [
+      {
+        "type": "section",
+        "id": "sec_000007",
+        "section_type": "technical_solution",
+        "title": "技术方案",
+        "level": 2,
+        "anchor": "sec_000007",
+        "children": [
+          {
+            "type": "paragraph",
+            "id": "blk_000001",
+            "section_id": "sec_000007",
+            "text": "本发明提供一种图像检测方法。"
+          }
+        ]
+      }
+    ]
+  },
+  "active_section_id": "sec_000007",
+  "active_block_id": "blk_000001",
+  "updated_at": "2026-04-23T21:15:00+08:00"
+}
+```
+
+## 六、原始文档接口
+
+### `GET /api/projects/{project_id}/document`
+
+返回当前 `disclosure.json`。
+
+该接口主要用于调试、排查和内部管理，不作为前端渲染主依赖。
+
+响应：
+
+```json
+{
+  "meta": {
+    "document_type": "patent_disclosure",
+    "schema_version": "v2",
+    "title": "一种图像检测方法",
+    "id_counters": {
+      "section": 12,
+      "block": 1
+    }
+  },
+  "sections": []
+}
+```
+
+## 七、Chat 接口
+
+### 1. `POST /api/projects/{project_id}/chat/messages`
+
+发送一条用户消息，并直接建立本轮 SSE 流。
+
+请求：
+
+```json
+{
+  "session_id": "sess_001",
+  "message": "请把技术方案这一章写得更具体一点，并强调低算力实时性约束。",
+  "active_section_id": "sec_000007",
+  "active_block_id": null
+}
+```
+
+字段说明：
+
+- `session_id`：当前 chat 会话标识，可选
+- `message`：用户本轮输入
+- `active_section_id`：可选，用于表示当前焦点章节
+- `active_block_id`：可选，用于表示当前焦点 block
+
+说明：
+
+- 不传 `session_id` 时，后端创建新 session。
+- 用户可以选择任意历史 session 继续聊天。
+- `active_session_id` 始终更新为最近聊过天的 session。
+- 同一 project 任意时刻只允许一个 session 处于执行中。
+- 只要存在未处理完成的消息，前端发送按钮保持禁用，且不允许新开 session 发起执行。
+- 用户输入的全部有效信息都包含在 `message` 文本中。
+- agent 在当前回合内自行从 `message` 中提取术语、目标、章节线索和待补信息。
+- 如提供 `active_section_id` / `active_block_id`，表示前端当前焦点位置，可作为当前回合的优先上下文。
+- 不单独设计“材料管理区”或“材料上传区”API，也不单独设计 `references` 输入字段。
+
+响应类型：
+
+- `Content-Type: text/event-stream`
+- 首个事件固定为 `round_started`
+
+`round_started` 示例：
+
+```text
+event: round_started
+data: {
+  "accepted": true,
+  "session_id": "sess_001",
+  "message_id": "msg_001",
+  "round_id": "round_001",
+  "first_user_text": "请把技术方案这一章写得更具体一点，并强调低算力实时性约束。"
+}
+```
+
+忙碌状态下的失败响应：
+
+```json
+{
+  "error": {
+    "code": "project_busy",
+    "message": "当前已有 session 正在执行，请等待本轮完成后再发送消息。"
+  }
+}
+```
+
+HTTP 错误协议：
+
+- `400`：请求参数错误
+- `403`：权限错误
+- `404`：资源不存在
+- `409`：并发冲突或 `project_busy`
+- `422`：schema 校验失败
+- `500`：系统内部错误
+
+统一错误响应体：
+
+```json
+{
+  "error": {
+    "code": "section_not_found",
+    "message": "section_id 不存在：sec_000007"
+  }
+}
+```
+
+同一条 `POST /api/projects/{project_id}/chat/messages` 连接中，服务端继续输出以下流式事件。除特别说明外，运行中事件会携带 `round_id` 和 `message_id`，便于前端把流式消息、工具节点和最终收束归并到同一轮。
+
+#### `assistant_delta`
+
+```text
+event: assistant_delta
+data: {"text":"我已经"}
+```
+
+说明：
+
+- 当模型正在输出面向用户的自然语言时，后端直接按文本 delta 转发给前端。
+- `assistant_delta` 只用于文本流式展示，不代表本轮已经完成。
+- 如果当前 delta 是工具调用片段，后端不会把它作为文本发送，而是累计完整 tool call 后再进入工具执行。
+- 正常完成时由 `round_finished.reply` 收束；取消或失败时分别由 `round_cancelled.reply`、`round_failed.reply` 收束。
+
+#### `tool_call_started`
+
+```text
+event: tool_call_started
+data: {
+  "call_id": "call_001",
+  "parent_call_id": null,
+  "scope": "main",
+  "tool": "execute_subagent",
+  "summary": "已启动 section_writer",
+  "round_id": "round_001",
+  "message_id": "msg_001"
+}
+```
+
+#### `tool_call_finished`
+
+```text
+event: tool_call_finished
+data: {
+  "call_id": "call_001",
+  "parent_call_id": null,
+  "scope": "main",
+  "tool": "execute_subagent",
+  "summary": "section_writer 已完成",
+  "result": {
+    "status": "success",
+    "output": {
+      "agent_id": "section_writer",
+      "result": {
+        "status": "success",
+        "summary": "已生成技术方案章节候选正文。",
+        "proposal": {
+          "type": "document_edit_proposal",
+          "operations": []
+        },
+        "questions": [],
+        "warnings": []
+      }
+    }
+  },
+  "round_id": "round_001",
+  "message_id": "msg_001"
+}
+```
+
+#### `document_changed`
+
+```text
+event: document_changed
+data: {
+  "changed": true,
+  "changed_section_ids": ["sec_000007"],
+  "changed_block_ids": ["blk_000014"],
+  "primary_section_id": "sec_000007",
+  "primary_block_id": "blk_000014",
+  "change_scope": "block_appended",
+  "active_section_id": "sec_000007",
+  "active_block_id": "blk_000014",
+  "round_id": "round_001",
+  "message_id": "msg_001"
+}
+```
+
+#### `round_failed`
+
+```text
+event: round_failed
+data: {
+  "code": "subagent_runtime_error",
+  "message": "section_writer 执行失败。",
+  "reply": "本轮未完成，请重试或补充信息。",
+  "round_id": "round_001",
+  "message_id": "msg_001"
+}
+```
+
+#### `round_cancelled`
+
+```text
+event: round_cancelled
+data: {
+  "cancelled": true,
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "round_id": "round_001",
+  "message_id": "msg_001",
+  "reply": "本轮任务已取消。"
+}
+```
+
+说明：
+
+- 用户取消运行中的 round 后，后端会将 project 恢复为空闲状态。
+- session log 会写入一条 `agent_output`，payload 中包含 `status=cancelled` 和 `code=round_cancelled`。
+
+#### `round_finished`
+
+```text
+event: round_finished
+data: {
+  "reply": "我已经补全了技术方案章节，重点补充了处理流程。",
+  "changed": true,
+  "changed_section_ids": ["sec_000007"],
+  "changed_block_ids": ["blk_000014"],
+  "primary_section_id": "sec_000007",
+  "primary_block_id": "blk_000014",
+  "change_scope": "block_appended",
+  "active_section_id": "sec_000007",
+  "active_block_id": "blk_000014",
+  "committed": false,
+  "commit_error": {
+    "code": "git_commit_failed",
+    "message": "git commit 执行失败。"
+  },
+  "round_id": "round_001",
+  "message_id": "msg_001"
+}
+```
+
+前端处理建议：
+
+- 收到 `assistant_delta` 后，追加到当前流式 assistant 消息
+- 收到 `tool_call_started` 后，在 Chat 区展示进行中的执行节点
+- 收到 `tool_call_finished` 后，将执行节点切换为已完成，并默认折叠结果详情
+- 收到 `document_changed` 后，刷新目录区与渲染区
+- 收到 `round_failed` 后，结束本轮加载状态并展示失败信息
+- 收到 `round_cancelled` 后，结束本轮加载状态并展示取消提示
+- 收到 `round_finished` 后，更新 chat 区回合状态
+
+### 2. `POST /api/projects/{project_id}/sessions/{session_id}/rounds/{round_id}/cancel`
+
+取消当前运行中的 round。
+
+说明：
+
+- 只有当 project 正在运行，且 `running_session_id` / `running_round_id` 与路径参数完全匹配时才会成功。
+- 成功后后端会发布 `round_cancelled` SSE，并将 project 的运行态字段清空。
+- 如果当前没有匹配的运行中任务，返回 `409 round_not_running`。
+
+响应：
+
+```json
+{
+  "cancelled": true,
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "round_id": "round_001",
+  "message_id": "msg_001",
+  "reply": "本轮任务已取消。"
+}
+```
+
+### 3. `GET /api/projects/{project_id}/sessions/{session_id}/stream`
+
+恢复订阅某个运行中 session 的 SSE 流，主要用于前端刷新页面、重新进入页面或运行中重建连接。
+
+首个事件：
+
+- 如果该 session 正在运行，返回 `stream_attached`。
+- 如果该 session 未在运行，返回 `stream_closed` 并结束连接。
+
+`stream_attached` 示例：
+
+```text
+event: stream_attached
+data: {
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "round_id": "round_001"
+}
+```
+
+`stream_closed` 示例：
+
+```text
+event: stream_closed
+data: {
+  "project_id": "proj_001",
+  "session_id": "sess_001",
+  "reason": "not_running"
+}
+```
+
+恢复连接建立后，后续事件与 `POST /chat/messages` 的 SSE 事件格式一致。
+
+## 八、Session 日志接口
+
+### `GET /api/projects/{project_id}/sessions`
+
+返回当前 project 下已有 session 的摘要列表。
+
+响应：
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "sess_001",
+      "updated_at": "2026-04-23T21:15:00+08:00",
+      "event_count": 8,
+      "last_round_id": "round_001",
+      "first_user_text": "请补写技术方案。",
+      "is_active": true,
+      "context_usage": {
+        "max_tokens": 128000,
+        "used_tokens": 24000,
+        "used_ratio": 0.1875,
+        "threshold_tokens": 96000,
+        "reserved_output_tokens": 8000,
+        "status": "ok"
+      }
+    }
+  ]
+}
+```
+
+### `GET /api/projects/{project_id}/sessions/{session_id}/events`
+
+返回指定 session 的事件日志。
+
+该接口主要用于：
+
+- 调试
+- 排查
+- 回放
+
+响应：
+
+```json
+{
+  "events": [
+    {
+      "id": "evt_001",
+      "type": "user_input",
+      "seq": 1,
+      "scope": "main",
+      "round_id": "round_001",
+      "message_id": "msg_001",
+      "call_id": null,
+      "parent_call_id": null,
+      "payload": {
+        "text": "请补写技术方案。"
+      }
+    }
+  ]
+}
+```
+
+## 九、导出接口
+
+### `POST /api/projects/{project_id}/export/markdown`
+
+导出当前交底书为 Markdown。
+
+响应：
+
+```json
+{
+  "path": "/absolute/path/to/export.md"
+}
+```
+
+说明：
+
+- Markdown 主要作为导出格式
+- 用户如果需要手动编辑，可导出后在系统外自行处理
+
+## 十、前端实际依赖的最小接口集
+
+前端最小依赖如下接口：
+
+1. `GET /api/projects`
+2. `GET /api/projects/{project_id}`
+3. `GET /api/projects/{project_id}/outline`
+4. `GET /api/projects/{project_id}/render`
+5. `POST /api/projects/{project_id}/chat/messages`
+6. `GET /api/projects/{project_id}/sessions`
+7. `GET /api/projects/{project_id}/sessions/{session_id}/events`
+8. `GET /api/projects/{project_id}/sessions/{session_id}/stream`
+9. `POST /api/projects/{project_id}/sessions/{session_id}/rounds/{round_id}/cancel`
+10. `POST /api/projects/{project_id}/export/markdown`
+
+以下接口可作为调试或增强接口：
+
+- `GET /api/projects/{project_id}/document`
+
+## 十一、一轮交互的最小链路
+
+### 1. 用户发送消息
+
+前端调用：
+
+- `POST /api/projects/{project_id}/chat/messages`
+
+### 2. 前端消费流式结果
+
+前端持续读取同一个：
+
+- `POST /api/projects/{project_id}/chat/messages`
+
+### 3. 文档发生修改
+
+服务端推送：
+
+- `document_changed`
+
+前端收到后刷新：
+
+- `outline`
+- `render`
+
+### 4. 回合结束
+
+服务端推送：
+
+- `round_finished`
+
+前端更新：
+
+- chat 区回合状态
+- 最近修改章节或 block 定位
+
+## 十二、设计结论
+
+API 设计采用如下原则：
+
+1. 前端以 `project` 为核心资源
+2. 渲染区消费 `render_ast`
+3. Markdown 只作为导出格式
+4. chat 过程采用 SSE，且由 `POST /chat/messages` 直接返回流
+5. API 文档定位使用 `section_id` 和 `block_id`
+6. 文档变更通知使用 `changed_section_ids` 和 `changed_block_ids`
+7. 参考资料通过 chat 附带，不单独做材料管理 API
+8. 目录区、渲染区、chat 区分别由独立接口支撑

@@ -181,7 +181,7 @@ def _restore_compressed_messages(
                         "content": str(block["tool_result"]),
                     }
                 )
-            messages.append({"role": "assistant", "content": "", "tool_calls": tool_calls})
+            messages.append(_restored_assistant_tool_message(tool_calls, [source_tool_blocks[call_id] for call_id in call_ids]))
             messages.extend(tool_messages)
             continue
         if "preserved_tool_call_ids" in message:
@@ -227,9 +227,41 @@ def _source_tool_blocks_from_messages(messages: list[dict[str, Any]]) -> dict[st
             blocks[call_id] = {
                 "tool_call": copy.deepcopy(call),
                 "tool_result": results[call_id],
+                **_assistant_metadata_for_tool_block(message),
             }
         index += 1 + len(calls)
     return blocks
+
+
+def _restored_assistant_tool_message(
+    tool_calls: list[dict[str, Any]],
+    blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": _common_string(blocks, "assistant_content") or "",
+        "tool_calls": tool_calls,
+    }
+    reasoning_content = _common_string(blocks, "reasoning_content")
+    if reasoning_content:
+        message["reasoning_content"] = reasoning_content
+    return message
+
+
+def _assistant_metadata_for_tool_block(message: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"assistant_content": str(message.get("content") or "")}
+    reasoning_content = message.get("reasoning_content")
+    if isinstance(reasoning_content, str) and reasoning_content:
+        metadata["reasoning_content"] = reasoning_content
+    return metadata
+
+
+def _common_string(blocks: list[dict[str, Any]], key: str) -> str | None:
+    values = [block.get(key) for block in blocks]
+    if not values or not all(isinstance(value, str) for value in values):
+        return None
+    first = values[0]
+    return first if all(value == first for value in values) else None
 
 
 def _required_content(raw: dict[str, Any], index: int) -> str:

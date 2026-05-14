@@ -1,0 +1,24 @@
+{
+  "snapshot_version": "1.0.0",
+  "type": "git_checkout",
+  "repo": "builderz-labs/mission-control",
+  "repo_url": "https://github.com/builderz-labs/mission-control",
+  "commit": "bd972bc953d1bf2c6d9f7febc941a2d3b3b63ba0",
+  "date": "2026-04-14",
+  "checkout_policy": {
+    "fetch_depth": 1,
+    "include_submodules": false,
+    "materialize_directory": "repo"
+  },
+  "focus_paths": [
+    "src/lib/agent-runtimes.ts",
+    "src/app/api/sessions/route.ts",
+    "src/app/api/sessions/transcript/route.ts",
+    "src/app/api/sessions/continue/route.ts",
+    "src/components/onboarding/runtime-setup-modal.tsx",
+    "src/components/settings/agent-runtimes-section.tsx",
+    "src/components/chat/conversation-list.tsx",
+    "src/components/terminal/terminal-view.tsx",
+    "openapi.json"
+  ]
+}

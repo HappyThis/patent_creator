@@ -10,17 +10,19 @@ class Settings:
     data_dir: Path
     git_user_name: str
     git_user_email: str
-    openai_compat_base_url: str = "https://api.deepseek.com"
+    openai_compat_base_url: str = "https://api.xiaomimimo.com/v1"
     openai_compat_api_key: str | None = None
-    openai_compat_enable_thinking: bool = True
-    openai_model: str = "deepseek-v4-pro"
+    openai_compat_provider: str = "mimo"
+    openai_compat_thinking: str = "disabled"
+    openai_compat_reasoning_effort: str = "high"
+    openai_compat_max_completion_tokens: int = 8192
+    openai_model: str = "mimo-v2.5-pro"
     llm_timeout: float = 45.0
     context_compression_timeout: float = 180.0
     llm_max_retries: int = 2
     cors_allow_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     round_step_delay: float = 0.15
     round_finish_delay: float = 0.1
-    main_agent_max_steps: int = 30
     subagent_max_steps: int = 30
     context_max_tokens: int = 128000
     context_compress_threshold_ratio: float = 0.8
@@ -41,10 +43,13 @@ class Settings:
             data_dir=data_dir,
             git_user_name=os.getenv("PATENT_CREATOR_GIT_USER_NAME", "Patent Creator"),
             git_user_email=os.getenv("PATENT_CREATOR_GIT_USER_EMAIL", "patent-creator@local"),
-            openai_compat_base_url=os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.deepseek.com"),
+            openai_compat_base_url=os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.xiaomimimo.com/v1"),
             openai_compat_api_key=os.getenv("OPENAI_COMPAT_API_KEY"),
-            openai_compat_enable_thinking=_parse_bool_env(os.getenv("OPENAI_COMPAT_ENABLE_THINKING"), True),
-            openai_model=os.getenv("OPENAI_MODEL", "deepseek-v4-pro"),
+            openai_compat_provider=os.getenv("OPENAI_COMPAT_PROVIDER", "mimo").strip().lower(),
+            openai_compat_thinking=os.getenv("OPENAI_COMPAT_THINKING", "disabled").strip().lower(),
+            openai_compat_reasoning_effort=os.getenv("OPENAI_COMPAT_REASONING_EFFORT", "high").strip().lower(),
+            openai_compat_max_completion_tokens=int(os.getenv("OPENAI_COMPAT_MAX_COMPLETION_TOKENS", "8192")),
+            openai_model=os.getenv("OPENAI_MODEL", "mimo-v2.5-pro"),
             llm_timeout=float(os.getenv("PATENT_CREATOR_LLM_TIMEOUT", "45")),
             context_compression_timeout=float(os.getenv("PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT", "180")),
             llm_max_retries=int(os.getenv("PATENT_CREATOR_LLM_MAX_RETRIES", "2")),
@@ -54,7 +59,6 @@ class Settings:
             ),
             round_step_delay=float(os.getenv("PATENT_CREATOR_ROUND_STEP_DELAY", "0.15")),
             round_finish_delay=float(os.getenv("PATENT_CREATOR_ROUND_FINISH_DELAY", "0.1")),
-            main_agent_max_steps=int(os.getenv("PATENT_CREATOR_MAIN_AGENT_MAX_STEPS", "30")),
             subagent_max_steps=int(os.getenv("PATENT_CREATOR_SUBAGENT_MAX_STEPS", "30")),
             context_max_tokens=int(os.getenv("PATENT_CREATOR_CONTEXT_MAX_TOKENS", "128000")),
             context_compress_threshold_ratio=float(

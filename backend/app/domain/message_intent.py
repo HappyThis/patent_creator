@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .disclosure import STANDARD_SECTIONS, find_section
+from .disclosure import STANDARD_SECTIONS, find_section, find_section_by_type
 
 
 @dataclass(slots=True)
@@ -43,20 +43,22 @@ def derive_message_intent(
 
     matched_terms: list[str] = []
     for section in STANDARD_SECTIONS:
-        section_id = section["id"]
+        section_type = section["type"]
         title = section["title"]
-        keywords = [section_id, title, *SECTION_KEYWORDS.get(section_id, [])]
+        keywords = [section_type, title, *SECTION_KEYWORDS.get(section_type, [])]
         local_matches = [term for term in keywords if term and term in normalized_message]
         if local_matches:
             matched_terms.extend(local_matches)
+            target_section = find_section_by_type(sections, section_type)
             return MessageIntent(
-                target_section_id=section_id,
+                target_section_id=target_section["id"] if target_section else "",
                 matched_by="message_keywords",
                 matched_terms=matched_terms,
             )
 
+    technical_solution = find_section_by_type(sections, "technical_solution")
     return MessageIntent(
-        target_section_id="technical_solution",
+        target_section_id=technical_solution["id"] if technical_solution else "",
         matched_by="default",
         matched_terms=[],
     )

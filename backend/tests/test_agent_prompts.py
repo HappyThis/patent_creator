@@ -138,6 +138,17 @@ def test_section_writer_context_prefers_children_for_complex_sections() -> None:
     assert "最终态文本" in prompt
 
 
+def test_append_child_section_protocol_is_single_shape() -> None:
+    prompt = build_section_writer_system_prompt(get_subagent("section_writer"))
+    document_edit = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "document_edit")
+    operations_description = document_edit["function"]["parameters"]["properties"]["operations"]["description"]
+
+    assert "parent_section_id" in prompt
+    assert "append_child_section 必须使用 `parent_section_id`" in prompt
+    assert "不能使用 `section_id`、`child` 或 `child_section`" in prompt
+    assert "append_child_section 必须使用 parent_section_id 和 section" in operations_description
+
+
 def test_execute_subagent_schema_only_uses_agent_id_and_goal() -> None:
     tool = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "execute_subagent")
     params = tool["function"]["parameters"]

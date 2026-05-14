@@ -1,0 +1,46 @@
+{
+  "case_id": "007",
+  "title": "Durable agent 框架中的保留式流式子 agent 工具编排机制",
+  "project_id": "cloudflare_agents",
+  "repo": "https://github.com/cloudflare/agents",
+  "source_kind": "feature_iteration",
+  "source_pr": "https://github.com/cloudflare/agents/pull/1421",
+  "source_commit": "1b65ff5550f904e2a59bd6015703f82b02f85e4f",
+  "snapshot_commit": "06fb49b47ac19bd93d0a1064a03839d1187cb170",
+  "date": "2026-04-30",
+  "difficulty": "very_hard",
+  "difficulty_score": 5,
+  "difficulty_reason": "Retained streaming agent tools 涉及父子 agent 编排、运行注册表、事件转发/重放、客户端聚合、访问控制、并发和取消清理，组合复杂度最高。",
+  "domain_tags": [
+    "agent",
+    "durable-object",
+    "sub-agent",
+    "streaming",
+    "resumability",
+    "react"
+  ],
+  "visibility": {
+    "agent_visible": [
+      "request.md",
+      "prepared project checkout as current working directory or environment path"
+    ],
+    "judge_hidden": [
+      "reference_solution.md",
+      "rubric.md",
+      "metadata.json",
+      "snapshot.json",
+      "focus_paths"
+    ]
+  },
+  "selection_notes": "该 case 来源于较大的 agent 协作能力迭代，涉及父子 agent 编排、流式事件、保留运行、恢复、访问控制与客户端聚合，符合软件专利技术方案 benchmark 对机制型新功能的要求。",
+  "context_shape": "prepared_project_environment",
+  "expected_capabilities": [
+    "codebase_reading",
+    "requirement_understanding",
+    "technical_problem_abstraction",
+    "technical_architecture_design",
+    "agent_orchestration_design",
+    "streaming_recovery_analysis",
+    "software_patent_solution_generation"
+  ]
+}

@@ -8,13 +8,15 @@ uv run uvicorn app.api.app:app --reload --host 127.0.0.1 --port 5172
 如果要启用真实 agent 写作能力，需要配置 OpenAI 兼容接口：
 
 ```bash
-export OPENAI_COMPAT_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1
+export OPENAI_COMPAT_PROVIDER=mimo
+export OPENAI_COMPAT_BASE_URL=https://api.xiaomimimo.com/v1
 export OPENAI_COMPAT_API_KEY=your_provider_api_key
-export OPENAI_COMPAT_ENABLE_THINKING=false
+export OPENAI_COMPAT_THINKING=disabled
+export OPENAI_COMPAT_MAX_COMPLETION_TOKENS=8192
 export OPENAI_MODEL=mimo-v2.5-pro
 ```
 
-`OPENAI_COMPAT_ENABLE_THINKING` 用于控制是否发送供应商专属的 thinking/reasoning 参数。DeepSeek 等兼容该参数的服务可保持 `true`；不确认兼容性的模型服务建议设为 `false`。
+`OPENAI_COMPAT_PROVIDER` 目前支持 `mimo` 和 `deepseek`。不同 provider 会按各自 API 要求发送 thinking、token 上限和 reasoning 参数；例如 MIMO 在 `OPENAI_COMPAT_THINKING=disabled` 时会显式发送 `extra_body={"thinking":{"type":"disabled"}}`。
 
 ## Structure
 

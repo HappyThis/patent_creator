@@ -46,8 +46,8 @@ class StubLLMClient:
         """模拟主 agent loop：execute_subagent -> document_edit -> respond。"""
         if "子 agent：section_writer" in system_prompt:
             goal = str(messages[-1].get("content") or "")
-            target_section_id = "technical_effects" if "技术效果" in goal else "technical_solution"
-            if target_section_id == "technical_solution":
+            target_section_id = "sec_000010" if "技术效果" in goal else "sec_000007"
+            if target_section_id == "sec_000007":
                 payload = {
                     "summary": "已生成技术方案候选正文。",
                     "reply": "我已经补充了技术方案里的整体架构和处理流程，并把结果同步到文档中。",
@@ -55,9 +55,9 @@ class StubLLMClient:
                     "operations": [
                         {
                             "op": "replace_section",
-                            "section_id": "technical_solution",
+                            "section_id": "sec_000007",
                             "section": {
-                                "id": "technical_solution",
+                                "type": "technical_solution",
                                 "title": "技术方案",
                                 "blocks": [
                                     {
@@ -71,7 +71,7 @@ class StubLLMClient:
                                 ],
                                 "children": [
                                     {
-                                        "id": "overall_architecture",
+                                        "type": "custom",
                                         "title": "整体架构",
                                         "blocks": [
                                             {
@@ -86,7 +86,7 @@ class StubLLMClient:
                                         "children": [],
                                     },
                                     {
-                                        "id": "processing_flow",
+                                        "type": "custom",
                                         "title": "处理流程",
                                         "blocks": [
                                             {
@@ -182,7 +182,7 @@ class StubLLMClient:
                 if message.get("role") == "user"
             ]
             user_message = user_messages[-1] if user_messages else ""
-            target_section_id = "technical_effects" if "技术效果" in user_message else "technical_solution"
+            target_section_id = "sec_000010" if "技术效果" in user_message else "sec_000007"
             arguments = {
                 "agent_id": "section_writer",
                 "goal": f"根据用户最新请求完善 {target_section_id} 章节：{user_message}",
@@ -372,11 +372,11 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200
         technical_effects = next(
-            section for section in document_response.json()["sections"] if section["id"] == "technical_effects"
+            section for section in document_response.json()["sections"] if section["type"] == "technical_effects"
         )
         assert len(technical_effects["blocks"]) == 2
         technical_solution = next(
-            section for section in document_response.json()["sections"] if section["id"] == "technical_solution"
+            section for section in document_response.json()["sections"] if section["type"] == "technical_solution"
         )
         assert technical_solution["blocks"] == []
 
@@ -392,7 +392,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
             {
                 "session_id": session_id,
                 "message": "继续完善这里的处理流程和整体架构。",
-                "active_section_id": "technical_solution",
+                "active_section_id": technical_solution["id"],
             },
         )
         assert second_stream_events[0][0] == "round_started"
@@ -401,10 +401,11 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200
         technical_solution = next(
-            section for section in document_response.json()["sections"] if section["id"] == "technical_solution"
+            section for section in document_response.json()["sections"] if section["type"] == "technical_solution"
         )
         assert len(technical_solution["blocks"]) == 2
-        assert technical_solution["children"][0]["id"] == "overall_architecture"
+        assert technical_solution["children"][0]["type"] == "custom"
+        assert technical_solution["children"][0]["title"] == "整体架构"
 
         missing_session_response = await client.post(
             f"/api/projects/{project_id}/chat/messages",

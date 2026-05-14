@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from typing import Any, Awaitable, Callable, Protocol
 
+from ...agents.runtime.model_profiles import prepare_messages_for_model_request
 from ...core import Settings
 from ...storage.workspace_store import WorkspaceStore
 from .compression import (
@@ -11,7 +13,7 @@ from .compression import (
     prepare_compressed_messages_with_warnings,
     restore_compressed_messages_from_messages,
 )
-from .history import context_anchor, current_user_event, project_main_events, restore_main_chat_messages
+from .history import MAIN_CONTEXT_EVENT_TYPES, context_anchor, current_user_event, project_main_events, restore_main_chat_messages
 from .prompts import context_compressor_system_prompt
 from .usage import ContextUsage, estimate_messages_tokens, usage_for_messages
 
@@ -57,6 +59,7 @@ class ContextManager:
             active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
+        messages = prepare_messages_for_model_request(messages, self.settings)
         return self._fit_messages_to_budget(messages)
 
     def _build_main_agent_messages_unfitted(
@@ -100,6 +103,7 @@ class ContextManager:
             active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
+        messages = prepare_messages_for_model_request(messages, self.settings)
         usage = usage_for_messages(messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
             return messages
@@ -173,6 +177,7 @@ class ContextManager:
                 active_block_id=active_block_id,
                 current_message_id=current_message_id,
             )
+            messages = prepare_messages_for_model_request(messages, self.settings)
             usage = usage_for_messages(messages, self.settings)
             if usage.used_tokens <= usage.threshold_tokens:
                 logger.info(
@@ -247,6 +252,7 @@ class ContextManager:
         if not session_id or not self.store.session_exists(project_id, session_id):
             return None
         messages = self._restore_main_chat_messages(project_id, session_id)
+        messages = prepare_messages_for_model_request(messages, self.settings)
         return usage_for_messages(messages, self.settings)
 
     def _restore_main_chat_messages(
@@ -294,7 +300,7 @@ class ContextManager:
             event
             for event in events
             if event.scope == "main"
-            and event.type in {"user_input", "agent_output", "tool_call", "tool_result"}
+            and event.type in MAIN_CONTEXT_EVENT_TYPES
             and anchor["cursor_seq"] <= event.seq < current_event.seq
         ]
         if len(compressible) < 2:
@@ -339,7 +345,7 @@ class ContextManager:
         )
         payload = build_compression_payload(
             current_user_message=str(current_event.payload.get("text") or ""),
-            compressible_messages=source_messages,
+            compressible_messages=_strip_reasoning_content(source_messages),
         )
         result = await llm_client.generate_json(
             system_prompt=context_compressor_system_prompt(),
@@ -424,7 +430,7 @@ class ContextManager:
         visible = [
             event
             for event in events
-            if event.scope == "main" and event.type in {"user_input", "agent_output"} and event.seq <= current_event.seq
+            if event.scope == "main" and event.type in {"user_input", "agent_message", "agent_output"} and event.seq <= current_event.seq
         ]
         user_events = [event for event in visible if event.type == "user_input"]
         if not user_events:
@@ -516,6 +522,14 @@ def _recent_history_from_user_boundary(history: list[dict[str, Any]], keep_user_
         return []
     start = user_indexes[-keep_user_messages] if len(user_indexes) >= keep_user_messages else user_indexes[0]
     return history[start:]
+
+
+def _strip_reasoning_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    stripped = copy.deepcopy(messages)
+    for message in stripped:
+        if message.get("role") == "assistant":
+            message.pop("reasoning_content", None)
+    return stripped
 
 
 def _combined_compression_warnings(raw_warnings: Any, generated_warnings: list[dict[str, Any]]) -> list[Any]:

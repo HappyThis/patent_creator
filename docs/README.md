@@ -1,23 +1,44 @@
-# Docs 索引
+# 文档索引
 
-## 文档清单
+## 目录结构
 
-`docs` 目录包含 14 份核心设计/状态文档：
+`docs` 目录按文档性质分组：
 
-1. [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
-2. [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
-3. [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
-4. [上下文管理规范](/Users/yangchaoqun/myProj/patent_creator/docs/context-management.md)
-5. [子 Agent 定义](/Users/yangchaoqun/myProj/patent_creator/docs/subagents.md)
-6. [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
-7. [Session 事件日志 Schema](/Users/yangchaoqun/myProj/patent_creator/docs/session-log.md)
-8. [工作区初始化规范](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init.md)
-9. [技术栈规范](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack.md)
-10. [API 设计规范](/Users/yangchaoqun/myProj/patent_creator/docs/api-design.md)
-11. [render_ast Schema](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema.md)
-12. [前端交互规范](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction.md)
-13. [一轮内部时序](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle.md)
-14. [后端实现概览](/Users/yangchaoqun/myProj/patent_creator/docs/backend-implementation-status.md)
+- `core/`：agent、子 agent 和工具边界等核心机制。
+- `specs/`：产品、协议、上下文、前端和工作区等专题规范。
+- `status/`：阶段性实现状态。
+- `benchmarks/`：评测基准分类和具体评测规范。
+- `issues/`：待处理问题和产品/技术讨论记录。
+- `assets/`：文档图片资源。
+
+## 核心文档
+
+1. [Agent 基本设计原则](core/agent-principles.md)
+2. [Agent Prompt 与上下文规范](core/agent-prompt-context-spec.md)
+3. [子 Agent 定义](core/subagents.md)
+4. [Tools 设计](core/tools.md)
+
+## 规范文档
+
+1. [专利交底书结构方案](specs/patent-disclosure-structure.md)
+2. [上下文管理规范](specs/context-management.md)
+3. [Session 事件日志 Schema](specs/session-log.md)
+4. [工作区初始化规范](specs/workspace-init.md)
+5. [技术栈规范](specs/tech-stack.md)
+6. [API 设计规范](specs/api-design.md)
+7. [render_ast Schema](specs/render-ast-schema.md)
+8. [前端交互规范](specs/frontend-interaction.md)
+9. [一轮内部时序](specs/round-lifecycle.md)
+
+## 状态文档
+
+- [后端实现概览](status/backend-implementation-status.md)
+
+## 评测规范
+
+- [评测基准规范索引](benchmarks/README.md)
+- [GitHub 中型项目软件专利技术方案评测基准](benchmarks/software-patent-solution-github.md)
+- [GitHub 中型项目候选清单](benchmarks/github-project-candidates.md)
 
 ## 是否需要合并
 
@@ -45,19 +66,11 @@
 
 文档拆分策略如下：
 
-- 保留 `专利交底书结构方案` 独立
-- 保留 `Agent 基本设计原则` 独立
-- 将 `上下文说明` 与 `prompt 模板原则` 合并为一份 `Agent Prompt 与上下文规范`
-- 保留 `上下文管理规范` 独立
-- 保留 `子 Agent 定义` 独立
-- 保留 `Tools 设计` 独立
-- 保留 `Session 事件日志 Schema` 独立
-- 保留 `工作区初始化规范` 独立
-- 保留 `技术栈规范` 独立
-- 保留 `API 设计规范` 独立
-- 保留 `render_ast Schema` 独立
-- 保留 `前端交互规范` 独立
-- 保留 `一轮内部时序` 独立
+- `core/` 保留 agent 运行机制和能力边界文档。
+- `specs/` 收纳具体专题规范和技术方案文档。
+- `status/` 收纳阶段性实现状态。
+- `benchmarks/` 收纳评测基准分类和评测规范。
+- `issues/` 收纳仍在讨论或待处理的问题。
 
 这些核心文档保持独立。
 
@@ -65,19 +78,19 @@
 
 阅读顺序如下：
 
-1. [专利交底书结构方案](/Users/yangchaoqun/myProj/patent_creator/docs/patent-disclosure-structure.md)
-2. [Agent 基本设计原则](/Users/yangchaoqun/myProj/patent_creator/docs/agent-principles.md)
-3. [Agent Prompt 与上下文规范](/Users/yangchaoqun/myProj/patent_creator/docs/agent-prompt-context-spec.md)
-4. [上下文管理规范](/Users/yangchaoqun/myProj/patent_creator/docs/context-management.md)
-5. [子 Agent 定义](/Users/yangchaoqun/myProj/patent_creator/docs/subagents.md)
-6. [Tools 设计](/Users/yangchaoqun/myProj/patent_creator/docs/tools.md)
-7. [Session 事件日志 Schema](/Users/yangchaoqun/myProj/patent_creator/docs/session-log.md)
-8. [工作区初始化规范](/Users/yangchaoqun/myProj/patent_creator/docs/workspace-init.md)
-9. [技术栈规范](/Users/yangchaoqun/myProj/patent_creator/docs/tech-stack.md)
-10. [API 设计规范](/Users/yangchaoqun/myProj/patent_creator/docs/api-design.md)
-11. [render_ast Schema](/Users/yangchaoqun/myProj/patent_creator/docs/render-ast-schema.md)
-12. [前端交互规范](/Users/yangchaoqun/myProj/patent_creator/docs/frontend-interaction.md)
-13. [一轮内部时序](/Users/yangchaoqun/myProj/patent_creator/docs/round-lifecycle.md)
+1. [专利交底书结构方案](specs/patent-disclosure-structure.md)
+2. [Agent 基本设计原则](core/agent-principles.md)
+3. [Agent Prompt 与上下文规范](core/agent-prompt-context-spec.md)
+4. [上下文管理规范](specs/context-management.md)
+5. [子 Agent 定义](core/subagents.md)
+6. [Tools 设计](core/tools.md)
+7. [Session 事件日志 Schema](specs/session-log.md)
+8. [工作区初始化规范](specs/workspace-init.md)
+9. [技术栈规范](specs/tech-stack.md)
+10. [API 设计规范](specs/api-design.md)
+11. [render_ast Schema](specs/render-ast-schema.md)
+12. [前端交互规范](specs/frontend-interaction.md)
+13. [一轮内部时序](specs/round-lifecycle.md)
 
 依赖关系可以理解为：
 

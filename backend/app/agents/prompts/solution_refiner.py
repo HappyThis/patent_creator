@@ -43,7 +43,10 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 - 当 proposal_type=analysis_result 时，proposal.solution_outline 为一段文字，概述整体技术方案走向。
 - proposal.modules 每一项为 {{"name": "...", "responsibility": "..."}}。
 - proposal.key_constraints / proposal.innovations / proposal.open_questions / questions / warnings 为字符串数组。
-- 当 proposal_type=document_edit_proposal 时，proposal.operations 必须是 document_edit 支持的 operations；新增 block 不要手写 id。
+- 当 proposal_type=document_edit_proposal 时，proposal.operations 必须是 document_edit 支持的 operations；新增 block 和新增 section 都不要手写 id。
+- 如果使用 append_child_section，必须使用 `parent_section_id` 指定父章节，使用 `section` 指定新增子章节；不能使用 `section_id`、`child` 或 `child_section`。
+- section_id 必须来自 document_read 返回的系统生成 id；不要把 technical_solution、technical_effects 等章节语义当作 section_id。
+- replace_section 的 section 对象不允许携带 id；子章节必须使用 `type:"custom"`，用 `title` 表达语义。
 - 不要编造具体性能数字、实验数据。
 - 信息不足时，将缺口放到 open_questions 或 questions，不要硬套空洞描述。
 

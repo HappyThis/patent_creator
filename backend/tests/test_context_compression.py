@@ -67,6 +67,25 @@ def test_compressed_messages_store_preserved_tool_ids_and_restore_original_tool_
     assert json.loads(restored[2]["content"])["status"] == "success"
 
 
+def test_compressed_messages_restore_preserved_tool_reasoning_content() -> None:
+    source_messages = _source_messages_with_tool_call()
+    source_messages[1]["reasoning_content"] = "需要读取目录再继续。"
+
+    compressed = prepare_compressed_messages_for_storage(
+        [
+            {"role": "assistant", "preserved_tool_call_ids": ["call_read_outline"]},
+            {"role": "assistant", "content": "已保留工具证据。"},
+        ],
+        source_messages=source_messages,
+    )
+
+    restored = restore_compressed_messages_from_messages(compressed, source_messages=source_messages)
+
+    assert restored[0]["role"] == "assistant"
+    assert restored[0]["reasoning_content"] == "需要读取目录再继续。"
+    assert restored[0]["tool_calls"][0]["id"] == "call_read_outline"
+
+
 def test_compressed_messages_drop_unavailable_preserved_tool_ids() -> None:
     compressed, warnings = prepare_compressed_messages_with_warnings(
         [
@@ -204,3 +223,78 @@ def test_restore_main_chat_messages_expands_preserved_tool_ids_from_session_even
     assert messages[1]["tool_call_id"] == "call_read_outline"
     assert json.loads(messages[1]["content"])["status"] == "success"
     assert messages[-1] == {"role": "user", "content": "继续完善"}
+
+
+def test_restore_main_chat_messages_uses_saved_agent_message_reasoning() -> None:
+    assistant_message = {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "先读取目录。",
+        "tool_calls": [
+            {
+                "id": "call_read_outline",
+                "type": "function",
+                "function": {
+                    "name": "document_read",
+                    "arguments": json.dumps({"action": "get_outline"}, ensure_ascii=False),
+                },
+            }
+        ],
+    }
+    events = [
+        SessionEvent(
+            id="evt_1",
+            ts="2026-05-09T00:00:00Z",
+            type="user_input",
+            seq=1,
+            scope="main",
+            round_id="round_1",
+            message_id="msg_1",
+            payload={"text": "先读取目录。"},
+        ),
+        SessionEvent(
+            id="evt_2",
+            ts="2026-05-09T00:00:01Z",
+            type="agent_message",
+            seq=2,
+            scope="main",
+            round_id="round_1",
+            message_id="msg_1",
+            payload={
+                "message": assistant_message,
+                "model": "deepseek-reasoner",
+                "provider": "deepseek",
+                "thinking": "enabled",
+            },
+        ),
+        SessionEvent(
+            id="evt_3",
+            ts="2026-05-09T00:00:02Z",
+            type="tool_call",
+            seq=3,
+            scope="main",
+            round_id="round_1",
+            message_id="msg_1",
+            call_id="call_read_outline",
+            payload={"tool": "document_read", "arguments": {"action": "get_outline"}},
+        ),
+        SessionEvent(
+            id="evt_4",
+            ts="2026-05-09T00:00:03Z",
+            type="tool_result",
+            seq=4,
+            scope="main",
+            round_id="round_1",
+            message_id="msg_1",
+            call_id="call_read_outline",
+            payload={"tool": "document_read", "status": "success", "output": {"sections": ["技术方案"]}},
+        ),
+    ]
+
+    messages = restore_main_chat_messages(events, current_user_message="继续完善", current_message_id="msg_2")
+
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["reasoning_content"] == "先读取目录。"
+    assert messages[1]["tool_calls"][0]["id"] == "call_read_outline"
+    assert messages[2]["role"] == "tool"
+    assert messages[2]["tool_call_id"] == "call_read_outline"

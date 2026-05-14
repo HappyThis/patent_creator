@@ -14,6 +14,31 @@ class ChatEventEmitter:
         self.bus = bus
         self.executor = executor
 
+    async def agent_message(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        message: dict[str, Any],
+        model: str,
+        provider: str,
+        thinking: str,
+    ) -> None:
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="agent_message",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload={
+                "message": message,
+                "model": model,
+                "provider": provider,
+                "thinking": thinking,
+            },
+        )
+
     async def agent_output(self, project_id: str, state: RoundState, text: str) -> None:
         self.store.append_session_event(
             project_id,
