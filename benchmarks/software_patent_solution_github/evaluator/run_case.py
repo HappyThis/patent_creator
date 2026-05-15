@@ -6,7 +6,6 @@ import json
 import shutil
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +70,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
 
     case_run_dir.mkdir(parents=True, exist_ok=True)
     request_md = (case_dir / "request.md").read_text(encoding="utf-8")
+    subject_reused = bool(args.skip_subject)
 
     if not args.skip_subject:
         prepare_project_checkout(case_dir, prepared_repo)
@@ -87,12 +87,9 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     else:
         prepare_project_checkout(case_dir, prepared_repo)
         technical_solution_md = artifact_path.read_text(encoding="utf-8")
-        subject_status = "reused"
-        diagnostics = read_existing_diagnostics(case_run_dir) or build_diagnostics(
-            [],
-            subject_status=subject_status,
-            rounds_run=0,
-            artifact_extracted=has_effective_solution(technical_solution_md),
+        subject_status, diagnostics = resolve_reused_subject_state(
+            technical_solution_md,
+            read_existing_diagnostics(case_run_dir),
         )
 
     manifest = {
@@ -107,6 +104,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         "evaluated_artifact": str(artifact_path),
         "artifact_source": "disclosure.technical_solution",
         "subject_status": subject_status,
+        "subject_reused": subject_reused,
         "max_refinement_rounds": max_refinements,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -177,7 +175,6 @@ async def run_subject_agent(
     settings.data_dir = data_dir
     settings.llm_timeout = max(settings.llm_timeout, float(round_timeout))
     services = AppServices(settings)
-    restrict_document_edit_to_technical_solution(services)
     project = services.store.create_project_with_id(f"bench_{case_id}_{generate_id('proj')}", f"Benchmark {case_id}")
     technical_solution = find_section_by_type(services.store.get_disclosure(project.project_id)["sections"], "technical_solution")
     if not technical_solution:
@@ -273,67 +270,6 @@ def mark_project_idle(services: Any, project_id: str) -> None:
     services.store.save_project(project)
 
 
-def restrict_document_edit_to_technical_solution(services: Any) -> None:
-    from app.domain import find_section_by_type
-
-    original_document_edit = services.executor.document_edit
-
-    def guarded_document_edit(project_id: str, arguments: dict[str, Any], scope: str = "main_agent") -> dict[str, Any]:
-        disclosure = services.store.get_disclosure(project_id)
-        technical_solution = find_section_by_type(disclosure["sections"], "technical_solution")
-        technical_solution_section_id = technical_solution["id"] if technical_solution else ""
-        forbidden = forbidden_document_edit_sections(arguments, technical_solution_section_id)
-        if forbidden:
-            return {
-                "status": "failed",
-                "output": {
-                    "code": "benchmark_forbidden_section_edit",
-                    "message": (
-                        "本 benchmark 只允许编辑 technical_solution 章节；"
-                        f"禁止编辑：{', '.join(sorted(forbidden))}。"
-                    ),
-                },
-            }
-        return original_document_edit(project_id, arguments, scope)
-
-    services.executor.document_edit = guarded_document_edit
-
-
-def forbidden_document_edit_sections(arguments: dict[str, Any], technical_solution_section_id: str) -> set[str]:
-    operations = arguments.get("operations")
-    if isinstance(operations, str):
-        try:
-            operations = json.loads(operations)
-        except json.JSONDecodeError:
-            return {"<invalid_operations>"}
-    if not isinstance(operations, list):
-        return {"<invalid_operations>"}
-    forbidden: set[str] = set()
-    for operation in operations:
-        if not isinstance(operation, dict):
-            forbidden.add("<invalid_operation>")
-            continue
-        op = str(operation.get("op") or "")
-        section_id = operation.get("section_id")
-        parent_section_id = operation.get("parent_section_id")
-        if op == "update_meta":
-            forbidden.add("meta")
-            continue
-        if op == "append_child_section":
-            if parent_section_id != technical_solution_section_id:
-                forbidden.add(str(parent_section_id or "<missing_parent_section_id>"))
-            continue
-        if isinstance(section_id, str) and section_id != technical_solution_section_id:
-            forbidden.add(section_id)
-            continue
-        if op in {"replace_section", "replace_section_blocks", "append_block"}:
-            if section_id != technical_solution_section_id:
-                forbidden.add(str(section_id or "<missing_section_id>"))
-        elif op == "replace_block":
-            forbidden.add("replace_block_without_section_guard")
-    return forbidden
-
-
 def build_diagnostics(
     events: list[Any],
     *,
@@ -342,46 +278,19 @@ def build_diagnostics(
     artifact_extracted: bool,
     judge_failed: bool = False,
 ) -> dict[str, Any]:
-    failure_codes: Counter[str] = Counter()
-    document_edit_failure_codes: Counter[str] = Counter()
-    round_failure_codes: Counter[str] = Counter()
-    tool_failure_count = 0
-    document_edit_failure_count = 0
-
-    for event in events:
-        event_type = event_value(event, "type")
-        payload = event_payload(event)
-        if event_type == "agent_output" and payload.get("status") == "failed":
-            round_failure_codes[failure_code(payload)] += 1
-            continue
-        if event_type != "tool_result":
-            continue
-        if payload.get("status") != "failed":
-            continue
-        tool_failure_count += 1
-        code = failure_code(payload)
-        failure_codes[code] += 1
-        if payload.get("tool") == "document_edit":
-            document_edit_failure_count += 1
-            document_edit_failure_codes[code] += 1
-
+    round_failed_flag = any(
+        event_value(event, "type") == "agent_output"
+        and event_payload(event).get("status") == "failed"
+        for event in events
+    )
     return {
         "subject_status": subject_status,
         "rounds_run": rounds_run,
         "refinement_attempts": max(0, rounds_run - 1),
         "artifact_extracted": artifact_extracted,
         "skipped_no_solution_artifact": subject_status == "skipped_no_solution_artifact",
-        "round_failed": subject_status == "round_failed" or bool(round_failure_codes),
-        "round_failure_count": sum(round_failure_codes.values()),
-        "round_failure_codes": dict(sorted(round_failure_codes.items())),
+        "round_failed": subject_status == "round_failed" or round_failed_flag,
         "judge_failed": judge_failed,
-        "tool_failure_count": tool_failure_count,
-        "tool_failure_codes": dict(sorted(failure_codes.items())),
-        "document_edit_failure_count": document_edit_failure_count,
-        "document_edit_failure_codes": dict(sorted(document_edit_failure_codes.items())),
-        "duplicate_section_id_count": failure_codes.get("duplicate_section_id", 0),
-        "invalid_operation_count": failure_codes.get("invalid_operation", 0),
-        "benchmark_forbidden_section_edit_count": failure_codes.get("benchmark_forbidden_section_edit", 0),
     }
 
 
@@ -400,19 +309,43 @@ def event_value(event: Any, key: str) -> Any:
     return getattr(event, key, None)
 
 
-def failure_code(payload: dict[str, Any]) -> str:
-    output = payload.get("output")
-    if isinstance(output, dict) and isinstance(output.get("code"), str) and output["code"]:
-        return output["code"]
-    code = payload.get("code")
-    return code if isinstance(code, str) and code else "unknown_tool_failure"
-
-
 def read_existing_diagnostics(case_run_dir: Path) -> dict[str, Any] | None:
     path = case_run_dir / "diagnostics.json"
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_reused_subject_state(
+    technical_solution_md: str,
+    existing_diagnostics: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
+    artifact_extracted = has_effective_solution(technical_solution_md)
+    fallback_status = "completed" if artifact_extracted else "skipped_no_solution_artifact"
+    if existing_diagnostics:
+        diagnostics = normalize_content_diagnostics(existing_diagnostics, fallback_status=fallback_status)
+        return str(diagnostics["subject_status"]), diagnostics
+    return fallback_status, build_diagnostics(
+        [],
+        subject_status=fallback_status,
+        rounds_run=0,
+        artifact_extracted=artifact_extracted,
+    )
+
+
+def normalize_content_diagnostics(diagnostics: dict[str, Any], *, fallback_status: str) -> dict[str, Any]:
+    subject_status = str(diagnostics.get("subject_status") or fallback_status)
+    rounds_run = int(diagnostics.get("rounds_run") or 0)
+    artifact_extracted = bool(diagnostics.get("artifact_extracted"))
+    return {
+        "subject_status": subject_status,
+        "rounds_run": rounds_run,
+        "refinement_attempts": max(0, rounds_run - 1),
+        "artifact_extracted": artifact_extracted,
+        "skipped_no_solution_artifact": subject_status == "skipped_no_solution_artifact",
+        "round_failed": subject_status == "round_failed" or bool(diagnostics.get("round_failed")),
+        "judge_failed": bool(diagnostics.get("judge_failed")),
+    }
 
 
 def write_result(case_run_dir: Path, result: dict[str, Any]) -> None:

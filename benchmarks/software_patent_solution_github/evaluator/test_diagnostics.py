@@ -8,14 +8,14 @@ EVALUATOR_DIR = Path(__file__).resolve().parent
 if str(EVALUATOR_DIR) not in sys.path:
     sys.path.insert(0, str(EVALUATOR_DIR))
 
-from run_case import build_diagnostics, forbidden_document_edit_sections, round_failed
+from run_case import build_diagnostics, resolve_reused_subject_state, round_failed
 
 
 def event(event_type: str, payload: dict) -> SimpleNamespace:
     return SimpleNamespace(type=event_type, payload=payload, round_id="round_1")
 
 
-def test_build_diagnostics_counts_tool_failures() -> None:
+def test_build_diagnostics_ignores_recoverable_tool_failures() -> None:
     diagnostics = build_diagnostics(
         [
             event(
@@ -50,17 +50,10 @@ def test_build_diagnostics_counts_tool_failures() -> None:
 
     assert diagnostics["refinement_attempts"] == 1
     assert diagnostics["artifact_extracted"] is True
-    assert diagnostics["tool_failure_count"] == 3
-    assert diagnostics["document_edit_failure_count"] == 2
-    assert diagnostics["duplicate_section_id_count"] == 1
-    assert diagnostics["invalid_operation_count"] == 1
-    assert diagnostics["tool_failure_codes"] == {
-        "duplicate_section_id": 1,
-        "invalid_operation": 1,
-        "section_not_found": 1,
-    }
     assert diagnostics["round_failed"] is False
-    assert diagnostics["round_failure_count"] == 0
+    assert "tool_failure_count" not in diagnostics
+    assert "tool_failure_codes" not in diagnostics
+    assert "document_edit_failure_count" not in diagnostics
 
 
 def test_build_diagnostics_counts_round_failures() -> None:
@@ -84,36 +77,43 @@ def test_build_diagnostics_counts_round_failures() -> None:
 
     assert round_failed(events, "round_1") is True
     assert diagnostics["round_failed"] is True
-    assert diagnostics["round_failure_count"] == 1
-    assert diagnostics["round_failure_codes"] == {"llm_http_error": 1}
 
 
-def test_forbidden_document_edit_sections_uses_append_child_parent_section() -> None:
-    assert (
-        forbidden_document_edit_sections(
-            {
-                "operations": [
-                    {
-                        "op": "append_child_section",
-                        "parent_section_id": "sec_000007",
-                        "section": {"type": "custom", "title": "子章节", "blocks": [], "children": []},
-                    }
-                ]
-            },
-            "sec_000007",
-        )
-        == set()
+def test_resolve_reused_subject_state_keeps_original_subject_status() -> None:
+    existing = {
+        "subject_status": "completed",
+        "rounds_run": 1,
+        "artifact_extracted": True,
+        "tool_failure_count": 3,
+        "tool_failure_codes": {"subagent_plain_response": 1},
+    }
+
+    status, diagnostics = resolve_reused_subject_state(effective_solution_markdown(), existing)
+
+    assert status == "completed"
+    assert status != "reused"
+    assert diagnostics["artifact_extracted"] is True
+    assert "tool_failure_count" not in diagnostics
+    assert "tool_failure_codes" not in diagnostics
+
+
+def test_resolve_reused_subject_state_without_diagnostics_uses_artifact_quality() -> None:
+    status, diagnostics = resolve_reused_subject_state(effective_solution_markdown(), None)
+
+    assert status == "completed"
+    assert diagnostics["subject_status"] == "completed"
+    assert diagnostics["artifact_extracted"] is True
+
+    empty_status, empty_diagnostics = resolve_reused_subject_state("## 技术方案\n\n太短。", None)
+
+    assert empty_status == "skipped_no_solution_artifact"
+    assert empty_diagnostics["subject_status"] == "skipped_no_solution_artifact"
+    assert empty_diagnostics["artifact_extracted"] is False
+
+
+def effective_solution_markdown() -> str:
+    return "## 技术方案\n\n" + (
+        "系统通过模块、流程、接口、状态和数据处理机制生成技术方案。"
+        "该机制包含多个步骤，用于保证技术方案内容可实施。"
+        * 8
     )
-
-    assert forbidden_document_edit_sections(
-        {
-            "operations": [
-                {
-                    "op": "append_child_section",
-                    "section_id": "sec_000007",
-                    "section": {"type": "custom", "title": "子章节", "blocks": [], "children": []},
-                }
-            ]
-        },
-        "sec_000007",
-    ) == {"<missing_parent_section_id>"}

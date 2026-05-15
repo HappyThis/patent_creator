@@ -92,11 +92,11 @@ backend/.venv/bin/python benchmarks/software_patent_solution_github/evaluator/ru
 backend/.venv/bin/python benchmarks/software_patent_solution_github/evaluator/run_all.py
 ```
 
-运行产物写入 `runs/<run_id>/`，该目录不进入版本控制。评估器会根据 `snapshot.json` 准备项目快照，将绝对路径注入给完整主 agent 对话接口；主 agent 完成后只抽取 `disclosure.json` 的 `technical_solution` 章节作为 `evaluated_artifact.md`。
+运行产物写入 `runs/<run_id>/`，该目录不进入版本控制。评估器会根据 `snapshot.json` 准备项目快照，将绝对路径注入给完整主 agent 对话接口；主 agent 完成后只抽取 `disclosure.json` 的 `technical_solution` 章节作为 `evaluated_artifact.md`。评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能提取有效技术方案，就进入内容评分。
 
 Codex-as-judge 使用本机 `codex exec`，在同一个项目快照目录中以只读方式阅读源码并打分。
 
-每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，统计工具失败、`document_edit` 失败、`duplicate_section_id`、`invalid_operation`、补充轮次、产物抽取和 judge 状态。批量运行会写入 `runs/<run_id>/run_summary.json`，其中包含每个 case 的 result 和 diagnostics 摘要。
+每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，只记录 subject 状态、补充轮次、产物抽取、round 硬失败和 judge 状态。完整运行轨迹仍保留在 `subject/session_events.jsonl`，用于调试，不作为技术方案质量评分依据。批量运行会写入 `runs/<run_id>/run_summary.json`，其中包含每个 case 的 result 和 diagnostics 摘要。
 
 ## 当前状态
 

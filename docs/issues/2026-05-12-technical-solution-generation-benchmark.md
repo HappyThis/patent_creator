@@ -1,10 +1,33 @@
 # 建立技术方案生成能力评测基准
 
+> 状态：进行中
+> 最后更新：2026-05-15
+> 关闭条件：核心 benchmark 规范稳定，完成足够数量的正式 case，并能稳定跑通 subject 与 Codex-as-judge 内容评分链路。
+
 ## 背景
 
 系统后续需要重点提升技术方案生成能力。为了判断每次 prompt、agent 职责、输出结构或调度策略调整是否真的带来提升，需要建立一套评测基准。
 
 该评测基准不应评估完整交底书字数或格式完整度，而应评估：在给定软件项目上下文和技术方案需求的情况下，系统能否生成合理、可实施、具备专利保护价值的软件技术方案。
+
+## 状态总览
+
+文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完成：正式 case 数量、项目快照固化、参考方案、rubric 和批量回归流程仍需要继续完善。
+
+已关闭子问题：
+
+- 已明确本 benchmark 只评价最终 `disclosure.technical_solution` 中提取出的技术方案内容。
+- 已移除 runner 对 `document_edit` 的章节 guard。
+- 已移除可恢复工具异常统计，`subagent_plain_response`、字符串化 `operations`、中途 `document_edit` 失败等过程问题不再进入内容评估指标。
+- 已保留 `session_events.jsonl` 作为 debug 材料。
+- 已跑通 `001` 的 subject 与 Codex-as-judge 完整评分链路。
+
+仍开放子问题：
+
+- 继续扩充和筛选正式 case。
+- 为正式 case 固化项目快照版本、参考方案、rubric 和 metadata。
+- 至少跑通 3 个黄金 case 后，再扩大到正式回归集。
+- 沉淀批量运行、汇总和横向比较流程。
 
 ## 当前决策
 
@@ -124,7 +147,7 @@
 已采取的 runner 层修正：
 
 - `runner.md` 明确要求只编辑“技术方案”章节。
-- 评估器在工具层限制 `document_edit`，正式评测中只允许写入 `technical_solution`；若主 agent 尝试写入其他章节，工具返回失败。
+- 评估器曾在工具层限制 `document_edit` 只写入 `technical_solution`；该策略已在 2026-05-15 调整为不再 guard，最终只按 `technical_solution` artifact 内容评分。
 - 评估产物只从 `disclosure.json` 的 `technical_solution` 章节抽取，不使用最终聊天回复兜底。
 - 运行失败或中断时，评估器应清理临时 benchmark project 的 busy 状态，避免污染后续运行。
 
@@ -156,7 +179,7 @@
 - 交底书结构协议已调整为系统生成 section id：`section.id` 只表示机器身份，`section.type` 表示标准章节语义，`section.title` 表示展示标题。
 - benchmark runner 抽取技术方案时已按 `section.type == "technical_solution"` 定位，而不是按语义化 section id 定位。
 - `document_edit` 对字符串化 `operations` 的窄口径防御和 `append_child_section` 唯一参数协议已完成。
-- 在 session 诊断中单独统计 `duplicate_section_id` 这类可恢复工具失败，避免只看最终 `artifact_extracted` 而忽略链路稳定性问题。（已在 evaluator 中写入 `diagnostics.json` 和批量 `run_summary.json`。）
+- 历史上曾在 session 诊断中单独统计 `duplicate_section_id` 这类可恢复工具失败；2026-05-15 后，内容 benchmark 不再统计可恢复工具异常，相关过程问题保留在 `session_events.jsonl` 中用于 debug。
 
 ## 2026-05-14 MiMo 试运行补充
 
@@ -175,14 +198,32 @@
    - 当前处理：executor 已增加 fail-fast，连续直接回复后立即失败，避免长时间空转。
    - 后续关注：需要判断不同模型是否稳定支持子 agent 的工具提交协议；如果不稳定，应加强子 agent tool choice、提示词约束或主 agent 的失败恢复策略。
 
-2. 主 agent 第一次写入 `document_edit` 时仍出现不合规 `operations`。
+2. 主 agent 第一次写入 `document_edit` 时仍出现不合规 `operations`。（历史记录；后续该类可恢复工具异常不再进入 benchmark 评分指标。）
    - 诊断码：`benchmark_forbidden_section_edit`
    - 具体禁止对象：`<invalid_operations>`
    - 现象：本次不是实际跨章节写入，而是 `operations` 被模型作为无法解析的字符串传入，benchmark 的章节保护层在调用真实 `document_edit` 前拦截。
    - 当前结果：主 agent 随后改用合法的数组格式，并通过 `replace_section_blocks` 与 `append_child_section` 成功写入技术方案。
-   - 后续关注：诊断命名容易让人误以为发生了跨章节编辑，后续可考虑将 benchmark guard 的错误拆分为 `benchmark_invalid_operations` 与 `benchmark_forbidden_section_edit` 两类，以便统计更准确。
+   - 后续调整：该 benchmark 已改为只评价最终技术方案 artifact，不再通过章节 guard 统计此类可恢复工具异常。
 
 本次运行说明：benchmark 约束、v2 section id 体系和 artifact 抽取链路已经能够得到有效产物，但仍需要把“工具协议稳定性”纳入主 agent 能力评估，而不能只看最终是否提取到技术方案。
+
+## 2026-05-15 完整评分链路复跑补充
+
+使用 `software_patent_solution_github` 的 `001` case 跑完整链路后，subject 与 judge 均已跑通，最终状态为 `scored`。
+
+- run id：`20260515-094548-001`
+- artifact 来源：`disclosure.technical_solution`
+- judge 状态：`scored`
+
+后续设计调整：
+
+- 本 benchmark 只评价最终 `disclosure.technical_solution` 中提取出的技术方案内容。
+- 已移除 benchmark runner 对 `document_edit` 的“只允许编辑技术方案章节”guard；agent 是否写过其他章节不作为本 benchmark 的评价对象。
+- 已移除可恢复工具异常统计，`subagent_plain_response`、字符串化 `operations`、中途 `document_edit` 失败等过程问题不进入 `result.json` 的内容评估指标。
+- `session_events.jsonl` 继续保留，作为 debug 和链路排障材料，不作为评分依据。
+- `diagnostics.json` 只保留 subject 状态、补充轮次、artifact 抽取、round 硬失败和 judge 状态。
+
+该调整后，benchmark runner 的目标收敛为：能提取有效技术方案则进入 Codex-as-judge 内容评分；无法提取有效技术方案则记为 `skipped_no_solution_artifact` 或相应硬失败状态。
 
 ## 暂不处理
 

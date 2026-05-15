@@ -1,10 +1,33 @@
 # 提高技术方案生成能力
 
+> 状态：进行中
+> 最后更新：2026-05-15
+> 关闭条件：系统能够稳定把粗粒度软件需求转化为合理、可实施、具备保护价值的技术方案，并且主 agent / 子 agent / 文档写入链路不再因协议问题阻断技术方案落地。
+
 ## 背景
 
 当前系统能够根据少量议题生成完整的专利交底书，输出字数较多，结构也较完整。但实际使用中发现，完整文档并不等于有效成果：如果核心技术方案不合理，后续生成的背景技术、发明内容、实施例等都会围绕一个不成立的方案展开，导致用户需要花费大量时间阅读和判断。
 
 对于专利交底书而言，最关键的不是先生成长文档，而是先形成一个逻辑自洽、可实施、具备保护价值的技术方案。
+
+## 状态总览
+
+文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在 `001` case 中产出并评分技术方案，但仍存在子 agent 协议失败、工具调用参数退化和工具失败恢复策略不稳定等链路问题。
+
+已关闭子问题：
+
+- `reasoning_content` 保存与回放已按 provider/profile 处理。
+- `document_edit.operations` 字符串化输入已有窄口径工具层防御。
+- `append_child_section` 参数协议已统一为 `parent_section_id` + `section`。
+- `duplicate_section_id` 的根因已通过 v2 文档结构解决：`section.id` 由系统生成，章节语义迁移到 `section.type`。
+- benchmark runner 已调整为只评价最终技术方案内容，不再把可恢复过程异常作为内容评分或诊断指标。
+
+仍开放子问题：
+
+- `section_writer` 子 agent 仍可能直接回复文本，而不是调用 `submit_result`。
+- 主 agent 工具调用参数仍可能退化为字符串化 JSON，虽然工具层已能防御。
+- 工具失败后的恢复策略仍不稳定，曾出现通过 `exec_command` 探索内部文档文件，而不是优先修正同一工具调用重试。
+- 技术方案质量本身仍需要通过更多正式 case 验证和提升。
 
 ## 问题
 
@@ -115,7 +138,29 @@
    - 后续方向：需要继续强化子 agent 的输出契约，或评估是否在技术方案生成 benchmark 中减少对子 agent 的依赖。
 
 2. 主 agent 仍可能先给出不合规的 `document_edit.operations`。
-   - 现象：主 agent 第一次把 `operations` 作为无法解析的字符串提交，benchmark guard 将其拦截为 `<invalid_operations>`。
+   - 现象：主 agent 第一次把 `operations` 作为无法解析的字符串提交。历史 runner guard 曾将其拦截为 `<invalid_operations>`。
    - 影响：即使最终能够自我修正，也会增加轮次、token 消耗和失败不确定性；在更弱模型或更复杂 case 下，可能直接导致无法提取技术方案。
-   - 当前处理：真实 `document_edit` 已有窄口径字符串解析防御；benchmark guard 已能提前拦截非法格式。
-   - 后续方向：需要从主 agent 工具调用提示、模型 provider 差异和 benchmark 诊断分类三个层面继续收敛，尤其要区分“跨章节编辑”和“非法 operations 格式”两类问题。
+   - 当前处理：真实 `document_edit` 已有窄口径字符串解析防御；该内容 benchmark 不再把可恢复工具异常作为评分或诊断指标。
+   - 后续方向：需要从主 agent 工具调用提示、模型 provider 差异继续收敛；该问题只在导致无法产出技术方案 artifact 时影响内容 benchmark 结果。
+
+## 2026-05-15 完整评分链路复跑补充
+
+`software_patent_solution_github` 的 `001` case 已经跑通 subject 与 judge。后续确认该 benchmark 只评价最终技术方案内容，不再把可恢复的工具异常、子 agent 协议失败或中途写入重试作为评分或诊断指标；这些过程问题保留在 `session_events.jsonl` 中供 debug。
+
+以下问题仍属于系统执行链路稳定性问题，但不再作为该技术方案内容 benchmark 的评价目标：
+
+1. 子 agent 协议失败仍然存在。
+   - 失败原因：`section_writer` 连续直接回复文本，未调用 `submit_result`。
+   - 诊断码：`subagent_plain_response`
+   - 影响：主 agent 无法直接接收结构化 proposal，只能把子 agent 调用视为失败后自行恢复。
+   - 后续方向：继续强化子 agent 输出契约；如果不同模型对 tool call 支持不稳定，需要评估是否让主 agent 在技术方案 benchmark 中直接写入，减少对子 agent 的强依赖。
+
+2. 主 agent 工具调用参数仍会退化为字符串化 JSON。
+   - 失败原因：`document_edit.operations` 被输出为字符串 JSON，而不是数组对象。
+   - 影响：真实工具已有窄口径防御，主 agent 通常可恢复，但会增加轮次和 token 消耗。
+   - 后续方向：继续收敛主 agent 的工具调用格式；该问题只在导致无法产出技术方案 artifact 时影响内容 benchmark 结果。
+
+3. 工具失败后的恢复策略不稳定。
+   - 现象：`document_edit` 参数错误后，主 agent 曾通过 `exec_command` 查找内部 `disclosure.json`，而不是直接修正 `document_edit` 参数重试。
+   - 影响：该行为虽然没有导致本次失败，但会增加无关路径探索，并可能在更复杂 case 中绕开预期文档工具边界。
+   - 后续方向：主 agent prompt 与工具错误信息应明确要求：工具参数错误时优先修正同一工具调用，不应通过文件系统直接读写内部交底书数据。

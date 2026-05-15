@@ -1,8 +1,17 @@
 # Issues
 
-This folder is used to collect and track current project issues.
+本目录用于收集和跟踪当前项目问题。
 
-Suggested filename format:
+建议文件名格式：
 
 - `YYYY-MM-DD-short-title.md`
 
+## 状态规范
+
+每个 issue 文件应在标题下方声明文件级状态：
+
+- `进行中`：问题仍有未完成工作，是默认状态。
+- `已关闭`：该 issue 的关闭条件已经满足，不再作为开放事项跟踪。
+- `暂缓`：当前不处理，但仍保留背景和决策记录。
+
+如果一个 issue 中包含多个子问题，应在文档中区分“已关闭子问题”和“仍开放子问题”。只有当文件级关闭条件全部满足时，才将整个 issue 标记为 `已关闭`。
