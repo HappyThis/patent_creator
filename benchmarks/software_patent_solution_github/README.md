@@ -9,6 +9,7 @@
 - [GitHub 中型项目软件专利技术方案评测基准](../../docs/benchmarks/software-patent-solution-github.md)
 - [GitHub 中型项目候选清单](../../docs/benchmarks/github-project-candidates.md)
 - [测试项难度复评](./difficulty_review.md)
+- [测试项筛选评估](./case_selection_report.md)
 
 ## 概念模型
 
@@ -92,11 +93,17 @@ backend/.venv/bin/python benchmarks/software_patent_solution_github/evaluator/ru
 backend/.venv/bin/python benchmarks/software_patent_solution_github/evaluator/run_all.py
 ```
 
+多次重复运行：
+
+```bash
+backend/.venv/bin/python benchmarks/software_patent_solution_github/evaluator/run_all.py --repeats 3
+```
+
 运行产物写入 `runs/<run_id>/`，该目录不进入版本控制。评估器会根据 `snapshot.json` 准备项目快照，将绝对路径注入给完整主 agent 对话接口；主 agent 完成后只抽取 `disclosure.json` 的 `technical_solution` 章节作为 `evaluated_artifact.md`。评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能提取有效技术方案，就进入内容评分。
 
 Codex-as-judge 使用本机 `codex exec`，在同一个项目快照目录中以只读方式阅读源码并打分。
 
-每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，只记录 subject 状态、补充轮次、产物抽取、round 硬失败和 judge 状态。完整运行轨迹仍保留在 `subject/session_events.jsonl`，用于调试，不作为技术方案质量评分依据。批量运行会写入 `runs/<run_id>/run_summary.json`，其中包含每个 case 的 result 和 diagnostics 摘要。
+每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，只记录 subject 状态、补充轮次、产物抽取、round 硬失败和 judge 状态。完整运行轨迹仍保留在 `subject/session_events.jsonl`，用于调试，不作为技术方案质量评分依据。批量运行会写入 `runs/<run_id>/run_summary.json`；多次重复运行会额外写入 `case_selection_summary.json` 和 `case_selection_report.md`，并在 benchmark 根目录更新 `latest_run_report.md`，用于观察成功率、平均分、分数波动和候选 case 去留。
 
 ## 当前状态
 
