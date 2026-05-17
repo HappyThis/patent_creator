@@ -101,3 +101,7 @@ Mission Control 已经具备多个 agent runtime 的发现、会话展示和继�
 - 对 OpenCode 保持 transcript / continue 支持，但不宣称现有 PTY 后端已经支持。
 - 增加真实结构 SQLite fixture、OpenCode binary 替身和 API / E2E 测试。
 - 更新 OpenAPI 与 API index，保持契约和实现一致。
+
+## 等价机制说明
+
+本参考方案不要求被评估方案猜中 OpenCode 的真实本地目录或文件格式。若方案把 OpenCode 状态作为外部适配对象，通过可配置路径、版本化 parser、fixture 和命令替身完成验证，并明确未知能力的 UI/API gating，应视为等价有效机制。

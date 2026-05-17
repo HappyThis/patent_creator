@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any
@@ -21,49 +23,22 @@ def main() -> None:
     batch_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
     runs_dir = Path(args.runs_dir).resolve()
     batch_dir = runs_dir / batch_id
-    results = []
-    for repeat in range(1, args.repeats + 1):
-        for case_id in case_ids:
-            normalized_case_id = str(case_id).zfill(3)
-            run_id = f"{batch_id}/r{repeat:02d}-{normalized_case_id}"
-            command = [
-                sys.executable,
-                str(RUN_CASE),
-                "--case",
-                normalized_case_id,
-                "--run-id",
-                run_id,
-                "--runs-dir",
-                str(runs_dir),
-                "--round-timeout",
-                str(args.round_timeout),
-                "--judge-timeout",
-                str(args.judge_timeout),
-            ]
-            if args.skip_judge:
-                command.append("--skip-judge")
-            print(f"\n=== case {normalized_case_id} repeat {repeat}/{args.repeats} ===", flush=True)
-            completed = subprocess.run(command, capture_output=True, text=True, check=False)
-            parsed_result = parse_case_result(completed.stdout)
-            result = {
-                "case_id": normalized_case_id,
-                "repeat": repeat,
-                "run_id": run_id,
-                "returncode": completed.returncode,
-                "stdout": completed.stdout,
-                "stderr": completed.stderr,
-                "result": parsed_result,
-                "diagnostics": parsed_result.get("diagnostics") if isinstance(parsed_result, dict) else None,
-            }
-            results.append(result)
-            print(completed.stdout)
-            if completed.returncode != 0:
-                print(completed.stderr, file=sys.stderr)
+    normalized_case_ids = [str(case_id).zfill(3) for case_id in case_ids]
+    jobs = [
+        {
+            "case_id": case_id,
+            "repeat": repeat,
+            "run_id": f"{batch_id}/r{repeat:02d}-{case_id}",
+        }
+        for repeat in range(1, args.repeats + 1)
+        for case_id in normalized_case_ids
+    ]
+    results = run_jobs(jobs, args=args, runs_dir=runs_dir)
 
     batch_dir.mkdir(parents=True, exist_ok=True)
     summary_path = batch_dir / "run_summary.json"
     summary_path.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    aggregate = aggregate_results(results, case_ids=[str(case_id).zfill(3) for case_id in case_ids])
+    aggregate = aggregate_results(results, case_ids=normalized_case_ids)
     aggregate_path = batch_dir / "case_selection_summary.json"
     aggregate_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report = render_report(batch_id=batch_id, aggregate=aggregate, repeats=args.repeats)
@@ -74,7 +49,76 @@ def main() -> None:
     print(f"report: {report_path}")
 
 
-def parse_case_result(stdout: str) -> dict[str, Any] | None:
+def run_jobs(jobs: list[dict[str, Any]], *, args: argparse.Namespace, runs_dir: Path) -> list[dict[str, Any]]:
+    if args.workers <= 1:
+        return [run_one_job(job, args=args, runs_dir=runs_dir) for job in jobs]
+
+    results: list[dict[str, Any]] = []
+    print(f"running {len(jobs)} jobs with {args.workers} workers", flush=True)
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        future_to_job = {
+            executor.submit(run_one_job, job, args=args, runs_dir=runs_dir): job
+            for job in jobs
+        }
+        for future in as_completed(future_to_job):
+            results.append(future.result())
+
+    results.sort(key=lambda item: (int(item["repeat"]), item["case_id"]))
+    return results
+
+
+def run_one_job(job: dict[str, Any], *, args: argparse.Namespace, runs_dir: Path) -> dict[str, Any]:
+    case_id = str(job["case_id"])
+    repeat = int(job["repeat"])
+    run_id = str(job["run_id"])
+    command = [
+        sys.executable,
+        str(RUN_CASE),
+        "--case",
+        case_id,
+        "--run-id",
+        run_id,
+        "--runs-dir",
+        str(runs_dir),
+        "--round-timeout",
+        str(args.round_timeout),
+        "--judge-timeout",
+        str(args.judge_timeout),
+    ]
+    if args.skip_judge:
+        command.append("--skip-judge")
+    child_env = os.environ.copy()
+    child_env.setdefault("PYTHONIOENCODING", "utf-8")
+    print(f"\n=== case {case_id} repeat {repeat}/{args.repeats} ===", flush=True)
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=child_env,
+        check=False,
+    )
+    parsed_result = parse_case_result(completed.stdout)
+    result = {
+        "case_id": case_id,
+        "repeat": repeat,
+        "run_id": run_id,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "result": parsed_result,
+        "diagnostics": parsed_result.get("diagnostics") if isinstance(parsed_result, dict) else None,
+    }
+    print(completed.stdout)
+    if completed.returncode != 0:
+        print(completed.stderr, file=sys.stderr)
+    return result
+
+
+def parse_case_result(stdout: str | None) -> dict[str, Any] | None:
+    if not stdout:
+        return None
     text = stdout.strip()
     if not text:
         return None
@@ -227,8 +271,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--round-timeout", type=int, default=1800)
     parser.add_argument("--judge-timeout", type=int, default=1800)
+    parser.add_argument("--workers", type=int, default=1, help="Number of cases to run concurrently.")
     parser.add_argument("--skip-judge", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
+    return args
 
 
 if __name__ == "__main__":

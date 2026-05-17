@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from ...core import ApiError
+from ...core.command_platform import exec_command_tool_description
 
 
 class SupportsGenerateWithTools(Protocol):
@@ -119,7 +120,7 @@ MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "exec_command",
-            "description": "在项目工作区内执行命令字符串，cwd 为当前 project 工作区。可用于读取文件、访问外部资料、运行诊断命令或 git 命令。",
+            "description": exec_command_tool_description(),
             "parameters": {
                 "type": "object",
                 "properties": {

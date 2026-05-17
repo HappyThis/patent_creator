@@ -60,3 +60,25 @@
 - 未考虑超时和资源清理：最多扣 10 分
 - 未考虑非法工具名、工具不存在或工具异常：最多扣 10 分
 - 把方案写成纯 UI 交互，无底层执行机制：最多扣 15 分
+
+## 源码级评分补充
+
+- 高分方案必须说明 provider/namespace 随工具调用消息传递或等价路由机制，避免多个 ToolProvider 或工具名规范化后发生歧义。
+- 必须覆盖工具名规范化映射、重复名/保留名拒绝、input schema 校验、output schema/结果处理、iframe ready/load/error/timeout/cleanup、postMessage origin 校验和限制性 CSP 或等价资源控制。
+- 只写“iframe sandbox + postMessage 调工具”但没有生命周期、错误状态、schema 和命名空间边界的方案应显著扣分。
+
+## 档位锚点
+
+- 90-100 分强答案：必须同时具备隔离执行容器、代码注入/启动/终止、主页面代理真实工具、provider/namespace 路由、规范化名称映射与冲突拒绝、input/output schema、完整 ready/execute/result/load-error/message-error/logs/cleanup 协议、requestId 关联、pending 清理、origin 校验、限制性 CSP/资源控制、codemode Executor/createCodeTool/ToolProvider/useAgentChat 源码接入。
+- 75-85 分可用但不完整：具备 iframe/worker 隔离和结构化工具调用协议，能处理命名空间、schema、超时和错误，但源码执行器接入、生命周期字段、CSP/资源控制或 pending cleanup 中缺一到两个关键边界。
+- 60-74 分弱答案：主要是 iframe + postMessage，缺完整生命周期、schema、命名空间或安全资源控制，可能可演示但难以安全接入现有工具体系。
+- 0-59 分不合格：直接在主页面 eval、无隔离、无工具调度协议、无错误/超时/清理，或允许生成代码直接操作主页面私有对象。
+
+## 分数上限规则
+
+- 如果方案没有明确对接当前 codemode Executor 抽象、createCodeTool 类型生成、ToolProvider/ResolvedProvider 命名空间和 useAgentChat/onToolCall 工具回传链路，总分通常不得高于 82 分。
+- 如果方案只细化工具调用消息，而没有 ready、execute、execution-result、load-error、message-error、logs、cleanup 等字段级生命周期协议，总分通常不得高于 84 分。
+- 如果方案没有限制性 CSP、资源加载白名单或等价外部资源控制机制，总分通常不得高于 82 分。
+- 如果方案声称隔离代码不能访问 window/document 等全局对象，但没有可落地执行技术或沙箱限制依据，总分通常不得高于 80 分。
+- 如果方案没有处理 pending tool calls 在超时、清理或 iframe 销毁时的统一拒绝和释放，总分通常不得高于 84 分。
+- 如果同时缺失源码执行器接入、完整生命周期协议、CSP/资源控制、pending 清理中任意两个关键机制，总分不得高于 80 分；缺失三个或更多时，总分不得高于 74 分。

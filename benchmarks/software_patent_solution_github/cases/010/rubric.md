@@ -60,3 +60,25 @@
 - 未设计访问门禁：最多扣 15 分
 - MCP 或文件工具允许浏览器直接绕过 agent 生命周期调用：最多扣 12 分
 - 只写产品交互，不写父子结构、代理和状态流：最多扣 20 分
+
+## 源码级评分补充
+
+- `MCP proxy` 是参考中的表达，不限定命名。高分方案应体现“父级持有 MCP 注册表、OAuth 凭据、connection state 和 tool descriptors；子会话按轮获取描述并经父级执行真实工具调用”的受控代理链。
+- Workspace proxy 必须覆盖 Think built-in tools 和 codemode state 所需的完整文件接口，至少说明文本/字节读写、stat/lstat、readDir/glob、rm、cp/mv、symlink/readlink 或等价能力。
+- 只做多 chat id、共享一张消息表，或让浏览器/子会话绕过父级直接执行 raw MCP invocation 的方案应显著扣分。
+
+## 档位锚点
+
+- 90-100 分强答案：必须同时具备用户级父目录 agent、每会话独立子 agent、父级会话索引/门禁、防猜测唤醒、共享 workspace 完整代理、共享 MCP 可序列化 tool descriptor + 子侧 wrapper + 父侧 callTool、OAuth 父级归属、浏览器 callable 与内部 RPC 隔离、workspace revision/onChange 广播、多标签刷新、跨会话调度、认证身份绑定和删除会话资源策略。
+- 75-85 分可用但不完整：父子 agent 架构和共享资源边界正确，能说明 workspace/MCP/OAuth/调度，但 workspace proxy、MCP proxy 可序列化边界、RPC 权限隔离、实时 revision 或认证路由中缺一到两个关键工程机制。
+- 60-74 分弱答案：只是多 chat id 或父级索引设计，缺完整共享 workspace/MCP 代理或访问门禁，可能让浏览器/子会话绕过父级直接执行 raw tool。
+- 0-59 分不合格：多个会话共享同一消息数组、无独立 agent 上下文、无共享/私有状态边界、无访问控制或直接暴露 raw MCP/file IO。
+
+## 分数上限规则
+
+- 如果 workspace proxy 没有覆盖 Think built-in tools 与 codemode/shell state 所需的完整文件接口，包括字节读写、append/exists/lstat、cp/mv、symlink/readlink、search/diff 或等价能力，总分通常不得高于 82 分。
+- 如果方案把包含 execute 函数闭包的 AI SDK ToolSet 直接跨 Durable Object RPC 传给子会话，而没有可序列化 tool descriptor + 子侧 wrapper + 父侧 callTool 的边界，总分通常不得高于 80 分。
+- 如果方案没有区分浏览器 callable 与父子内部 RPC，导致 raw MCP invocation 可能被前端绕过 agent 生命周期调用，总分通常不得高于 82 分。
+- 如果方案没有 workspace revision/onChange 或等价单调变更广播，无法说明文件浏览器和多标签页何时刷新，总分通常不得高于 84 分。
+- 如果方案没有说明 Worker 路由如何绑定认证身份并拒绝伪造 userId/sessionId，总分通常不得高于 82 分。
+- 如果同时缺失完整 workspace proxy、可序列化 MCP 工具代理、RPC/callable 权限隔离、认证路由绑定中任意两个关键机制，总分不得高于 78 分；缺失三个或更多时，总分不得高于 72 分。

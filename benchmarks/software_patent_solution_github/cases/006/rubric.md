@@ -58,3 +58,26 @@
 - 没有考虑工具 continuation 或恢复中的服务端 turn。
 - 没有配置策略，无法支持 request-lifetime 型应用。
 - 显式取消后错误处理 active request id，导致残余服务端消息污染 UI。
+
+## 源码级评分补充
+
+- `cancelOnClientAbort` 是参考中的配置名，不限定具体命名。只要方案明确区分 durable 默认模式和 request-lifetime opt-in 模式，并描述配置入口与行为矩阵，应按等价机制给分。
+- 高分方案必须指出当前 transport 中 caller abort、stream.cancel、本地清理和服务端 cancel frame 易被耦合，并给出拆分后的状态机。
+- 只说“刷新不取消服务端”或“增加 stop 按钮”，但没有 active request id 保留、late chunk/done 过滤、resume fallback、tool continuation 和多标签观察路径的方案应显著扣分。
+
+## 档位锚点
+
+- 90-100 分强答案：必须同时具备 durable 默认与 request-lifetime opt-in 行为矩阵、active server turn id 保留、本地 detach 与服务端 cancel 解耦、显式 cancel frame/API、服务端终态保护、late chunk/done 过滤、resume fallback、tool continuation、多标签/observed turn 处理、配置入口和源码级 WebSocket/useAgentChat/AIChatAgent 接入说明。
+- 75-85 分可用但不完整：能正确区分刷新/本地关闭与显式服务端取消，并有 active id 或配置策略，但 resume、tool continuation、late event 过滤、多标签观察或终态保护中缺一到两个关键边界。
+- 60-74 分弱答案：只提出“刷新不取消服务端”或“增加 stop”，缺 active id、显式取消协议或恢复/continuation 语义，容易污染 UI 或误杀 durable turn。
+- 0-59 分不合格：把普通 abort/close 一律映射为服务端取消、所有 stop 都只本地关闭、或依赖源码中不存在的自动取消能力作为核心机制。
+
+## 分数上限规则
+
+- 如果方案没有服务端活动 turn id 或等价 active request 标识的保留与校验机制，总分通常不得高于 82 分。
+- 如果方案没有区分普通客户端 abort、本地 stream cancel、显式服务端取消和 request-lifetime opt-in 行为矩阵，总分通常不得高于 80 分。
+- 如果方案没有显式取消帧/取消 API 与服务端终态保护，总分通常不得高于 82 分。
+- 如果方案没有 late chunk/done 过滤、resume fallback、tool continuation 或多标签观察中的至少两个边界处理，总分通常不得高于 85 分。
+- 如果同时缺失 active id、显式服务端取消、配置行为矩阵、resume/continuation 边界处理中任意两个关键机制，总分不得高于 78 分；缺失三个或更多时，总分不得高于 72 分。
+- 如果 unsupported_claims 中包含“现有 WebSocket close、AbortSignal、ReadableStream.cancel 或本地 stream close 已经自动取消服务端 durable turn”这类核心源码事实错误，总分必须不高于 75 分；该上限不能因方案总体方向正确而豁免。
+- 如果上述核心源码事实错误同时伴随缺少 active server turn id 或 late chunk/done 过滤，总分必须不高于 72 分。

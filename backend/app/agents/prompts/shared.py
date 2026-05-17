@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from ...core.command_platform import current_command_platform, exec_command_prompt_examples
+
+_EXEC_COMMAND_PLATFORM = current_command_platform()
+_EXEC_COMMAND_PROMPT_GUIDANCE = exec_command_prompt_examples()
+_EXEC_COMMAND_FIRST_EXAMPLE = _EXEC_COMMAND_PLATFORM.examples[0]
 
 SUBAGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - document_read 读取项目上下文：
@@ -13,7 +18,7 @@ SUBAGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - document_read 搜索正文：
   {"action":"search_blocks","query":"消息平台"}
 - exec_command 执行诊断命令：
-  {"command":"ls -la","timeout":30}
+  {"command":"__PLATFORM_COMMAND_EXAMPLE__","timeout":30}
 - submit_result 提交最终结果：
   {"summary":"已完成任务。","reply":"已整理结果。","rationale":"基于当前上下文整理。","proposal_type":"analysis_result","proposal":{},"questions":[],"warnings":[]}
 
@@ -22,7 +27,11 @@ SUBAGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - JSON 字符串必须使用双引号；不能使用单引号、注释、尾随逗号或未转义换行。
 - 中文正文中的双引号、反斜杠和换行必须正确转义。
 - 最终结果必须通过 submit_result 工具提交，不要直接回复 JSON 或正文。
-"""
+__PLATFORM_EXEC_COMMAND_GUIDANCE__
+""".replace("__PLATFORM_COMMAND_EXAMPLE__", _EXEC_COMMAND_FIRST_EXAMPLE).replace(
+    "__PLATFORM_EXEC_COMMAND_GUIDANCE__",
+    _EXEC_COMMAND_PROMPT_GUIDANCE,
+)
 
 
 MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
@@ -47,7 +56,7 @@ MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - execute_subagent 调度资料分析：
   {"agent_id":"material_analyst","goal":"基于已继承的上下文，提炼用户材料中的技术问题、技术方案和技术效果。"}
 - exec_command 执行诊断命令：
-  {"command":"ls -la","timeout":30}
+  {"command":"__PLATFORM_COMMAND_EXAMPLE__","timeout":30}
 
 工具调用要求：
 - 调用工具时，arguments 必须是严格 JSON 对象。
@@ -57,7 +66,11 @@ MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
 - append_child_section 只能使用 parent_section_id 和 section 字段，不得使用 section_id、child 或 child_section 表示父章节或子章节。
 - section_id 必须使用 document_read 返回的系统生成 id；不要把 technical_solution、technical_effects 等章节语义当作 section_id。
 - 新增或替换 section 的 section 对象不允许携带 id；新增子章节使用 type:"custom" 和 title 表达语义。
-"""
+__PLATFORM_EXEC_COMMAND_GUIDANCE__
+""".replace("__PLATFORM_COMMAND_EXAMPLE__", _EXEC_COMMAND_FIRST_EXAMPLE).replace(
+    "__PLATFORM_EXEC_COMMAND_GUIDANCE__",
+    _EXEC_COMMAND_PROMPT_GUIDANCE,
+)
 
 
 FINAL_TEXT_RULES = """- 交底书正文必须是最终态文本，只呈现最终技术方案、结构和效果。

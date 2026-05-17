@@ -111,6 +111,22 @@ def test_resolve_reused_subject_state_without_diagnostics_uses_artifact_quality(
     assert empty_diagnostics["artifact_extracted"] is False
 
 
+def test_resolve_reused_subject_state_recovers_artifact_after_round_failure() -> None:
+    existing = {
+        "subject_status": "round_failed",
+        "rounds_run": 2,
+        "artifact_extracted": True,
+        "round_failed": True,
+    }
+
+    status, diagnostics = resolve_reused_subject_state(effective_solution_markdown(), existing)
+
+    assert status == "completed"
+    assert diagnostics["subject_status"] == "completed"
+    assert diagnostics["artifact_extracted"] is True
+    assert diagnostics["round_failed"] is True
+
+
 def effective_solution_markdown() -> str:
     return "## 技术方案\n\n" + (
         "系统通过模块、流程、接口、状态和数据处理机制生成技术方案。"

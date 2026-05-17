@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
+from ....core.command_platform import command_arguments, current_command_platform, decode_command_output
 from ....domain.document_tools import tool_failed, tool_success
 from ....storage.workspace_store import WorkspaceStore
 from ..registry import can_use_tool
@@ -22,13 +23,13 @@ def exec_command(
         return tool_failed("invalid_operation", "command 字段缺失。")
 
     timeout = float(arguments.get("timeout", 30))
+    profile = current_command_platform()
     try:
         completed = subprocess.run(
-            command,
+            command_arguments(command, profile),
             cwd=store.project_dir(project_id),
             capture_output=True,
-            shell=True,
-            text=True,
+            text=False,
             timeout=timeout,
             check=False,
         )
@@ -37,16 +38,26 @@ def exec_command(
             "command_timeout",
             f"命令执行超时：{timeout} 秒。",
             command=command,
-            stdout=exc.stdout or "",
-            stderr=exc.stderr or "",
+            platform=profile.platform,
+            shell=profile.shell,
+            stdout=decode_command_output(exc.stdout),
+            stderr=decode_command_output(exc.stderr),
         )
     except OSError as exc:
-        return tool_failed("command_execution_failed", f"命令执行失败：{exc}", command=command)
+        return tool_failed(
+            "command_execution_failed",
+            f"命令执行失败：{exc}",
+            command=command,
+            platform=profile.platform,
+            shell=profile.shell,
+        )
     return tool_success(
         {
             "command": command,
+            "platform": profile.platform,
+            "shell": profile.shell,
             "exit_code": completed.returncode,
-            "stdout": completed.stdout,
-            "stderr": completed.stderr,
+            "stdout": decode_command_output(completed.stdout),
+            "stderr": decode_command_output(completed.stderr),
         }
     )

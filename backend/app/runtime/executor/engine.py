@@ -16,6 +16,7 @@ from ...agents.workers import (
     MainAgentToolCall,
 )
 from ...core import ApiError, Settings
+from ...core.command_platform import exec_command_tool_description
 from ...domain.document_tools import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
 from ..context import ContextManager
@@ -64,7 +65,7 @@ SUBAGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "exec_command",
-            "description": "在项目工作区执行命令字符串，cwd 为当前 project 工作区。",
+            "description": exec_command_tool_description(),
             "parameters": {
                 "type": "object",
                 "properties": {

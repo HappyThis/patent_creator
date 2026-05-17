@@ -107,3 +107,7 @@ read tool 普通结果可分为：
 - 方案提交：`b197faf0ca79d9e921d2f80c5fcafe4899995d11`
 - 快照提交：`cdf203a799e97f8d8bdc5409622b99e499f8c57d`
 - 关键能力：`WorkspaceLike`、`readFileBytes`、媒体类型探测、`image-data` / `file-data` 模型输出、最大文件字节限制、文本分页和二进制降级。
+
+## 等价机制说明
+
+`readFileBytes` 是当前源码中已有的字节读取能力名，不限定接口命名。若方案通过等价的 byte read/inspect 接口获得字节、MIME、大小和 stat 信息，并能完成模型内容块转换和结构化降级，应视为等价有效机制。

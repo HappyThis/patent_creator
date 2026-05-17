@@ -106,3 +106,7 @@ Mission Control 已经能够派发 agent 任务、记录部分 spawn history、�
 - 新增 `/api/v1/runs`、`/api/v1/runs/:id`、`/api/v1/runs/:id/provenance`、`/api/v1/runs/:id/eval`、`/api/v1/runs/stream` 和 `/api/v1/evals/leaderboard`。
 - 通过事件总线发布 `run.created`、`run.updated`、`run.completed`、`run.eval_attached`。
 - 在 MCP server 中新增 run 查询、创建、更新、溯源、评估附着和排行榜工具。
+
+## 等价机制说明
+
+`AgentRun` 是参考方案中的命名，不是唯一可接受答案。若方案使用其他名称，但形成统一运行记录契约，并能桥接 spawn history、task、session、cost、eval、event 和 MCP/API 查询，应视为等价有效机制。

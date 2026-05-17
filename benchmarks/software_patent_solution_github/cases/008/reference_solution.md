@@ -129,3 +129,7 @@ iframe 内部运行时接收待执行代码与可用工具提供者列表，构�
 - 方案提交：`186a2a45700fbd9680b69e8b72ea062fd325d077`
 - 快照提交：`ab2b1db31971ac2d2ddab9d962986f208c69a422`
 - 关键能力：`IframeSandboxExecutor`、`createBrowserCodeTool()`、iframe `sandbox="allow-scripts"`、限制性 CSP、`postMessage` 工具调用协议、执行超时和清理。
+
+## 等价机制说明
+
+浏览器隔离执行不限定必须使用 iframe；Worker、isolated realm 或其他等价浏览器侧隔离环境也可接受。关键是主页面工具代理、namespace/provider 路由、schema 校验、生命周期错误、资源控制和禁止直接污染主页面对象。

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from app.agents.runtime.openai_compat import OpenAICompatibleClient
+from app.core.command_platform import current_command_platform
 from app.core.config import Settings
 from app.runtime import ContextManager, ExecutorEngine
 from app.storage.workspace_store import WorkspaceStore
@@ -248,20 +250,41 @@ def test_document_edit_generates_section_ids_and_rejects_agent_ids(tmp_path: Pat
 
 def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path) -> None:
     executor, project_id = make_executor(tmp_path)
+    profile = current_command_platform()
 
-    pwd_result = executor.exec_command(project_id, {"command": "pwd"})
+    def python_command(script: str) -> str:
+        executable = json.dumps(sys.executable)
+        script_arg = json.dumps(script)
+        if profile.platform == "windows":
+            return f"& {executable} -c {script_arg}"
+        return f"{executable} -c {script_arg}"
+
+    pwd_result = executor.exec_command(project_id, {"command": python_command("import os; print(os.getcwd())")})
     assert pwd_result["status"] == "success"
     assert pwd_result["output"]["exit_code"] == 0
+    assert pwd_result["output"]["platform"] == profile.platform
+    assert pwd_result["output"]["shell"] == profile.shell
 
-    pipe_result = executor.exec_command(project_id, {"command": "printf ok | wc -c"})
-    assert pipe_result["status"] == "success"
-    assert pipe_result["output"]["exit_code"] == 0
-    assert pipe_result["output"]["stdout"].strip() == "2"
+    output_result = executor.exec_command(project_id, {"command": python_command("print(len('ok'))")})
+    assert output_result["status"] == "success"
+    assert output_result["output"]["exit_code"] == 0
+    assert output_result["output"]["stdout"].strip() == "2"
 
-    write_result = executor.exec_command(project_id, {"command": "touch unsafe.txt"})
+    write_result = executor.exec_command(
+        project_id,
+        {"command": python_command("from pathlib import Path; Path('unsafe.txt').write_text('ok', encoding='utf-8')")},
+    )
     assert write_result["status"] == "success"
     assert write_result["output"]["exit_code"] == 0
     assert (executor.store.project_dir(project_id) / "unsafe.txt").exists()
+
+    workspace = executor.store.project_dir(project_id)
+    (workspace / "utf8.txt").write_text("中文测试\n", encoding="utf-8")
+    read_command = "Get-Content -Raw -Encoding UTF8 utf8.txt" if profile.platform == "windows" else "cat utf8.txt"
+    read_result = executor.exec_command(project_id, {"command": read_command})
+    assert read_result["status"] == "success"
+    assert read_result["output"]["exit_code"] == 0
+    assert "中文测试" in read_result["output"]["stdout"]
 
     denied_scope = executor.exec_command(project_id, {"command": "pwd"}, scope="unknown")  # type: ignore[arg-type]
     assert denied_scope["status"] == "failed"

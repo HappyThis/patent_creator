@@ -124,3 +124,7 @@
 - 方案提交：`1b65ff5550f904e2a59bd6015703f82b02f85e4f`
 - 快照提交：`06fb49b47ac19bd93d0a1064a03839d1187cb170`
 - 关键能力：`agentTool()`、`runAgentTool()`、父侧运行注册表、`agent-tool-event`、React `useAgentToolEvents()`、Think 与 AIChatAgent 子适配、清理与取消逻辑。
+
+## 等价机制说明
+
+子运行身份、父子关联和事件协议可以使用不同命名；只要能稳定表达 runId/requestId/streamId 或等价映射、实时/重放事件去重、无父工具调用的后台运行、访问门禁和清理保留策略，应视为等价有效机制。

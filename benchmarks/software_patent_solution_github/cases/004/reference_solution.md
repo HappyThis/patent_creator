@@ -104,3 +104,7 @@ ByteRover 的 context tree 使用 Markdown 文件承载项目知识，并支持�
 - 修改 markdown writer、memory scoring、search knowledge、curate tool、memory symbol tree 等路径，将运行时信号从 Markdown frontmatter 迁移到 sidecar。
 - 对 curate、search、archive、manifest、consolidate、prune、synthesize、dream 等流程进行双写、读取融合或清理一致性改造。
 - 增加 sidecar failure logging、dual-write pipeline、VC clean regression 等测试，验证运行时信号不再污染版本控制状态。
+
+## 等价机制说明
+
+`sidecar` 表示与共享 Markdown 分离的本机运行时信号存储，不限定具体实现。SQLite、JSON/KV、本机轻量数据库或等价旁路存储，只要提供路径键映射、批量读取、原子更新、读取融合、迁移兼容和 fail-open，都应按等价机制评价。

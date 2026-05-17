@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -86,7 +88,7 @@ def run_codex_judge(
     )
 
     command = [
-        codex_bin,
+        resolve_codex_bin(codex_bin),
         "exec",
         "--cd",
         str(prepared_repo),
@@ -103,6 +105,8 @@ def run_codex_judge(
         input=prompt_path.read_text(encoding="utf-8"),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         timeout=timeout_seconds,
     )
@@ -114,6 +118,22 @@ def run_codex_judge(
     if not output_path.exists():
         raise RuntimeError("Codex judge 未生成 judge_output.json。")
     return json.loads(output_path.read_text(encoding="utf-8"))
+
+
+def resolve_codex_bin(codex_bin: str) -> str:
+    command_path = Path(codex_bin)
+    if command_path.parent != Path("."):
+        return codex_bin
+
+    candidates = [codex_bin]
+    if os.name == "nt" and not command_path.suffix:
+        candidates = [f"{codex_bin}.cmd", f"{codex_bin}.bat", f"{codex_bin}.exe", codex_bin]
+
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return codex_bin
 
 
 def build_judge_prompt(
@@ -133,6 +153,7 @@ def build_judge_prompt(
 - 不要评估聊天回复、工具轨迹、子 agent proposal 或文档 diff。
 - 参考方案不是唯一答案；若被评估方案不同但项目依据充分、技术机制合理，不应机械扣分。
 - 对看似合理但当前项目环境中没有依据的具体源码事实、类名、接口或能力，应列入 unsupported_claims 并酌情扣分。
+- 必须执行 judge.md 和 rubric.md 中的分数校准规则、明确扣分项和分数上限；如果总分超过上限倾向，请在 score_rationale 中解释为什么不适用上限。
 - 必须输出符合 JSON schema 的 JSON，不要输出 Markdown。
 
 <judge.md>

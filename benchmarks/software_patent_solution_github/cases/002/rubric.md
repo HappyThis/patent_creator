@@ -16,7 +16,7 @@
 
 ## 技术手段具体性：20 分
 
-- 17-20 分：提出统一 AgentRun 对象、provenance、spawn history 自动桥接、eval 附着、leaderboard 聚合、事件流和工具化访问等具体机制。
+- 17-20 分：提出统一运行记录对象（可称 AgentRun 或采用等价命名）、provenance、spawn history 自动桥接、eval 附着、leaderboard 聚合、事件流和工具化访问等具体机制。
 - 10-16 分：提出 run 记录模型和查询接口，但缺少自动桥接、评估附着、事件流或工具访问中的多个关键部分。
 - 0-9 分：只说“保存日志”“增加统计接口”“用数据库记录”，缺少可实施方案。
 
@@ -58,3 +58,25 @@
 - 把 run 记录做成与 task、agent、session 完全割裂的独立表。
 - 没有说明如何关联成本、状态、错误、输出或评估。
 - 没有考虑外部工具或 agent 如何查询、附着或复用运行记录。
+
+## 源码级评分补充
+
+- `AgentRun` 只是参考方案中的命名。使用 `RunRecord`、`ExecutionRun`、`AgentExecution` 或其他名称，只要形成统一运行记录契约并覆盖关联、状态、评估和查询能力，应按等价机制给分。
+- 不应要求方案凭空声称当前源码已有统一 run 模型；高分方案应指出现有 spawn history、eval、token/cost、pipeline run、MCP task/cost 工具等信息是分散的，需要桥接。
+- 泛泛新增日志表、只记录最终输出、或无法把 run 与 task/session/spawn/eval/cost/provenance 关联的方案应显著扣分。
+
+## 档位锚点
+
+- 90-100 分强答案：必须同时具备统一 run 契约、task/session/agent/spawn/eval/cost 关联、结构化 provenance/lineage、spawn 创建/完成/失败/取消自动桥接、run 级多次 eval attach、事件流、MCP 工具层查询/附着、leaderboard 聚合、终态保护和源码级 schema/API/event 接入说明。
+- 75-85 分可用但不完整：有统一 run 对象和主要关联，能复用现有任务/agent/session/spawn 信息，但 provenance、spawn 自动桥接、eval attach、MCP 工具或 leaderboard 中缺一到两个关键机制。
+- 60-74 分弱答案：主要是日志表或运行历史页面，只有部分关联或最终输出记录，不能支撑溯源、评估附着和外部工具复用。
+- 0-59 分不合格：只保存文本日志、要求人工补录、与 task/session/spawn/eval/cost 割裂，或编造当前源码已有完整 run 模型。
+
+## 分数上限规则
+
+- 如果方案没有结构化 provenance/lineage 字段和生成流程，总分通常不得高于 82 分。
+- 如果方案没有说明 spawn 创建、完成、失败、取消等路径如何自动桥接 run 生命周期，总分通常不得高于 82 分。
+- 如果方案只把 eval 写成单个分数字段，没有 run 级 eval attach 契约、多次评估、版本、评估者或维度明细，总分通常不得高于 85 分。
+- 如果方案没有 MCP 工具层的 run 查询、溯源查询、评估附着或 leaderboard 聚合能力，总分通常不得高于 85 分。
+- 如果同时缺失 provenance/lineage、spawn 自动桥接、eval attach、MCP/leaderboard 中任意两个关键机制，总分不得高于 78 分；缺失三个或更多时，总分不得高于 72 分。
+- 如果核心论证依赖当前源码中不存在的表字段、事件、API 或调用路径，总分不得高于 75 分。

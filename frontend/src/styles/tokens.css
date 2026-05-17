@@ -1,0 +1,66 @@
+:root {
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  color: #e6e6e6;
+  background: #111111;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --bg: #111111;
+  --dark: #efebe4;
+  --dark-soft: #e7e1d7;
+  --dark-border: #d8cfbf;
+  --dark-border-strong: #cbc1b2;
+  --text-main: #2d3438;
+  --text-soft: #7d7a73;
+  --accent: #7f99b8;
+  --accent-soft: rgba(127, 153, 184, 0.14);
+  --paper-shell: #f4efe7;
+  --paper-sidebar: #f4efe7;
+  --paper-border: #e2dacd;
+  --paper: #f4efe7;
+  --paper-text: #162132;
+  --recent: #d7a34a;
+  --chat-panel: #f4f0e8;
+  --chat-muted: #8a857b;
+  --chat-line: rgba(92, 82, 68, 0.14);
+  --chat-soft-line: rgba(92, 82, 68, 0.09);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f6f0e7;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus {
+  outline: 0;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(163, 124, 55, 0.36);
+  outline-offset: 2px;
+}

@@ -59,3 +59,25 @@
 - 未考虑取消、失败、清理：最多扣 12 分
 - 将多个子运行混入父消息而无身份隔离：最多扣 10 分
 - 过度复述源码 API 名称但缺少技术原理：最多扣 8 分
+
+## 源码级评分补充
+
+- 高分方案必须落到子运行身份和事件协议：runId、requestId/streamId 映射或等价关联，parentToolCallId 可选，live/replay 事件可去重。
+- 对没有父工具调用的后台子运行，方案必须说明如何归类、展示、恢复和清理；只处理“一个工具调用返回一个文本结果”的方案不得高分。
+- 必须覆盖未知 runId/child id 不得唤醒或创建新 facet 的安全边界，以及 headless 子 agent 中浏览器 client tools 的不可用或降级策略。
+
+## 档位锚点
+
+- 90-100 分强答案：必须同时具备现有源码级工具包装入口、命令式子运行入口、父侧 retained registry、独立子执行上下文、runId/requestId/streamId 事件协议、live/replay 去重、并行和无父工具调用后台运行归类、Think/AIChatAgent 恢复与取消适配、headless client tools 降级或父侧中介、父模型最终 tool result 契约、drill-in 路由门禁、retention/tombstone 清理模型和客户端聚合 hook。
+- 75-85 分可用但不完整：父子运行、事件回流、恢复、并行和取消清理机制方向正确，但源码接入、Think/AIChatAgent 适配、headless client tools、最终返回契约或 tombstone 中缺一到两个关键工程边界。
+- 60-74 分弱答案：通用 retained registry 或流式转发设计较完整，但没有落到当前项目接口，或者遗漏 headless client tools、最终 tool result、路由门禁等关键约束。
+- 0-59 分不合格：把子 agent 当普通函数调用、只返回最终文本、没有独立执行上下文、没有恢复/重放/取消/清理和访问控制。
+
+## 分数上限规则
+
+- 如果方案没有明确落到现有项目的工具包装入口、命令式子运行入口、事件 hook、子 agent 路由门禁和清理 API，总分通常不得高于 84 分。
+- 如果方案没有分别说明 AIChatAgent 与 Think 执行/恢复/取消边界如何接入，总分通常不得高于 84 分。
+- 如果方案没有处理 headless 子 agent 中浏览器 client tools 不可用、降级或父侧中介执行，总分通常不得高于 82 分。
+- 如果方案没有父模型工具调用的最终返回契约，包括完成摘要、失败结构和父回合中断语义，总分通常不得高于 85 分。
+- 如果方案没有 retention/tombstone/deleted 状态或未知 runId 清理后一致响应，总分通常不得高于 86 分。
+- 如果同时缺失源码接入面、AIChatAgent/Think 适配、headless client tools 边界、最终返回契约中任意两个关键机制，总分不得高于 80 分；缺失三个或更多时，总分不得高于 74 分。

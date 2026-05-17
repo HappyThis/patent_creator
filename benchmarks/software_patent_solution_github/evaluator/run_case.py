@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import sys
 import time
@@ -33,7 +34,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs-dir", default=str(BENCHMARK_DIR / "runs"), help="Directory for run artifacts.")
     parser.add_argument("--skip-judge", action="store_true", help="Only run the subject agent and extract artifact.")
     parser.add_argument("--skip-subject", action="store_true", help="Reuse existing evaluated_artifact.md and run judge.")
-    parser.add_argument("--codex-bin", default="codex", help="Codex executable used for judging.")
+    parser.add_argument(
+        "--codex-bin",
+        default=os.environ.get("CODEX_BIN", "codex"),
+        help="Codex executable used for judging. Defaults to CODEX_BIN or codex.",
+    )
     parser.add_argument("--round-timeout", type=int, default=1800, help="Timeout per main-agent round in seconds.")
     parser.add_argument("--judge-timeout", type=int, default=1800, help="Timeout for Codex judge in seconds.")
     parser.add_argument("--max-refinement-rounds", type=int, default=None, help="Override benchmark refinement count.")
@@ -213,11 +218,11 @@ async def run_subject_agent(
         write_artifact(subject_dir / f"technical_solution_after_round_{index + 1}.md", technical_solution_md)
         dump_session_events(services, project.project_id, session_id, subject_dir / "session_events.jsonl")
         events = services.store.read_session_events(project.project_id, session_id)
-        if round_failed(events, response.round_id):
-            status = "round_failed"
-            break
         if has_effective_solution(technical_solution_md):
             status = "completed" if index == 0 else "completed_after_refinement"
+            break
+        if round_failed(events, response.round_id):
+            status = "round_failed"
             break
 
     (subject_dir / "disclosure.json").write_text(
@@ -337,6 +342,8 @@ def normalize_content_diagnostics(diagnostics: dict[str, Any], *, fallback_statu
     subject_status = str(diagnostics.get("subject_status") or fallback_status)
     rounds_run = int(diagnostics.get("rounds_run") or 0)
     artifact_extracted = bool(diagnostics.get("artifact_extracted"))
+    if artifact_extracted and subject_status == "round_failed":
+        subject_status = fallback_status
     return {
         "subject_status": subject_status,
         "rounds_run": rounds_run,

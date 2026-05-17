@@ -54,7 +54,7 @@
   "case": {
     "difficulty": "hard",
     "difficulty_score": 4,
-    "difficulty_reason": "ByteRover 运行时信号 sidecar 需要理解知识写入、检索排序、curate、dream/prune/synthesize 等路径，并处理迁移、读取融合和失败隔离，领域上下文较重。",
+    "difficulty_reason": "ByteRover 运行时信号分层存储需要理解知识写入、检索排序、curate、dream/prune/synthesize 等路径，并处理迁移、读取融合和失败隔离，领域上下文较重。",
     "context_shape": "prepared_project_environment",
     "source_project_id": "campfirein_byterover_cli",
     "source_kind": "mechanism_enhancement",

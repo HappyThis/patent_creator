@@ -122,3 +122,7 @@
 - 默认 abort / stream cancel 仅做本地 stream cleanup，使服务端 turn 可继续并支持 resume。
 - 在 `useAgentChat` 和文档中暴露策略说明，明确 explicit stop 始终取消服务端 turn。
 - 增加 cancellation policy、abort、resume 和工具 continuation 相关测试。
+
+## 等价机制说明
+
+`cancelOnClientAbort` 是参考实现的配置名，不是唯一可接受字段。若方案用其他名称表达默认 durable 模式与可选 request-lifetime 模式，并明确普通本地清理、显式停止、服务端 cancel frame、active id 保留和 resume 兼容，应视为等价有效机制。

@@ -48,7 +48,7 @@
   "case": {
     "difficulty": "hard",
     "difficulty_score": 4,
-    "difficulty_reason": "AgentRun 机制覆盖数据模型、provenance、eval 附着、事件流、API 和 MCP 工具访问，跨面较广；但本质是结构化观测与评估沉淀，状态恢复压力不如最高档。",
+    "difficulty_reason": "统一运行记录机制覆盖数据模型、provenance、eval 附着、事件流、API 和 MCP 工具访问，跨面较广；但本质是结构化观测与评估沉淀，状态恢复压力不如最高档。",
     "context_shape": "prepared_project_environment",
     "source_project_id": "builderz_labs_mission_control",
     "source_kind": "feature_iteration",

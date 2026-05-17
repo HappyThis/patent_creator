@@ -129,3 +129,7 @@ Think agent 已有 `saveMessages()` 等能力，可以把消息注入会话并�
 - 使用 `messages_applied_at` 作为 Session 消息应用边界，支撑恢复判定。
 - 增加 pending/running/terminal 状态转换、取消、reset、cleanup 和恢复规则。
 - 增加 submission lifecycle observability events、用户文档、设计文档和示例。
+
+## 等价机制说明
+
+`messagesAppliedAt` 或 `messages_applied_at` 是一种表示消息已安全应用到会话的边界字段，不限定命名。若方案使用 applied checkpoint、消息 id 集、事务版本或其他 durable apply boundary 来区分写入前崩溃、写入后崩溃和恢复重放，应视为等价有效机制。

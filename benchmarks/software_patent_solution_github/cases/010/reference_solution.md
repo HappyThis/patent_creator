@@ -130,3 +130,7 @@ MCP proxy 应在每轮推理前从父目录获取当前工具描述，构造 AI 
 - 方案提交：`a7059d4a5a1071a10c60be0e777968fc7ff5d36c`
 - 快照提交：`d31ec18dd70500bccda7944c63b70ef9fad49bda`
 - 关键能力：用户级 `AssistantDirectory`、子会话 `MyAssistant` facet、`onBeforeSubAgent` 注册表门禁、共享 workspace 代理、`WorkspaceFsLike`、共享 MCP 代理、workspace change broadcast、父级 schedule。
+
+## 等价机制说明
+
+`MCP proxy`、`Workspace proxy` 和 `AssistantDirectory` 是参考命名，不限定实现名称。只要方案体现用户级父实体持有共享资源、子会话隔离消息和配置、子会话经受控代理访问共享 workspace/MCP/OAuth，且浏览器不能绕过 agent 生命周期直接执行 raw MCP tool invocation，应视为等价有效机制。

@@ -10,8 +10,10 @@ from app.agents.prompts.material_analyst import build_material_analyst_system_pr
 from app.agents.prompts.section_writer import build_section_writer_system_prompt as build_split_section_writer_system_prompt
 from app.agents.prompts.solution_refiner import build_solution_refiner_system_prompt
 from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
+from app.core.command_platform import current_command_platform
 from app.runtime.context.barrier import render_barrier_message
 from app.runtime.context.prompts import context_compressor_system_prompt
+from app.runtime.executor.engine import SUBAGENT_TOOLS
 
 
 def test_agent_prompts_are_split_by_agent_module() -> None:
@@ -128,6 +130,23 @@ def test_main_agent_document_read_supports_search_blocks() -> None:
     assert "search_blocks" in properties["action"]["enum"]
     assert "get_project_context" in properties["action"]["enum"]
     assert "query" in properties
+
+
+def test_exec_command_metadata_uses_current_platform() -> None:
+    profile = current_command_platform()
+    main_tool = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "exec_command")
+    subagent_tool = next(tool for tool in SUBAGENT_TOOLS if tool["function"]["name"] == "exec_command")
+
+    for tool in (main_tool, subagent_tool):
+        description = tool["function"]["description"]
+        assert profile.platform in description
+        assert profile.shell in description
+        assert profile.examples[0] in description
+
+    prompt = build_main_agent_system_prompt()
+    assert profile.platform in prompt
+    assert profile.shell in prompt
+    assert profile.examples[0] in prompt
 
 
 def test_section_writer_context_prefers_children_for_complex_sections() -> None:

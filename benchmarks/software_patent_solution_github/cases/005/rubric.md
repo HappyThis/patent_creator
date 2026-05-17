@@ -58,3 +58,25 @@
 - 重试可能重复追加用户消息。
 - 取消或 reset 后迟到的完成状态可以覆盖终态。
 - 把该能力设计成替代 workflows 或替代所有普通 chat turn。
+
+## 源码级评分补充
+
+- `messagesAppliedAt` 是参考中的一种消息应用边界表达，不限定字段名。使用 applied version、message ids、checkpoint、事务标记或等价 durable apply boundary，能区分写入前崩溃、写入后崩溃和恢复重放的，应给等价分。
+- 高分方案必须沿用现有 `saveMessages`、`waitUntilStable`、requestId、stream/recovery/cancel 语义，而不是绕过 Think 的消息保存和 turn 生命周期。
+- 只把 webhook 直接调用 `saveMessages`，没有 submission ledger、claim/drain、幂等键、状态查询和条件终态更新的方案应显著扣分。
+
+## 档位锚点
+
+- 90-100 分强答案：必须同时具备 durable submission ledger、幂等键/重复请求返回同一任务、持久消息应用边界、pending 到 running 的条件 claim/drain、复用 saveMessages/requestId/stream/recovery/cancel、取消/reset/cleanup 与 submission 状态同步、迟到完成条件终态更新、status/list/delete/cleanup/retry API、可观察事件，以及崩溃恢复下写入前/写入后/运行中三类判定。
+- 75-85 分可用但不完整：有 submission 记录、幂等和后台执行方向，能复用 Think 会话，但缺消息应用边界、后台 claim/drain、条件终态更新、reset/cleanup、list/delete 或 observability 中的一到两个关键机制。
+- 60-74 分弱答案：只有异步提交或普通队列，缺 durable apply boundary 或幂等恢复，重试可能重复写消息，取消和迟到完成处理不可靠。
+- 0-59 分不合格：只用内存队列、同步等待模型完成、绕过 Think saveMessages/stream 生命周期，或把该能力设计成替代普通 chat/workflow。
+
+## 分数上限规则
+
+- 如果方案没有持久消息应用边界或等价 checkpoint，总分通常不得高于 75 分。
+- 如果方案没有后台 drain/唤醒机制和 pending -> running 条件领取事务，总分通常不得高于 78 分。
+- 如果方案没有终态条件更新，可能让迟到完成覆盖 cancelled/skipped/error，总分通常不得高于 78 分。
+- 如果方案没有 reset/clear conversation 与 submission ledger 的同步处理，总分通常不得高于 82 分。
+- 如果方案没有 list/delete/cleanup API 和幂等键保留窗口，总分通常不得高于 82 分。
+- 如果同时缺失消息应用边界、后台 claim/drain、终态条件更新、reset/cleanup 中任意两个关键机制，总分不得高于 75 分；缺失三个或更多时，总分不得高于 68 分。

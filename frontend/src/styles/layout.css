@@ -1,0 +1,62 @@
+.app-shell {
+  height: 100%;
+  padding: 14px 18px;
+  background:
+    linear-gradient(135deg, rgba(172, 153, 121, 0.08) 0 1px, transparent 1px 34px),
+    linear-gradient(45deg, rgba(172, 153, 121, 0.05) 0 1px, transparent 1px 38px),
+    radial-gradient(circle at 76% 8%, rgba(185, 168, 138, 0.14), transparent 28%),
+    var(--paper-shell);
+  overflow: hidden;
+}
+
+.workspace {
+  width: 100%;
+  max-width: none;
+  height: calc(100vh - 28px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(860px, 1fr) minmax(360px, 420px);
+  gap: 18px;
+}
+
+.document-workspace {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 216px minmax(460px, 1fr);
+  gap: 18px;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+  border-right: 0;
+}
+
+.outline-pane {
+  min-height: 0;
+  height: fit-content;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
+  border: 1px solid rgba(92, 82, 68, 0.15);
+  border-radius: 14px;
+  background: rgba(250, 247, 241, 0.9);
+  box-shadow: 0 16px 40px rgba(55, 45, 30, 0.08);
+}
+
+.outline-list,
+.preview-scroll,
+.chat-scroll {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.outline-list::-webkit-scrollbar,
+.preview-scroll::-webkit-scrollbar,
+.chat-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
