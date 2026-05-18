@@ -1,7 +1,7 @@
 # 建立技术方案生成能力评测基准
 
 > 状态：进行中
-> 最后更新：2026-05-15
+> 最后更新：2026-05-18
 > 关闭条件：核心 benchmark 规范稳定，完成足够数量的正式 case，并能稳定跑通 subject 与 Codex-as-judge 内容评分链路。
 
 ## 背景
@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完成：正式 case 数量、项目快照固化、参考方案、rubric 和批量回归流程仍需要继续完善。
+文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：至少 3 个黄金 case 已经跑通完整 subject + Codex-as-judge 链路，但全量首轮仍存在失败 case，需要继续排查并沉淀稳定回归流程。
 
 已关闭子问题：
 
@@ -21,20 +21,22 @@
 - 已移除可恢复工具异常统计，`subagent_plain_response`、字符串化 `operations`、中途 `document_edit` 失败等过程问题不再进入内容评估指标。
 - 已保留 `session_events.jsonl` 作为 debug 材料。
 - 已跑通 `001` 的 subject 与 Codex-as-judge 完整评分链路。
+- 已跑通 `001`、`002`、`003` 的 subject 与 Codex-as-judge 完整评分链路，满足“至少 3 个黄金 case”的最低闭环要求。
+- `010` 在单独提高 `round-timeout` 到 `1200` 秒后可完成闭环，说明该 case 本身不是不可运行样本。
 
 仍开放子问题：
 
-- 继续扩充和筛选正式 case。
-- 为正式 case 固化项目快照版本、参考方案、rubric 和 metadata。
-- 至少跑通 3 个黄金 case 后，再扩大到正式回归集。
+- 继续复核和筛选正式 case 的质量门槛。
+- 排查全量首轮中 `005`、`007` 未写出 result 的原因。
+- 将复杂 case 的低并发、timeout 和失败复跑策略沉淀为稳定回归流程。
 - 沉淀批量运行、汇总和横向比较流程。
 
 ## 开放问题优先级
 
 P0：
 
-- 完成至少 3 个黄金 case。每个 case 需要有稳定项目快照、粗粒度需求、参考方案、rubric 和 metadata。当前只有单个 case 跑通，无法判断系统改动是否具有普遍提升。
-- 跑通 3 个黄金 case 的完整 subject + Codex-as-judge 链路，并形成可横向比较的结果汇总。没有这个闭环，benchmark 很难用于后续 prompt、agent 或模型适配回归。
+- 排查全量首轮中 `005`、`007` 未写出 result 的原因，并确认它们是 case 难度、provider transient、runner 工程问题，还是 agent 调度问题。
+- 形成低并发全量首轮的稳定运行标准，避免并发、timeout 和复杂 case 混在一起导致误判。
 
 P1：
 
@@ -241,6 +243,29 @@ P2：
 - `diagnostics.json` 只保留 subject 状态、补充轮次、artifact 抽取、round 硬失败和 judge 状态。
 
 该调整后，benchmark runner 的目标收敛为：能提取有效技术方案则进入 Codex-as-judge 内容评分；无法提取有效技术方案则记为 `skipped_no_solution_artifact` 或相应硬失败状态。
+
+## 2026-05-18 黄金 case 与全量首轮补充
+
+2026-05-18 已完成至少 3 个黄金 case 的完整闭环验证：
+
+| Case | 状态 | 分数 |
+| --- | --- | ---: |
+| 001 | `scored` | 72 |
+| 002 | `scored` | 76 |
+| 003 | `scored` | 82 |
+
+因此，历史 issue `benchmark-golden-cases` 已满足最低关闭条件：不再是“只有 `001` 完整跑通”。后续 benchmark 重点从“能否跑通 3 个 case”转为“全量回归是否稳定、失败 case 是否能被准确排查、结果是否可横向比较”。
+
+同日执行过一次全量首轮：
+
+- `001`、`002`、`003`、`004`、`006`、`008`、`009` 在全量批次中完成评分。
+- `010` 在全量并发批次中曾因 `900` 秒 round timeout 未写出 result；单独复跑并将 `round-timeout` 提高到 `1200` 秒后完成评分，说明该 case 可运行，但复杂 case 对并发和 timeout 更敏感。
+- `005`、`007` 仍需要单独查看 stderr/progress 并复跑，区分 timeout、provider transient、runner 工程缺口或 agent 调度问题。
+
+当前 benchmark 侧开放 issue：
+
+- `benchmark-failed-cases`：排查并复跑 `005`、`007`。
+- `benchmark-stable-full-run`：沉淀全量低并发、复杂 case timeout、失败 case 单独复跑和结果汇总规范。
 
 ## 暂不处理
 

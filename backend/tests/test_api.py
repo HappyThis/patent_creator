@@ -48,117 +48,54 @@ class StubLLMClient:
             goal = str(messages[-1].get("content") or "")
             target_section_id = "sec_000010" if "技术效果" in goal else "sec_000007"
             if target_section_id == "sec_000007":
-                payload = {
-                    "summary": "已生成技术方案候选正文。",
-                    "reply": "我已经补充了技术方案里的整体架构和处理流程，并把结果同步到文档中。",
-                    "rationale": "用户明确要求继续完善技术方案章节。",
-                    "operations": [
-                        {
-                            "op": "replace_section",
-                            "section_id": "sec_000007",
-                            "section": {
-                                "type": "technical_solution",
-                                "title": "技术方案",
-                                "blocks": [
-                                    {
-                                        "type": "paragraph",
-                                        "text": f"本节结合用户当前要求“{goal}”，补充适用于低算力终端的整体方案说明。",
-                                    },
-                                    {
-                                        "type": "paragraph",
-                                        "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
-                                    },
-                                ],
-                                "children": [
-                                    {
-                                        "type": "custom",
-                                        "title": "整体架构",
-                                        "blocks": [
-                                            {
-                                                "type": "table",
-                                                "columns": ["模块", "职责"],
-                                                "rows": [
-                                                    ["预处理模块", "完成缩放、归一化和候选区域粗筛"],
-                                                    ["推理模块", "仅对高价值候选区域执行完整检测"],
-                                                ],
-                                            }
-                                        ],
-                                        "children": [],
-                                    },
-                                    {
-                                        "type": "custom",
-                                        "title": "处理流程",
-                                        "blocks": [
-                                            {
-                                                "type": "list",
-                                                "ordered": True,
-                                                "items": [
-                                                    "获取当前帧图像并复用上一帧稳定特征。",
-                                                    "筛出满足阈值的候选区域。",
-                                                    "对候选区域执行轻量化检测与结果校正。",
-                                                ],
-                                            }
-                                        ],
-                                        "children": [],
-                                    },
-                                ],
-                            },
-                        }
-                    ],
-                    "questions": [],
-                    "warnings": [],
-                }
+                content = f"""## 技术方案候选正文
+
+本节结合用户当前要求“{goal}”，补充适用于低算力终端的整体方案说明。
+
+系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。
+
+## 整体架构
+
+预处理模块完成缩放、归一化和候选区域粗筛；推理模块仅对高价值候选区域执行完整检测。
+
+## 处理流程
+
+1. 获取当前帧图像并复用上一帧稳定特征。
+2. 筛出满足阈值的候选区域。
+3. 对候选区域执行轻量化检测与结果校正。"""
             else:
-                payload = {
-                    "summary": "已生成技术效果候选正文。",
-                    "reply": "我已经补充了技术效果章节，重点强调了低算力实时性的收益。",
-                    "rationale": "用户明确希望强调实时性收益。",
-                    "operations": [
-                        {
-                            "op": "replace_section_blocks",
-                            "section_id": target_section_id,
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
-                                },
-                                {
-                                    "type": "list",
-                                    "ordered": False,
-                                    "items": [
-                                        "缩短端到端检测时延，提升实时响应能力。",
-                                        "在有限算力预算下保持检测稳定性。",
-                                        "降低持续运行时的能耗和温升压力。",
-                                    ],
-                                },
-                            ],
-                        }
-                    ],
-                    "questions": [],
-                    "warnings": [],
-                }
-            arguments = {
-                "summary": payload["summary"],
-                "reply": payload["reply"],
-                "rationale": payload["rationale"],
-                "proposal_type": "document_edit_proposal",
-                "proposal": {"operations": payload["operations"]},
-                "questions": payload["questions"],
-                "warnings": payload["warnings"],
-            }
+                content = """## 技术效果候选正文
+
+本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。
+
+- 缩短端到端检测时延，提升实时响应能力。
+- 在有限算力预算下保持检测稳定性。
+- 降低持续运行时的能耗和温升压力。"""
+            write_arguments = {"content": content}
             return {
                 "type": "tool_calls",
-                "tool_calls": [{"tool": "submit_result", "arguments": arguments, "tool_call_id": "stub_sub_submit_1"}],
+                "tool_calls": [
+                    {"tool": "write_pipe", "arguments": write_arguments, "tool_call_id": "stub_sub_write_1"},
+                    {"tool": "finish", "arguments": {}, "tool_call_id": "stub_sub_finish_1"},
+                ],
                 "assistant_message": {
                     "role": "assistant",
                     "content": "",
                     "tool_calls": [
                         {
-                            "id": "stub_sub_submit_1",
+                            "id": "stub_sub_write_1",
                             "type": "function",
                             "function": {
-                                "name": "submit_result",
-                                "arguments": json.dumps(arguments, ensure_ascii=False),
+                                "name": "write_pipe",
+                                "arguments": json.dumps(write_arguments, ensure_ascii=False),
+                            },
+                        },
+                        {
+                            "id": "stub_sub_finish_1",
+                            "type": "function",
+                            "function": {
+                                "name": "finish",
+                                "arguments": "{}",
                             },
                         }
                     ],
@@ -209,7 +146,83 @@ class StubLLMClient:
 
         if len(tool_results) == 1:
             subagent_result = json.loads(tool_results[0]["content"])
-            operations = subagent_result["output"]["result"]["proposal"]["operations"]
+            content = subagent_result["output"]["content"]
+            if "技术效果候选正文" in content:
+                operations = [
+                    {
+                        "op": "replace_section_blocks",
+                        "section_id": "sec_000010",
+                        "blocks": [
+                            {
+                                "type": "paragraph",
+                                "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
+                            },
+                            {
+                                "type": "list",
+                                "ordered": False,
+                                "items": [
+                                    "缩短端到端检测时延，提升实时响应能力。",
+                                    "在有限算力预算下保持检测稳定性。",
+                                    "降低持续运行时的能耗和温升压力。",
+                                ],
+                            },
+                        ],
+                    }
+                ]
+            else:
+                operations = [
+                    {
+                        "op": "replace_section",
+                        "section_id": "sec_000007",
+                        "section": {
+                            "type": "technical_solution",
+                            "title": "技术方案",
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "本节补充适用于低算力终端的整体方案说明。",
+                                },
+                                {
+                                    "type": "paragraph",
+                                    "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
+                                },
+                            ],
+                            "children": [
+                                {
+                                    "type": "custom",
+                                    "title": "整体架构",
+                                    "blocks": [
+                                        {
+                                            "type": "table",
+                                            "columns": ["模块", "职责"],
+                                            "rows": [
+                                                ["预处理模块", "完成缩放、归一化和候选区域粗筛"],
+                                                ["推理模块", "仅对高价值候选区域执行完整检测"],
+                                            ],
+                                        }
+                                    ],
+                                    "children": [],
+                                },
+                                {
+                                    "type": "custom",
+                                    "title": "处理流程",
+                                    "blocks": [
+                                        {
+                                            "type": "list",
+                                            "ordered": True,
+                                            "items": [
+                                                "获取当前帧图像并复用上一帧稳定特征。",
+                                                "筛出满足阈值的候选区域。",
+                                                "对候选区域执行轻量化检测与结果校正。",
+                                            ],
+                                        }
+                                    ],
+                                    "children": [],
+                                },
+                            ],
+                        },
+                    }
+                ]
             arguments = {"operations": operations}
             return {
                 "type": "tool_calls",
@@ -231,12 +244,7 @@ class StubLLMClient:
                 },
             }
 
-        subagent_result = json.loads(tool_results[0]["content"])
-        reply = (
-            subagent_result["output"]["result"].get("reply")
-            or subagent_result["output"]["result"].get("summary")
-            or "已完成本轮修改。"
-        )
+        reply = "已完成本轮修改。"
         if on_text_delta is not None:
             await on_text_delta(reply)
         return {

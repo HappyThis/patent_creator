@@ -1,4 +1,4 @@
 from .registry import SUBAGENTS, get_subagent
-from .types import ProposalType, SubagentDeclaration
+from .types import SubagentDeclaration
 
-__all__ = ["ProposalType", "SUBAGENTS", "SubagentDeclaration", "get_subagent"]
+__all__ = ["SUBAGENTS", "SubagentDeclaration", "get_subagent"]

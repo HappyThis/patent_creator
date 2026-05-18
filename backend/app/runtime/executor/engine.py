@@ -30,7 +30,7 @@ from ..context.messages import closed_message_prefix
 from ..context.prompts import context_compressor_system_prompt
 from ..context.usage import estimate_messages_tokens, usage_for_messages
 from .registry import can_use_tool
-from .submit_result import invalid_tool_arguments_json_result, submit_subagent_result, subagent_tool_summary
+from .subagent_pipe import SubagentPipe, invalid_tool_arguments_json_result, subagent_tool_summary
 from .tools.document import document_edit, document_read
 from .tools.shell import exec_command
 from .types import AgentScope
@@ -79,31 +79,29 @@ SUBAGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "submit_result",
-            "description": "提交子 agent 的最终结构化结果。调用成功后子 agent 本轮结束。",
+            "name": "write_pipe",
+            "description": "把一小段需要展示给主 agent 的内容写入本次子 agent 内存管道。可以少量多次调用。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string"},
-                    "reply": {"type": "string"},
-                    "rationale": {"type": "string"},
-                    "proposal_type": {
+                    "content": {
                         "type": "string",
-                        "enum": ["analysis_result", "document_edit_proposal", "review_report"],
+                        "description": "要追加到 pipe 的 Markdown 或纯文本内容。避免一次写入巨大内容。",
                     },
-                    "proposal": {"type": "object"},
-                    "questions": {"type": "array", "items": {"type": "string"}},
-                    "warnings": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": [
-                    "summary",
-                    "reply",
-                    "rationale",
-                    "proposal_type",
-                    "proposal",
-                    "questions",
-                    "warnings",
-                ],
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finish",
+            "description": "结束当前子 agent run。finish 不承载任何业务内容；业务内容必须先通过 write_pipe 写入。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
             },
         },
     },
@@ -185,7 +183,7 @@ class ExecutorEngine:
         return tool_success(
             {
                 "agent_id": declaration.id,
-                "result": result,
+                "content": result.get("content", ""),
             }
         )
 
@@ -205,7 +203,7 @@ class ExecutorEngine:
         system_prompt = self._subagent_system_prompt(agent_id)
         messages: list[dict[str, Any]] = [dict(message) for message in initial_messages]
         max_steps = max(1, self.settings.subagent_max_steps)
-        plain_response_count = 0
+        pipe = SubagentPipe()
 
         for _step in range(max_steps):
             messages = await self._prepare_subagent_run_messages(
@@ -223,7 +221,6 @@ class ExecutorEngine:
                 messages=messages,
                 tools=SUBAGENT_TOOLS,
                 on_text_delta=None,
-                response_format_json=True,
             )
             assistant_message = action.get("assistant_message")
             if not isinstance(assistant_message, dict):
@@ -231,23 +228,11 @@ class ExecutorEngine:
             messages.append(assistant_message)
 
             if action.get("type") == "respond":
-                plain_response_count += 1
-                if plain_response_count > 1:
-                    raise ApiError(
-                        502,
-                        "subagent_plain_response",
-                        f"{agent_id} 连续直接回复文本，未按协议调用 submit_result。",
-                    )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "你不能直接回复文本或 JSON。请调用 submit_result 工具提交最终结果；"
-                            "如果你还缺少信息，先调用 document_read 或 exec_command。"
-                        ),
-                    }
+                raise ApiError(
+                    502,
+                    "subagent_plain_response",
+                    f"{agent_id} 直接回复文本，未按协议调用 write_pipe 和 finish。",
                 )
-                continue
 
             if action.get("type") != "tool_calls":
                 raise ApiError(502, "subagent_invalid_action", f"{agent_id} 返回未知动作：{action.get('type')}")
@@ -255,7 +240,6 @@ class ExecutorEngine:
             raw_calls = action.get("tool_calls")
             if not isinstance(raw_calls, list) or not raw_calls:
                 raise ApiError(502, "subagent_invalid_action", f"{agent_id} tool_calls 为空。")
-            completed_result: dict[str, Any] | None = None
             for raw_call in raw_calls:
                 tool_call = MainAgentToolCall(
                     tool=str(raw_call.get("tool") or ""),
@@ -274,6 +258,7 @@ class ExecutorEngine:
                     message_id=message_id,
                     parent_call_id=parent_call_id,
                     on_tool_event=on_tool_event,
+                    pipe=pipe,
                 )
                 messages.append(
                     {
@@ -282,12 +267,8 @@ class ExecutorEngine:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
-                if tool_call.tool == "submit_result" and result.get("status") == "success":
-                    output = result.get("output")
-                    if isinstance(output, dict) and isinstance(output.get("result"), dict):
-                        completed_result = output["result"]
-            if completed_result is not None:
-                return completed_result
+                if tool_call.tool == "finish" and result.get("status") == "success":
+                    return {"content": pipe.content()}
 
         raise ApiError(502, "subagent_max_steps_reached", f"{agent_id} 未在步数上限内完成。")
 
@@ -302,6 +283,7 @@ class ExecutorEngine:
         message_id: str | None,
         parent_call_id: str | None,
         on_tool_event: ToolEventSink | None,
+        pipe: SubagentPipe,
     ) -> dict[str, Any]:
         if not tool_call.tool_call_id:
             raise ApiError(502, "subagent_invalid_tool_call", f"{agent_id} tool_call 缺少 id。")
@@ -337,8 +319,10 @@ class ExecutorEngine:
             result = self.document_read(project_id, tool_call.arguments, scope="subagent")
         elif tool_call.tool == "exec_command":
             result = self.exec_command(project_id, tool_call.arguments, scope="subagent")
-        elif tool_call.tool == "submit_result":
-            result = submit_subagent_result(agent_id, tool_call.arguments)
+        elif tool_call.tool == "write_pipe":
+            result = pipe.write(tool_call.arguments)
+        elif tool_call.tool == "finish":
+            result = pipe.finish(tool_call.arguments)
         else:
             result = tool_failed("permission_denied", f"子 agent 不允许调用 {tool_call.tool}。")
 

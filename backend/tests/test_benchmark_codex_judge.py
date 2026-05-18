@@ -16,7 +16,7 @@ def test_resolve_codex_bin_prefers_windows_cmd(monkeypatch) -> None:
             return r"C:\Users\yang\AppData\Roaming\npm\codex.cmd"
         return None
 
-    monkeypatch.setattr(codex_judge.os, "name", "nt")
+    monkeypatch.setattr(codex_judge, "is_windows", lambda: True)
     monkeypatch.setattr(codex_judge.shutil, "which", fake_which)
 
     assert codex_judge.resolve_codex_bin("codex") == r"C:\Users\yang\AppData\Roaming\npm\codex.cmd"

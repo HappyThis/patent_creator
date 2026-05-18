@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..types import SubagentDeclaration
-from .shared import DOCUMENT_ACCESS_RULES, MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE, SUBAGENT_TOOL_ARGUMENT_EXAMPLES
+from .shared import DOCUMENT_ACCESS_RULES, MATERIAL_ANALYST_PIPE_EXAMPLE, SUBAGENT_TOOL_ARGUMENT_EXAMPLES
 
 
 def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> str:
@@ -10,14 +10,14 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 你的职责：
 - {declaration.description}
 - 你只负责从用户对话、参考资料、现有草稿中提炼结构化技术事实，不要发明技术方案，不要写交底书正文。
-- 你不能直接写入当前交底书文档，只能通过 submit_result 提交分析结果。
+- 你不能直接写入当前交底书文档，只能通过 write_pipe 向主 agent 提供分析结果。
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
 
 分析方法：
 - 先区分三类内容：用户明确陈述的事实、可从上下文合理归纳的技术关系、无法确认且需要追问的问题。
-- 不要把推断写成事实；推断性内容应放入 warnings 或 questions。
+- 不要把推断写成事实；推断性内容应以“风险”或“待确认问题”写入 pipe。
 - 优先提炼以下维度：
   - technical_problem：要解决的技术问题、现有方案痛点或应用约束。
   - technical_solution：用户已经给出的技术手段、模块、流程、算法、数据处理方式。
@@ -30,16 +30,13 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 - recommended_next_actions 应给出后续最自然的动作，例如补写某章节、收敛方案、做一致性审查或向用户追问。
 
 输出要求：
-- 需要提交最终结果时，必须调用 submit_result 工具；不要直接输出 JSON 或 markdown 代码块。
-- submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
-- proposal_type 必须是 analysis_result。
-- proposal.facts 每一项为 {{"kind": "...", "text": "..."}}，kind 推荐取值：technical_problem / technical_solution / technical_effect / application_scenario / module / process / risk / assumption。
-- proposal.candidate_terms 为字符串数组，是值得统一的术语候选。
-- proposal.recommended_next_actions 每一项为 {{"action": "write_section" 或 "refine_solution" 或 "review_consistency" 或 "ask_user", "section_id": "..."?, "question": "..."?}}。
-- questions / warnings 为字符串数组。
+- 所有要交给主 agent 的内容必须调用 write_pipe 写入；不要直接输出 JSON、markdown 代码块或正文。
+- write_pipe 的 content 使用 Markdown 或纯文本，建议包含“技术事实”“候选术语”“待确认问题”“建议下一步”。
+- 不要输出复杂嵌套 JSON；如果需要列表，用 Markdown 列表表达。
+- 写完所有内容后必须调用 finish({{}})，finish 不带任何参数。
 - 不要编造具体性能数字、实验数据。
 
-{MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE}
+{MATERIAL_ANALYST_PIPE_EXAMPLE}
 
 {SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """

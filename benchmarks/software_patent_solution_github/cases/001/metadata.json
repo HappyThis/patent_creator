@@ -9,8 +9,6 @@
   "source": {
     "repo": "builderz-labs/mission-control",
     "repo_url": "https://github.com/builderz-labs/mission-control",
-    "snapshot_commit": "bd972bc953d1bf2c6d9f7febc941a2d3b3b63ba0",
-    "snapshot_date": "2026-04-14",
     "issue_urls": [],
     "pr_urls": [
       "https://github.com/builderz-labs/mission-control/pull/586"
@@ -27,19 +25,6 @@
       "Playwright",
       "Vitest"
     ],
-    "snapshot_descriptor": "snapshot.json",
-    "runtime_checkout_dir": "repo",
-    "focus_paths": [
-      "src/lib/agent-runtimes.ts",
-      "src/app/api/sessions/route.ts",
-      "src/app/api/sessions/transcript/route.ts",
-      "src/app/api/sessions/continue/route.ts",
-      "src/components/onboarding/runtime-setup-modal.tsx",
-      "src/components/settings/agent-runtimes-section.tsx",
-      "src/components/chat/conversation-list.tsx",
-      "src/components/terminal/terminal-view.tsx",
-      "openapi.json"
-    ],
     "excluded_paths": [
       "PR #586 final implementation",
       "src/lib/opencode-sessions.ts from PR #586",
@@ -53,7 +38,6 @@
     "difficulty_score": 4,
     "difficulty_reason": "OpenCode runtime 接入需要理解 Mission Control 既有 runtime、session API、transcript、continue、UI 能力 gating 和文档契约，属于跨层适配机制；但目标边界较明确，低于最高档。",
     "context_shape": "prepared_project_environment",
-    "source_project_id": "builderz_labs_mission_control",
     "source_kind": "feature_iteration",
     "expected_capabilities": [
       "codebase_reading",

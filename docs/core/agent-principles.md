@@ -175,17 +175,17 @@
 - `description`
 - `input_expectation`
 - `output_contract`
+- `usage_guidance`
 - `tool_permissions`
-- `default_proposal_type`
 
 字段说明：
 
 - `id`：子 agent 的稳定机器标识
 - `description`：对子 agent 能力边界的一句话说明，要求尽量精确，直接写清楚做什么、输出什么、尽量不做什么
 - `input_expectation`：调用它时通常需要给哪些输入
-- `output_contract`：调用它后通常会返回什么类型的结果
-- `tool_permissions`：该子 agent 允许调用哪些工具
-- `default_proposal_type`：该子 agent 默认返回的 proposal 类型
+- `output_contract`：调用它后会通过 pipe 返回什么类型的内容
+- `usage_guidance`：主 agent 调用该子 agent 时应遵守的边界
+- `tool_permissions`：该子 agent 允许调用哪些工作工具；`write_pipe` 和 `finish` 是管道协议工具，不作为业务工作工具声明
 
 说明：
 

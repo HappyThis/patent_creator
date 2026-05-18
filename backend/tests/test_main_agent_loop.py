@@ -1,246 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
-from typing import Any, Callable
 
 import pytest
 
-from app.core.config import Settings
 from app.schemas import ChatMessageRequest
 from app.services import AppServices
 
-
-class ScriptedLLMClient:
-    """驱动主 agent loop 的脚本化 stub。
-
-    - generate_with_tools_stream 按外部提供的 script 顺序返回 action。
-    - 未脚本化子 agent 时，默认通过 submit_result 提交 section_writer 结果。
-    """
-
-    def __init__(
-        self,
-        script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]],
-        *,
-        script_subagents: bool = False,
-    ) -> None:
-        self._script = list(script)
-        self._cursor = 0
-        self._script_subagents = script_subagents
-        self.generated_json_payloads: list[dict[str, Any]] = []
-
-    async def generate_with_tools_stream(
-        self,
-        *,
-        system_prompt: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        on_text_delta: Any = None,
-        response_format_json: bool = False,
-    ) -> dict[str, Any]:
-        if "子 agent：" in system_prompt and not self._script_subagents:
-            task_content = str(messages[-1].get("content") or "")
-            target_section_id = "sec_000010" if "技术效果" in task_content else "sec_000007"
-            arguments = {
-                "summary": "已生成候选正文。",
-                "reply": "已补充目标章节。",
-                "rationale": "根据用户输入生成候选。",
-                "proposal_type": "document_edit_proposal",
-                "proposal": {
-                    "operations": [
-                        {
-                            "op": "replace_section_blocks",
-                            "section_id": target_section_id,
-                            "blocks": [{"type": "paragraph", "text": "正文占位。"}],
-                        }
-                    ],
-                },
-                "questions": [],
-                "warnings": [],
-            }
-            return {
-                "type": "tool_calls",
-                "tool_calls": [tool_call("submit_result", arguments, "sub_submit_1")],
-                "assistant_message": self._build_assistant_message(
-                    {"type": "tool_calls", "tool_calls": [tool_call("submit_result", arguments, "sub_submit_1")]}
-                ),
-            }
-        if self._cursor >= len(self._script):
-            raise AssertionError("ScriptedLLMClient script exhausted")
-        step = self._script[self._cursor]
-        self._cursor += 1
-        result = step(messages)
-        if result.get("type") == "respond" and on_text_delta is not None:
-            await on_text_delta(str(result.get("text") or ""))
-        if "assistant_message" not in result:
-            result = {**result, "assistant_message": self._build_assistant_message(result)}
-        return result
-
-    @staticmethod
-    def _build_assistant_message(result: dict[str, Any]) -> dict[str, Any]:
-        if result.get("type") == "respond":
-            return {
-                "role": "assistant",
-                "content": str(result.get("text") or ""),
-                "reasoning_content": "测试推理内容。",
-            }
-        if result.get("type") in {"tool_call", "tool_calls"}:
-            raw_calls = result.get("tool_calls")
-            if not isinstance(raw_calls, list):
-                raw_calls = [result]
-            return {
-                "role": "assistant",
-                "content": "",
-                "reasoning_content": "测试工具调用推理内容。",
-                "tool_calls": [
-                    {
-                        "id": str(call.get("tool_call_id") or ""),
-                        "type": "function",
-                        "function": {
-                            "name": str(call.get("tool") or ""),
-                            "arguments": json.dumps(call.get("arguments") or {}, ensure_ascii=False),
-                        },
-                    }
-                    for call in raw_calls
-                ],
-            }
-        return {"role": "assistant", "content": ""}
-
-    async def generate_json(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float = 0.2,
-        timeout: float | None = None,
-    ) -> dict[str, Any]:
-        if "上下文压缩 agent" in system_prompt:
-            context = json.loads(user_prompt)
-            context["_timeout"] = timeout
-            self.generated_json_payloads.append(context)
-            message_count = len(context.get("compressible_messages") or [])
-            return {
-                "compressed_messages": [
-                    {
-                        "role": "user",
-                        "content": f"我前面已经提供了 {message_count} 条历史消息相关的信息，现在继续同一任务。",
-                    }
-                ],
-                "warnings": [],
-            }
-        return {
-            "compressed_messages": [{"role": "user", "content": "压缩后的历史。"}],
-            "questions": [],
-            "warnings": [],
-        }
-
-
-def make_settings(tmp_path: Path) -> Settings:
-    return Settings(
-        data_dir=tmp_path / "data",
-        git_user_name="Test User",
-        git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
-        round_step_delay=0.0,
-        round_finish_delay=0.0,
-    )
-
-
-async def wait_until_idle(services: AppServices, project_id: str, timeout: float = 2.0) -> None:
-    elapsed = 0.0
-    step = 0.01
-    while elapsed < timeout:
-        if not services.store.get_project(project_id).is_busy:
-            return
-        await asyncio.sleep(step)
-        elapsed += step
-    raise AssertionError("round did not finish in time")
-
-
-async def create_project(services: AppServices, title: str = "测试项目") -> str:
-    project = services.store.create_project(title)
-    return project.project_id
-
-
-def tool_call(tool: str, arguments: dict[str, Any], tool_call_id: str) -> dict[str, Any]:
-    return {"tool": tool, "arguments": arguments, "tool_call_id": tool_call_id}
-
-
-def test_recover_interrupted_project_marks_round_failed_and_unlocks_project(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
-    project_id = services.store.create_project("测试项目").project_id
-    session_id = "sess_interrupted"
-    round_id = "round_interrupted"
-    message_id = "msg_interrupted"
-    services.store.append_session_event(
-        project_id,
-        session_id,
-        event_type="user_input",
-        scope="main",
-        round_id=round_id,
-        message_id=message_id,
-        payload={"text": "开始长任务"},
-    )
-    project = services.store.get_project(project_id)
-    project.active_session_id = session_id
-    project.running_session_id = session_id
-    project.running_round_id = round_id
-    project.is_busy = True
-    services.store.save_project(project)
-
-    recovered = services.store.recover_interrupted_projects()
-
-    assert [item.project_id for item in recovered] == [project_id]
-    unlocked = services.store.get_project(project_id)
-    assert unlocked.is_busy is False
-    assert unlocked.running_session_id is None
-    assert unlocked.running_round_id is None
-
-    events = services.store.read_session_events(project_id, session_id)
-    failure_event = events[-1]
-    assert failure_event.type == "agent_output"
-    assert failure_event.round_id == round_id
-    assert failure_event.message_id == message_id
-    assert failure_event.payload["code"] == "round_interrupted_by_restart"
-    assert "后端重启" in failure_event.payload["text"]
-
-    recovered_again = services.store.recover_interrupted_projects()
-    assert recovered_again == []
-    assert len(services.store.read_session_events(project_id, session_id)) == len(events)
-
-
-def test_recover_interrupted_project_does_not_infer_missing_running_round(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
-    project_id = services.store.create_project("测试项目").project_id
-    session_id = "sess_stale"
-    services.store.append_session_event(
-        project_id,
-        session_id,
-        event_type="user_input",
-        scope="main",
-        round_id="round_stale",
-        message_id="msg_stale",
-        payload={"text": "开始长任务"},
-    )
-    project = services.store.get_project(project_id)
-    project.active_session_id = session_id
-    project.running_session_id = None
-    project.running_round_id = None
-    project.is_busy = True
-    services.store.save_project(project)
-
-    recovered = services.store.recover_interrupted_projects()
-
-    assert [item.project_id for item in recovered] == [project_id]
-    unlocked = services.store.get_project(project_id)
-    assert unlocked.is_busy is False
-    assert unlocked.running_session_id is None
-    assert unlocked.running_round_id is None
-    events = services.store.read_session_events(project_id, session_id)
-    assert len(events) == 1
+from helpers import ScriptedLLMClient, create_project, make_settings, tool_call, wait_until_idle
 
 
 @pytest.mark.anyio
@@ -277,7 +45,14 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     def step_edit(messages: list[dict[str, Any]]) -> dict[str, Any]:
         last_tool = [m for m in messages if m.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
-        operations = result["output"]["result"]["proposal"]["operations"]
+        assert result["output"]["content"].endswith("正文占位。")
+        operations = [
+            {
+                "op": "replace_section_blocks",
+                "section_id": "sec_000010",
+                "blocks": [{"type": "paragraph", "text": "正文占位。"}],
+            }
+        ]
         return {
             "type": "tool_calls",
             "tool_calls": [tool_call("document_edit", {"operations": operations}, "call_3")],
@@ -313,7 +88,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
         for event in events
         if event.type == "tool_call" and event.scope.startswith("subagent:")
     ]
-    assert sub_tool_calls == ["submit_result"]
+    assert sub_tool_calls == ["write_pipe", "finish"]
     assert "agent_output" in event_types
     assert event_types[-1] == "agent_output"
 
@@ -328,7 +103,6 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     disclosure = services.store.get_disclosure(project_id)
     technical_effects = next(s for s in disclosure["sections"] if s["type"] == "technical_effects")
     assert len(technical_effects["blocks"]) >= 1
-
 
 @pytest.mark.anyio
 async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_message(tmp_path: Path) -> None:
@@ -362,7 +136,6 @@ async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_mess
         if event.type == "tool_call" and event.scope == "main" and event.payload.get("tool") == "document_read"
     ]
     assert len(main_reads) == 2
-
 
 @pytest.mark.anyio
 async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> None:
@@ -416,53 +189,6 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
     assert round_events[1].payload["message"]["content"] == "我先读取技术领域，然后继续判断。"
     assert round_events[2].payload["text"] == "我先读取技术领域，然后继续判断。"
     assert round_events[-1].payload["text"] == "读取完成。"
-
-
-@pytest.mark.anyio
-async def test_execute_subagent_unknown_agent_returns_tool_failure(tmp_path: Path) -> None:
-    def step_unknown_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {
-                        "agent_id": "missing_writer",
-                        "goal": "测试不存在的子 agent。",
-                    },
-                    "call_missing_subagent",
-                )
-            ],
-        }
-
-    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        result = json.loads(last_tool["content"])
-        assert last_tool["tool_call_id"] == "call_missing_subagent"
-        assert result["status"] == "failed"
-        assert result["output"]["code"] == "subagent_not_found"
-        return {"type": "respond", "text": "已识别不存在的子 agent。"}
-
-    llm = ScriptedLLMClient([step_unknown_subagent, step_respond])
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    response = await services.chat.start_round(project_id, ChatMessageRequest(message="调用不存在的子 agent。"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, response.session_id)
-    failed_tool_result = next(
-        event
-        for event in events
-        if event.type == "tool_result" and event.call_id == "call_missing_subagent"
-    )
-    assert failed_tool_result.payload["status"] == "failed"
-    assert failed_tool_result.payload["output"]["code"] == "subagent_not_found"
-
-    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
-    assert "round_failed" not in [name for name, _ in bus_events]
-    assert bus_events[-1][0] == "round_finished"
-
 
 @pytest.mark.anyio
 async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Path) -> None:
@@ -535,7 +261,6 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "已识别参数格式错误并重新规划。"
 
-
 @pytest.mark.anyio
 async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_calls(tmp_path: Path) -> None:
     error_message = "document_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
@@ -587,7 +312,6 @@ async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_ca
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "已收到完整工具结果。"
 
-
 @pytest.mark.anyio
 async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path) -> None:
     """工具返回 failed 时应回填给模型继续决策，而不是直接炸掉整轮。"""
@@ -621,7 +345,6 @@ async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path)
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "没有找到对应章节，我需要换一个有效章节。"
 
-
 @pytest.mark.anyio
 async def test_main_agent_restores_session_history_between_rounds(tmp_path: Path) -> None:
     def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -648,7 +371,6 @@ async def test_main_agent_restores_session_history_between_rounds(tmp_path: Path
     assistant_outputs = [event.payload.get("text") for event in events if event.type == "agent_output"]
     assert assistant_outputs == ["第一轮回答", "第二轮回答"]
 
-
 @pytest.mark.anyio
 async def test_main_agent_saves_reasoning_but_filters_mimo_replay(tmp_path: Path) -> None:
     def first_round(_: list[dict[str, Any]]) -> dict[str, Any]:
@@ -674,7 +396,6 @@ async def test_main_agent_saves_reasoning_but_filters_mimo_replay(tmp_path: Path
     agent_message = next(event for event in events if event.type == "agent_message")
     assert agent_message.payload["message"]["reasoning_content"] == "测试推理内容。"
 
-
 @pytest.mark.anyio
 async def test_main_agent_replays_reasoning_for_deepseek_enabled(tmp_path: Path) -> None:
     def first_round(_: list[dict[str, Any]]) -> dict[str, Any]:
@@ -697,7 +418,6 @@ async def test_main_agent_replays_reasoning_for_deepseek_enabled(tmp_path: Path)
 
     await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
     await wait_until_idle(services, project_id)
-
 
 @pytest.mark.anyio
 async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Path) -> None:
@@ -754,532 +474,3 @@ async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Pa
 
     await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续判断"))
     await wait_until_idle(services, project_id)
-
-
-@pytest.mark.anyio
-async def test_main_agent_restores_execute_subagent_result_without_subagent_internal_tools(tmp_path: Path) -> None:
-    def main_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {
-                        "agent_id": "section_writer",
-                        "goal": "读取并总结背景技术。",
-                    },
-                    "call_restore_subagent",
-                )
-            ],
-        }
-
-    def subagent_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert messages[-1]["role"] == "user"
-        assert "【任务说明】" in messages[-1]["content"]
-        assert "读取并总结背景技术" in messages[-1]["content"]
-        assert {"role": "user", "content": "让子 agent 读背景技术"} in messages
-        assert not any(
-            call.get("id") == "call_restore_subagent"
-            for message in messages
-            for call in (message.get("tool_calls") or [])
-        )
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "document_read",
-                    {"action": "get_section", "section_id": "sec_000003"},
-                    "sub_internal_read",
-                )
-            ],
-        }
-
-    def subagent_submit(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert any(
-            message.get("role") == "tool" and message.get("tool_call_id") == "sub_internal_read"
-            for message in messages
-        )
-        arguments = {
-            "summary": "已读取背景技术。",
-            "reply": "已读取背景技术。",
-            "rationale": "测试子 agent 内部工具过程隔离。",
-            "proposal_type": "analysis_result",
-            "proposal": {"facts": [{"kind": "section_read", "text": "背景技术已读取。"}]},
-            "questions": [],
-            "warnings": [],
-        }
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_restore")],
-        }
-
-    def main_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        assert last_tool["tool_call_id"] == "call_restore_subagent"
-        assert json.loads(last_tool["content"])["status"] == "success"
-        return {"type": "respond", "text": "主流程已收到子 agent 最终结果。"}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        restored_main_tool = [
-            message
-            for message in messages
-            if message.get("role") == "tool" and message.get("tool_call_id") == "call_restore_subagent"
-        ]
-        assert restored_main_tool
-        assert json.loads(restored_main_tool[0]["content"])["output"]["agent_id"] == "section_writer"
-        assert not any(
-            message.get("role") == "tool" and message.get("tool_call_id") == "sub_internal_read"
-            for message in messages
-        )
-        assert not any(
-            call.get("id") == "sub_internal_read"
-            for message in messages
-            for call in (message.get("tool_calls") or [])
-        )
-        return {"type": "respond", "text": "第二轮只看到了子 agent 最终结果。"}
-
-    llm = ScriptedLLMClient(
-        [main_call_subagent, subagent_read, subagent_submit, main_respond, second_round],
-        script_subagents=True,
-    )
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message="让子 agent 读背景技术"))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
-    await wait_until_idle(services, project_id)
-
-
-@pytest.mark.anyio
-async def test_execute_subagent_compresses_run_local_messages(tmp_path: Path) -> None:
-    def subagent_submit(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        contents = [str(message.get("content") or "") for message in messages]
-        assert any("我前面已经提供了" in content for content in contents)
-        assert any("【上下文说明】" in content for content in contents)
-        assert messages[-1]["role"] == "user"
-        assert "【任务说明】" in messages[-1]["content"]
-        arguments = {
-            "summary": "已完成分析。",
-            "reply": "已完成分析。",
-            "rationale": "基于压缩后的上下文分析。",
-            "proposal_type": "analysis_result",
-            "proposal": {"facts": [{"kind": "technical_problem", "text": "历史内容已被压缩保留。"}]},
-            "questions": [],
-            "warnings": [],
-        }
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_compressed")],
-        }
-
-    settings = make_settings(tmp_path)
-    settings.context_max_tokens = 120
-    settings.context_reserved_output_tokens = 0
-    settings.context_compress_threshold_ratio = 0.5
-    settings.context_compression_timeout = 123
-    llm = ScriptedLLMClient([subagent_submit], script_subagents=True)
-    services = AppServices(settings, llm_client=llm)
-    project_id = await create_project(services)
-    session_id = "sess_subagent_compress"
-
-    result = await services.executor.execute_subagent(
-        project_id,
-        {"agent_id": "material_analyst", "goal": "提炼压缩后的历史事实。"},
-        session_id=session_id,
-        round_id="round_subagent_compress",
-        message_id="msg_subagent_compress",
-        parent_call_id="call_parent",
-        caller_messages=[
-            {"role": "user", "content": "历史技术细节" * 120},
-            {"role": "assistant", "content": "历史处理结论" * 120},
-        ],
-    )
-
-    assert result["status"] == "success"
-    events = services.store.read_session_events(project_id, session_id)
-    summary_event = next(event for event in events if event.type == "context_summary")
-    compression_payload = llm.generated_json_payloads[-1]
-    assert compression_payload["_timeout"] == 123
-    assert "target_estimated_tokens" not in compression_payload
-    assert summary_event.scope == "subagent:material_analyst"
-    assert summary_event.payload["compressed_messages"][-1]["content"].startswith("【上下文说明】")
-
-
-@pytest.mark.anyio
-async def test_context_manager_compresses_old_session_history(tmp_path: Path) -> None:
-    long_text = "历史技术细节" * 80
-
-    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert messages[-1]["content"] == long_text
-        return {"type": "respond", "text": "已记录历史技术细节。" + long_text}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        contents = [message["content"] for message in messages]
-        assert any("我前面已经提供了" in content for content in contents)
-        assert not any(content == long_text for content in contents[:-1])
-        assert messages[-1] == {"role": "user", "content": "继续完善"}
-        return {"type": "respond", "text": "继续处理。"}
-
-    llm = ScriptedLLMClient([first_round, second_round])
-    settings = make_settings(tmp_path)
-    settings.context_max_tokens = 200
-    settings.context_reserved_output_tokens = 0
-    settings.context_compress_threshold_ratio = 0.5
-    settings.context_recent_full_rounds = 1
-    settings.context_compression_timeout = 123
-    services = AppServices(settings, llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message=long_text))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(
-        project_id,
-        ChatMessageRequest(session_id=first.session_id, message="继续完善"),
-    )
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, first.session_id)
-    summary_event = next(event for event in events if event.type == "context_summary")
-    compressed_messages = summary_event.payload["compressed_messages"]
-    bus_events, _ = await services.bus.subscribe((project_id, first.session_id))
-    bus_event_names = [name for name, _payload in bus_events]
-    assert "context_compression_started" in bus_event_names
-    assert "context_compression_completed" in bus_event_names
-    compression_payload = llm.generated_json_payloads[-1]
-    assert compression_payload["_timeout"] == 123
-    assert "target_estimated_tokens" not in compression_payload
-    assert "summary" not in summary_event.payload
-    assert compressed_messages[-1]["content"].startswith("【上下文说明】")
-    usage = services.context_manager.context_usage(project_id, first.session_id)
-    assert usage is not None
-    assert usage.used_tokens > 0
-
-
-@pytest.mark.anyio
-async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(tmp_path: Path) -> None:
-    long_text = "历史技术细节" * 1200
-
-    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert messages[-1]["content"] == long_text
-        return {"type": "respond", "text": "已记录历史技术细节。" + long_text}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        contents = [message["content"] for message in messages]
-        assert any("我前面已经提供了" in content for content in contents)
-        assert messages[-1] == {"role": "user", "content": "继续完善"}
-        return {"type": "respond", "text": "继续处理。"}
-
-    llm = ScriptedLLMClient([first_round, second_round])
-    settings = make_settings(tmp_path)
-    settings.context_max_tokens = 1000
-    settings.context_reserved_output_tokens = 0
-    settings.context_compress_threshold_ratio = 0.5
-    settings.context_recent_full_rounds = 1
-    services = AppServices(settings, llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message=long_text))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(
-        project_id,
-        ChatMessageRequest(session_id=first.session_id, message="继续完善"),
-    )
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, first.session_id)
-    summary_event = next(event for event in events if event.type == "context_summary")
-    assert summary_event.payload["compressed_messages"][-1]["content"].startswith("【上下文说明】")
-
-
-@pytest.mark.anyio
-async def test_subagent_plain_response_is_corrected_to_submit_result(tmp_path: Path) -> None:
-    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {
-                        "agent_id": "section_writer",
-                        "goal": "补充背景技术",
-                    },
-                    "call_bad_json",
-                )
-            ],
-        }
-
-    def step_subagent_bad_json(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert messages
-        return {"type": "respond", "text": "这不是 JSON"}
-
-    def step_subagent_submit_result(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert messages[-1]["role"] == "user"
-        assert "submit_result" in messages[-1]["content"]
-        arguments = {
-            "summary": "已生成候选正文。",
-            "reply": "已补充背景技术。",
-            "rationale": "根据用户输入生成候选。",
-            "proposal_type": "document_edit_proposal",
-            "proposal": {
-                "operations": [
-                    {
-                        "op": "replace_section_blocks",
-                        "section_id": "sec_000003",
-                        "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
-                    }
-                ],
-            },
-            "questions": [],
-            "warnings": [],
-        }
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_retry")],
-        }
-
-    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        result = json.loads(last_tool["content"])
-        assert result["status"] == "success"
-        assert result["output"]["result"]["proposal"]["operations"][0]["section_id"] == "sec_000003"
-        return {"type": "respond", "text": "子 agent 已按 submit_result 重新提交。"}
-
-    llm = ScriptedLLMClient(
-        [step_call_subagent, step_subagent_bad_json, step_subagent_submit_result, step_main_recover],
-        script_subagents=True,
-    )
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    response = await services.chat.start_round(project_id, ChatMessageRequest(message="补充背景技术"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, response.session_id)
-    main_tool_results = [
-        event for event in events if event.type == "tool_result" and event.scope == "main" and event.payload.get("tool") == "execute_subagent"
-    ]
-    assert main_tool_results[-1].payload["status"] == "success"
-    assert [event.payload.get("text") for event in events if event.type == "agent_output"][-1] == "子 agent 已按 submit_result 重新提交。"
-
-
-@pytest.mark.anyio
-async def test_subagent_repeated_plain_response_fails_fast(tmp_path: Path) -> None:
-    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {"agent_id": "section_writer", "goal": "补充背景技术章节"},
-                    "call_subagent_plain_repeat",
-                )
-            ],
-        }
-
-    def step_subagent_plain_response(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"type": "respond", "text": "这不是 submit_result。"}
-
-    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        result = json.loads(last_tool["content"])
-        assert result["status"] == "failed"
-        assert result["output"]["code"] == "subagent_plain_response"
-        return {"type": "respond", "text": "子 agent 未按协议提交。"}
-
-    llm = ScriptedLLMClient(
-        [step_call_subagent, step_subagent_plain_response, step_subagent_plain_response, step_main_recover],
-        script_subagents=True,
-    )
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    response = await services.chat.start_round(project_id, ChatMessageRequest(message="测试子 agent 连续直接回复。"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, response.session_id)
-    main_tool_results = [
-        event
-        for event in events
-        if event.type == "tool_result" and event.scope == "main" and event.payload.get("tool") == "execute_subagent"
-    ]
-    assert main_tool_results[-1].payload["status"] == "failed"
-    assert main_tool_results[-1].payload["output"]["code"] == "subagent_plain_response"
-
-
-@pytest.mark.anyio
-async def test_subagent_submit_result_validation_failure_can_retry(tmp_path: Path) -> None:
-    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {
-                        "agent_id": "section_writer",
-                        "goal": "补充背景技术",
-                    },
-                    "call_bad_submit",
-                )
-            ],
-        }
-
-    def step_subagent_bad_submit(_: list[dict[str, Any]]) -> dict[str, Any]:
-        arguments = {
-            "summary": "缺少 proposal。",
-            "reply": "缺少 proposal。",
-            "rationale": "测试校验失败。",
-            "proposal_type": "document_edit_proposal",
-            "proposal": {},
-            "questions": [],
-            "warnings": [],
-        }
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_bad")],
-        }
-
-    def step_subagent_retry(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        assert last_tool["tool_call_id"] == "sub_submit_bad"
-        result = json.loads(last_tool["content"])
-        assert result["status"] == "failed"
-        assert result["output"]["code"] == "subagent_invalid_submit_result"
-        arguments = {
-            "summary": "已生成候选正文。",
-            "reply": "已补充背景技术。",
-            "rationale": "根据校验反馈补齐 operations。",
-            "proposal_type": "document_edit_proposal",
-            "proposal": {
-                "operations": [
-                    {
-                        "op": "replace_section_blocks",
-                        "section_id": "sec_000003",
-                        "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
-                    }
-                ],
-            },
-            "questions": [],
-            "warnings": [],
-        }
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_ok")],
-        }
-
-    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        result = json.loads(last_tool["content"])
-        assert result["status"] == "success"
-        return {"type": "respond", "text": "子 agent 校验失败后已重试成功。"}
-
-    llm = ScriptedLLMClient(
-        [step_call_subagent, step_subagent_bad_submit, step_subagent_retry, step_main_recover],
-        script_subagents=True,
-    )
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    response = await services.chat.start_round(project_id, ChatMessageRequest(message="补充背景技术"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, response.session_id)
-    sub_submit_results = [
-        event
-        for event in events
-        if event.type == "tool_result" and event.scope == "subagent:section_writer" and event.payload.get("tool") == "submit_result"
-    ]
-    assert [event.payload["status"] for event in sub_submit_results] == ["failed", "success"]
-
-
-@pytest.mark.anyio
-async def test_subagent_submit_result_invalid_arguments_json_can_retry(tmp_path: Path) -> None:
-    error_message = "submit_result 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
-
-    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {
-                        "agent_id": "section_writer",
-                        "goal": "补充背景技术",
-                    },
-                    "call_bad_submit_json",
-                )
-            ],
-        }
-
-    def step_subagent_bad_arguments(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                {
-                    "tool": "submit_result",
-                    "arguments": {},
-                    "tool_call_id": "sub_submit_invalid_json",
-                    "arguments_error": error_message,
-                }
-            ],
-        }
-
-    def step_subagent_retry(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        assert last_tool["tool_call_id"] == "sub_submit_invalid_json"
-        result = json.loads(last_tool["content"])
-        assert result == {
-            "status": "failed",
-            "output": {
-                "code": "invalid_tool_arguments_json",
-                "message": error_message,
-            },
-        }
-        arguments = {
-            "summary": "已生成候选正文。",
-            "reply": "已补充背景技术。",
-            "rationale": "根据参数错误反馈重交合法 JSON。",
-            "proposal_type": "document_edit_proposal",
-            "proposal": {
-                "operations": [
-                    {
-                        "op": "replace_section_blocks",
-                        "section_id": "sec_000003",
-                        "blocks": [{"type": "paragraph", "text": "背景技术正文。"}],
-                    }
-                ],
-            },
-            "questions": [],
-            "warnings": [],
-        }
-        return {
-            "type": "tool_calls",
-            "tool_calls": [tool_call("submit_result", arguments, "sub_submit_json_retry")],
-        }
-
-    def step_main_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        result = json.loads(last_tool["content"])
-        assert result["status"] == "success"
-        return {"type": "respond", "text": "子 agent 参数 JSON 错误后已重试成功。"}
-
-    llm = ScriptedLLMClient(
-        [step_call_subagent, step_subagent_bad_arguments, step_subagent_retry, step_main_recover],
-        script_subagents=True,
-    )
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    response = await services.chat.start_round(project_id, ChatMessageRequest(message="补充背景技术"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, response.session_id)
-    sub_submit_results = [
-        event
-        for event in events
-        if event.type == "tool_result" and event.scope == "subagent:section_writer" and event.payload.get("tool") == "submit_result"
-    ]
-    assert [event.payload["status"] for event in sub_submit_results] == ["failed", "success"]

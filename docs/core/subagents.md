@@ -2,23 +2,17 @@
 
 ## 文档定位
 
-本文档定义本项目的 4 个核心子 agent。
+本文档定义本项目的业务子 agent 清单、职责范围、权限边界和声明字段。
 
-它建立在以下文档之上：
+子 agent 的结果传输与结束方式以 [子 Agent 管道协议](subagent-pipe-protocol.md) 为准。子 agent 不通过复杂 envelope 或 `document_edit.operations` 向主 agent 交付最终结果，而是将需要展示给主 agent 的内容写入 pipe，并通过 `finish({})` 结束。
+
+依赖文档：
 
 - [专利交底书结构方案](../specs/patent-disclosure-structure.md)
 - [Agent 基本设计原则](agent-principles.md)
 - [Agent Prompt 与上下文规范](agent-prompt-context-spec.md)
+- [子 Agent 管道协议](subagent-pipe-protocol.md)
 - [Tools 设计](tools.md)
-
-本文档定义：
-
-- 子 agent 清单
-- 子 agent 职责范围
-- 子 agent 权限边界
-- 子 agent 声明字段
-- 子 agent 统一返回结构
-- 不同 proposal 类型
 
 ## 一、总体原则
 
@@ -33,7 +27,7 @@
 
 1. 从资料和对话中抽取事实
 2. 将事实收敛为技术方案
-3. 将方案写成交底书章节候选内容
+3. 面向局部 section 或 block 生成候选正文
 4. 对已有内容做一致性审查
 
 统一原则：
@@ -41,30 +35,23 @@
 1. 用户始终只与主 agent 对话。
 2. 子 agent 不直接面向用户。
 3. 主 agent 负责决定何时调用哪个子 agent。
-4. 子 agent 只提出建议或候选结果。
-5. 主 agent 负责判断是否采纳子 agent 结果。
+4. 子 agent 只提供分析、骨架、候选正文或审查意见。
+5. 主 agent 负责解释子 agent 内容，并决定是否采纳。
 6. `document_edit` 只能由主 agent 调用。
-7. 子 agent 可以读取文档，但不直接修改 `disclosure.json`。
+7. 子 agent 不直接修改 `disclosure.json`。
 8. 子 agent 支持多轮 tool use，但不允许继续调用其他子 agent。
-
-运行口径：
-
-- 4 个子 agent 均通过统一的子 agent loop 运行。
-- 子 agent 可在 loop 中调用 `document_read` 和 `exec_command`。
-- 子 agent 的内部工具调用会写入 session log，并通过 SSE 以 `scope=subagent:<agent_id>` 实时推送。
-- 子 agent 最终仍必须输出统一 envelope，再由主 agent 决定是否采纳。
+9. 子 agent 的结果交付遵守管道协议：内容写入 `write_pipe(content)`，结束调用 `finish({})`。
 
 ## 二、权限边界
 
 子 agent 可以：
 
-- 调用 `document_read`
-- 调用 `exec_command`
 - 分析用户资料和已有正文
-- 生成候选正文 blocks
-- 生成候选 `document_edit.operations`
-- 提出问题和风险提示
-- 返回结构化 proposal
+- 读取自身权限范围内允许读取的上下文
+- 使用自身权限范围内允许使用的工作工具
+- 生成分析、方案骨架、局部候选正文或审查意见
+- 将需要展示给主 agent 的内容写入 pipe
+- 调用 `finish({})` 结束本次子 agent run
 
 子 agent 不可以：
 
@@ -74,6 +61,12 @@
 - 决定是否采纳自己的候选内容
 - 执行 git commit
 - 面向用户直接收束回合
+- 把最终结果绕过 pipe 直接交给主 agent
+
+说明：
+
+- 管道协议只新增 `write_pipe(content)` 和 `finish({})` 两个结果传输工具。
+- 其他工作工具不属于管道协议，仍由子 agent 声明和执行器权限配置决定。
 
 ## 三、上下文装配
 
@@ -89,20 +82,20 @@
 8. 子 agent 内部工具调用与工具结果只服务于本次子 agent run。
 9. 主 agent 只接收 `execute_subagent` 的最终工具返回结果。
 
-如果子 agent 判断上下文不足，应在权限范围内调用 `document_read`，或在统一 envelope 中返回需要补充确认的问题。
+如果子 agent 判断上下文不足，应在权限范围内调用读取或诊断工具；如果仍无法完成，应把缺口、风险或待确认问题写入 pipe 后调用 `finish({})`。
 
 ## 四、子 agent 清单
 
 ### 1. material_analyst
 
-`material_analyst` 用于把用户聊天内容、参考资料、已有草稿中的信息提炼成结构化技术事实。
+`material_analyst` 用于把用户聊天内容、参考资料、已有草稿中的信息提炼成技术事实。
 
 它主要负责：
 
 - 抽取技术主题、应用场景、现有方案、问题点、模块、流程、效果
 - 识别信息缺口、歧义点和待澄清点
 - 归纳候选术语
-- 输出 `analysis_result`
+- 给主 agent 提供事实、术语、风险和待确认项
 
 它不直接负责：
 
@@ -119,15 +112,14 @@
 
 ### 2. solution_refiner
 
-`solution_refiner` 用于把零散技术事实收敛成一个可写作、可继续讨论的技术方案。
+`solution_refiner` 用于把零散技术事实收敛成一个可写作、可继续讨论的技术方案骨架。
 
 它主要负责：
 
 - 组织整体方案结构
 - 拆出模块、流程、关键约束、创新点
 - 指出还需要用户确认的设计点
-- 输出 `analysis_result`
-- 在信息足够时输出 `document_edit_proposal`
+- 给主 agent 提供可继续写作的方案骨架
 
 它不直接负责：
 
@@ -144,29 +136,28 @@
 
 ### 3. section_writer
 
-`section_writer` 用于面向指定章节或 block 执行写作任务。
+`section_writer` 用于面向指定 section 或 block 生成轻量局部候选正文。
 
 它主要负责：
 
-- 起草章节候选 blocks
-- 补写章节候选 blocks
-- 改写章节候选 blocks
-- 按反馈重写候选内容
-- 生成段落、列表、图片说明、表格文字等块级内容
-- 输出 `document_edit_proposal`
+- 起草一个短段落、短列表或单个局部子章节
+- 补写或改写局部正文
+- 按主 agent 给出的局部目标生成候选文本
+- 给主 agent 提供可审查的正文片段
 
 它不直接负责：
 
 - 决定整篇方案方向
 - 决定全局文档结构
-- 做全文一致性裁决
+- 一次生成完整技术方案、完整实施例或多子章节整章内容
+- 生成最终 `document_edit.operations`
 - 修改文档
 
 适合场景：
 
-- 用户明确要求“写出来”
-- 用户要求补写某一节
-- 用户要求改写、重写某一章、某个子章节或某个 block
+- 用户或主 agent 明确要求补写一个局部段落
+- 目标 section 或 block 已经明确
+- 主 agent 需要一个轻量正文候选，而不是完整章节
 
 ### 4. consistency_reviewer
 
@@ -178,7 +169,7 @@
 - 检查技术问题、技术方案、技术效果是否闭环
 - 检查实施例是否支撑方案
 - 检查章节是否冲突、跳步、空泛
-- 输出 `review_report`
+- 给主 agent 提供问题清单、风险和建议
 
 它不直接负责：
 
@@ -200,17 +191,17 @@
 - `description`
 - `input_expectation`
 - `output_contract`
+- `usage_guidance`
 - `tool_permissions`
-- `default_proposal_type`
 
 字段说明：
 
-- `id`：子 agent 的稳定机器标识
-- `description`：能力边界说明
-- `input_expectation`：通常需要的输入
-- `output_contract`：返回结构约束
-- `tool_permissions`：允许调用的工具
-- `default_proposal_type`：默认 proposal 类型
+- `id`：子 agent 的稳定机器标识。
+- `description`：能力边界说明。
+- `input_expectation`：通常需要的输入。
+- `output_contract`：面向主 agent 的结果口径；当前协议下应表达为 pipe 内容类型，而不是复杂 envelope。
+- `usage_guidance`：主 agent 调用该子 agent 时应遵守的使用边界。
+- `tool_permissions`：允许调用的工作工具；不包含管道协议新增的 `write_pipe` 和 `finish`。
 
 ## 六、子 agent 声明示例
 
@@ -219,14 +210,14 @@
 ```json
 {
   "id": "material_analyst",
-  "description": "从用户对话、参考资料和已有草稿中提炼结构化技术事实，输出事实摘要、信息缺口和候选术语，不直接生成交底书正文。",
-  "input_expectation": "需要任务描述，通常需要参考资料、已有文本片段或用户刚提供的说明内容。",
-  "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 analysis_result。",
+  "description": "从当前聊天材料和已有正文中抽取技术事实、术语和待确认问题。",
+  "input_expectation": "提供用户输入、必要的参考章节和分析目标。",
+  "output_contract": "通过 pipe 返回事实、术语、风险和待确认项。",
+  "usage_guidance": "适合在写作前提炼事实、术语、约束和待确认问题；不要要求它直接生成完整正文或落盘编辑。",
   "tool_permissions": [
     "document_read",
     "exec_command"
-  ],
-  "default_proposal_type": "analysis_result"
+  ]
 }
 ```
 
@@ -235,14 +226,14 @@
 ```json
 {
   "id": "solution_refiner",
-  "description": "将零散技术事实整理为可写作的技术方案，输出方案结构、创新点和待确认决策，不直接修改交底书正文。",
-  "input_expectation": "需要任务描述，通常需要已有事实、局部正文片段或参考方案说明。",
-  "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 analysis_result，必要时可返回 document_edit_proposal。",
+  "description": "将零散事实收敛成可继续讨论或继续写作的技术方案骨架。",
+  "input_expectation": "提供事实摘要、目标方向以及必要章节上下文。",
+  "output_contract": "通过 pipe 返回方案骨架、模块关系、关键流程和待确认点。",
+  "usage_guidance": "适合收敛技术问题、核心手段、模块关系和流程骨架；当需要完整章节正文时，由主 agent 基于骨架继续规划和落盘。",
   "tool_permissions": [
     "document_read",
     "exec_command"
-  ],
-  "default_proposal_type": "analysis_result"
+  ]
 }
 ```
 
@@ -251,14 +242,14 @@
 ```json
 {
   "id": "section_writer",
-  "description": "针对指定章节或 block 执行写作任务，输出可由主 agent 审查采纳的候选 document_edit operations，不直接修改文档。",
-  "input_expectation": "需要任务描述、目标 section_id 或 block_id、局部正文上下文和必要的方案材料。",
-  "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 document_edit_proposal。",
+  "description": "面向指定 section 或 block 生成轻量局部候选正文。",
+  "input_expectation": "提供明确的局部目标，例如一个子章节、一个短段落或一个短列表，以及必要的当前章节内容。",
+  "output_contract": "通过 pipe 返回局部候选正文。",
+  "usage_guidance": "轻量局部写作工具；不要用于完整技术方案、完整实施例或多子章节整章生成。单次正文一般不超过 800 个中文字符。",
   "tool_permissions": [
     "document_read",
     "exec_command"
-  ],
-  "default_proposal_type": "document_edit_proposal"
+  ]
 }
 ```
 
@@ -267,156 +258,24 @@
 ```json
 {
   "id": "consistency_reviewer",
-  "description": "检查术语、逻辑、章节关系和技术闭环是否一致，输出问题清单和修改建议，不直接改写正文。",
-  "input_expectation": "需要任务描述，通常需要目标章节和必要的关联章节内容。",
-  "output_contract": "返回统一子 agent envelope，其中 proposal 默认为 review_report。",
+  "description": "检查术语、逻辑链路和章节闭环的一致性。",
+  "input_expectation": "提供待审查章节、相关上下游章节和审查目标。",
+  "output_contract": "通过 pipe 返回问题清单、风险和建议。",
+  "usage_guidance": "适合在正文已有草稿后检查术语一致性、问题-方案闭环和方案-效果因果链；不要要求它直接改写或落盘文档。",
   "tool_permissions": [
     "document_read",
     "exec_command"
-  ],
-  "default_proposal_type": "review_report"
-}
-```
-
-## 七、统一返回结构
-
-所有子 agent 固定返回统一 envelope：
-
-```json
-{
-  "status": "success",
-  "summary": "一句话说明本次结果。",
-  "proposal": {},
-  "questions": [],
-  "warnings": []
-}
-```
-
-字段说明：
-
-- `status`：`success` 或 `failed`
-- `summary`：给主 agent 的简短结论
-- `proposal`：结构化结果，失败时可以为 `null`
-- `questions`：需要用户或主 agent 补充的信息
-- `warnings`：风险、假设和不确定性
-
-失败示例：
-
-```json
-{
-  "status": "failed",
-  "summary": "当前信息不足，无法完成任务。",
-  "proposal": null,
-  "questions": [
-    "请补充目标应用场景。"
-  ],
-  "warnings": []
-}
-```
-
-## 八、proposal 类型
-
-`proposal.type` 支持：
-
-```text
-document_edit_proposal
-analysis_result
-review_report
-```
-
-### 1. document_edit_proposal
-
-用于提出可采纳的文档修改候选。
-
-示例：
-
-```json
-{
-  "type": "document_edit_proposal",
-  "target_section_id": "sec_000007",
-  "target_block_id": null,
-  "intent": "replace_section_blocks",
-  "confidence": 0.82,
-  "rationale": "目标章节适合整体写入候选 blocks。",
-  "operations": [
-    {
-      "op": "replace_section_blocks",
-      "section_id": "sec_000007",
-      "blocks": [
-        {
-          "type": "paragraph",
-          "text": "本发明提供一种图像检测方法。"
-        }
-      ]
-    }
   ]
 }
 ```
 
-规则：
-
-1. `operations` 结构贴近 `document_edit.operations`。
-2. 新增 block 不携带 `id`。
-3. 主 agent 必须审查后决定是否采纳。
-4. 子 agent 返回 proposal 不等于文档已经修改。
-
-### 2. analysis_result
-
-用于返回事实提炼、方案收敛或下一步建议。
-
-示例：
-
-```json
-{
-  "type": "analysis_result",
-  "facts": [
-    {
-      "kind": "technical_problem",
-      "text": "现有图像检测方法在低算力设备上实时性不足。"
-    }
-  ],
-  "candidate_terms": [
-    "低算力设备",
-    "特征提取模块"
-  ],
-  "recommended_next_actions": [
-    {
-      "action": "write_section",
-      "section_id": "technical_problem"
-    }
-  ]
-}
-```
-
-### 3. review_report
-
-用于返回一致性审查结果。
-
-示例：
-
-```json
-{
-  "type": "review_report",
-  "issues": [
-    {
-      "severity": "medium",
-      "section_id": "technical_effects",
-      "block_id": null,
-      "message": "技术效果未对应技术问题中的实时性目标。",
-      "suggested_fix": "补充低延迟或低算力相关效果。"
-    }
-  ]
-}
-```
-
-## 九、设计结论
+## 七、设计结论
 
 子 agent 设计如下：
 
 1. 子 agent 清单为 `material_analyst`、`solution_refiner`、`section_writer`、`consistency_reviewer`。
-2. 子 agent 只提出建议，不直接修改文档。
-3. 子 agent 可使用 `document_read`，不可使用 `document_edit`。
-4. 子 agent 不可调用其他子 agent。
-5. 所有子 agent 使用统一返回 envelope。
-6. `proposal.type` 区分 `document_edit_proposal`、`analysis_result`、`review_report`。
-7. 主 agent 决定是否采纳 `document_edit_proposal.operations`。
+2. 子 agent 只提供分析、骨架、候选正文或审查意见，不直接修改文档。
+3. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
+4. 子 agent 的结果内容通过 `write_pipe(content)` 进入 pipe。
+5. 子 agent 通过 `finish({})` 显式结束本次 run。
+6. 主 agent 读取 pipe content 后，决定是否采纳、如何结构化和是否调用 `document_edit`。

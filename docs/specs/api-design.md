@@ -391,16 +391,7 @@ data: {
     "status": "success",
     "output": {
       "agent_id": "section_writer",
-      "result": {
-        "status": "success",
-        "summary": "已生成技术方案章节候选正文。",
-        "proposal": {
-          "type": "document_edit_proposal",
-          "operations": []
-        },
-        "questions": [],
-        "warnings": []
-      }
+      "content": "## 局部候选正文\n\n本发明提供一种图像检测方法。"
     }
   },
   "round_id": "round_001",

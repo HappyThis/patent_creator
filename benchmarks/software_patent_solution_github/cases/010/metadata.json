@@ -1,46 +1,68 @@
 {
-  "case_id": "010",
+  "id": "010",
   "title": "多会话 agent assistant 中会话隔离与用户级共享资源协同机制",
-  "project_id": "cloudflare_agents",
-  "repo": "https://github.com/cloudflare/agents",
-  "source_kind": "feature_iteration",
-  "source_pr": "https://github.com/cloudflare/agents/pull/1384",
-  "source_commit": "a7059d4a5a1071a10c60be0e777968fc7ff5d36c",
-  "snapshot_commit": "d31ec18dd70500bccda7944c63b70ef9fad49bda",
-  "date": "2026-04-24",
-  "difficulty": "very_hard",
-  "difficulty_score": 5,
-  "difficulty_reason": "多会话 assistant 涉及用户级父目录、子会话隔离、共享 workspace、共享 MCP/OAuth、路由门禁、广播同步和父级调度，是架构级组合问题。",
-  "domain_tags": [
-    "agent",
-    "multi-session",
-    "sub-agent",
-    "workspace",
-    "mcp",
-    "durable-object"
-  ],
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "cloudflare/agents",
+    "repo_url": "https://github.com/cloudflare/agents",
+    "issue_urls": [],
+    "pr_urls": [
+      "https://github.com/cloudflare/agents/pull/1384"
+    ],
+    "solution_merge_commit": "a7059d4a5a1071a10c60be0e777968fc7ff5d36c"
+  },
+  "project": {
+    "source_project_id": "cloudflare_agents",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Cloudflare Workers",
+      "Durable Objects",
+      "React"
+    ],
+    "excluded_paths": [
+      "PR #1384 final implementation"
+    ]
+  },
+  "case": {
+    "difficulty": "very_hard",
+    "difficulty_score": 5,
+    "difficulty_reason": "多会话 assistant 涉及用户级父目录、子会话隔离、共享 workspace、共享 MCP/OAuth、路由门禁、广播同步和父级调度，是架构级组合问题。",
+    "context_shape": "prepared_project_environment",
+    "source_kind": "feature_iteration",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "multi_session_agent_design",
+      "shared_resource_boundary_analysis",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "agent",
+      "multi-session",
+      "sub-agent",
+      "workspace",
+      "mcp",
+      "durable-object"
+    ]
+  },
   "visibility": {
     "agent_visible": [
       "request.md",
       "prepared project checkout as current working directory or environment path"
     ],
-    "judge_hidden": [
+    "hidden_from_agent": [
       "reference_solution.md",
       "rubric.md",
       "metadata.json",
+      "PR #1384 final diff",
       "snapshot.json",
       "focus_paths"
     ]
-  },
-  "selection_notes": "该 case 来源于多会话 assistant 的大功能迭代，涉及父子 agent 架构、会话隔离、共享 workspace、共享 MCP、访问控制、广播同步和定时任务，符合核心 benchmark 的机制型新功能要求。",
-  "context_shape": "prepared_project_environment",
-  "expected_capabilities": [
-    "codebase_reading",
-    "requirement_understanding",
-    "technical_problem_abstraction",
-    "technical_architecture_design",
-    "multi_session_agent_design",
-    "shared_resource_boundary_analysis",
-    "software_patent_solution_generation"
-  ]
+  }
 }

@@ -793,59 +793,17 @@ io_error
   "status": "success",
   "output": {
     "agent_id": "section_writer",
-    "result": {
-      "status": "success",
-      "summary": "已生成技术方案章节候选正文。",
-      "proposal": {
-        "type": "document_edit_proposal",
-        "target_section_id": "sec_000007",
-        "intent": "replace_section_blocks",
-        "confidence": 0.84,
-        "rationale": "当前章节适合整体写入候选 blocks。",
-        "operations": [
-          {
-            "op": "replace_section_blocks",
-            "section_id": "sec_000007",
-            "blocks": [
-              {
-                "type": "paragraph",
-                "text": "本发明提供一种图像检测方法。"
-              }
-            ]
-          }
-        ]
-      },
-      "questions": [],
-      "warnings": []
-    }
-  }
-}
-```
-
-### 成功输出：子 agent 任务失败
-
-```json
-{
-  "status": "success",
-  "output": {
-    "agent_id": "section_writer",
-    "result": {
-      "status": "failed",
-      "summary": "当前信息不足，无法生成稳定候选正文。",
-      "proposal": null,
-      "questions": [
-        "该方案主要强调检测精度，还是低算力实时性？"
-      ],
-      "warnings": []
-    }
+    "content": "## 局部候选正文\n\n本发明提供一种图像检测方法。"
   }
 }
 ```
 
 说明：
 
-- 外层 `status=success` 表示调度工具成功启动并拿到子 agent 结构化结果。
-- 内层 `result.status=failed` 表示子 agent 判断本次任务无法完成。
+- 外层 `status=success` 表示调度工具成功启动并拿到子 agent pipe 内容。
+- `output.content` 是子 agent 通过 `write_pipe(content)` 少量多次写入后合并得到的字符串。
+- 如果子 agent 判断信息不足，也应把缺口或待确认问题写入 `content` 后调用 `finish({})`。
+- 主 agent 读取 `content` 后自行决定是否采纳、追问、继续拆分任务或调用 `document_edit`。
 
 ### 失败输出：调度工具失败
 
@@ -870,37 +828,22 @@ subagent_runtime_error
 invalid_subagent_result
 ```
 
-## 十一、子 agent 统一返回结构
+## 十一、子 agent pipe 工具
 
-所有子 agent 返回统一外层结构：
-
-```json
-{
-  "status": "success | failed",
-  "summary": "string",
-  "proposal": {},
-  "questions": [],
-  "warnings": []
-}
-```
-
-字段说明：
-
-- `status`：子 agent 对本次任务的完成状态
-- `summary`：给主 agent 的简短结论
-- `proposal`：结构化结果
-- `questions`：需要补充确认的问题
-- `warnings`：风险、假设、不确定性
-
-`proposal.type` 支持：
+子 agent 结果传输只使用两个管道工具：
 
 ```text
-document_edit_proposal
-analysis_result
-review_report
+write_pipe(content)
+finish({})
 ```
 
-只有 `document_edit_proposal.operations` 可以作为 `document_edit.operations` 的候选输入，且必须由主 agent 决定是否采纳。
+规则：
+
+1. 所有要展示给主 agent 的内容都必须写入 `write_pipe(content)`。
+2. `content` 是字符串，可以是 Markdown 或纯文本。
+3. 子 agent 可以多次写入，执行器按顺序用 `\n` 拼接。
+4. `finish({})` 不接收任何业务参数，只表示本次子 agent run 结束。
+5. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
 
 ## 十二、exec_command 协议
 

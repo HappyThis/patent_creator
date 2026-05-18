@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from ..registry import SUBAGENTS
 from ...core import ApiError
 from ...core.command_platform import exec_command_tool_description
 
@@ -36,108 +37,122 @@ class MainAgentAction:
     assistant_message: dict[str, Any] | None = None
 
 
-MAIN_AGENT_TOOLS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "document_read",
-            "description": "按 section_id、block_id 或关键词读取当前交底书的部分正文。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["get_meta", "get_project_context", "get_outline", "get_section", "get_block", "search_blocks"],
-                        "description": "读取动作。get_project_context 返回标题和完整目录树；get_section 按章节 id；get_block 按 block id；search_blocks 按关键词搜索正文。",
+def _subagent_tool_description() -> str:
+    catalog = "；".join(
+        f"{declaration.id}：{declaration.description} 输入要求：{declaration.input_expectation} 返回值：{declaration.output_contract} 使用边界：{declaration.usage_guidance}"
+        for declaration in SUBAGENTS.values()
+    )
+    return f"调度一个已注册子 agent 执行局部任务，返回合并后的 pipe content。可用子 agent：{catalog}"
+
+
+def build_main_agent_tools() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "document_read",
+                "description": "按 section_id、block_id 或关键词读取当前交底书的部分正文。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "get_meta",
+                                "get_project_context",
+                                "get_outline",
+                                "get_section",
+                                "get_block",
+                                "search_blocks",
+                            ],
+                            "description": "读取动作。get_project_context 返回标题和完整目录树；get_section 按章节 id；get_block 按 block id；search_blocks 按关键词搜索正文。",
+                        },
+                        "section_id": {
+                            "type": "string",
+                            "description": "系统生成的章节 id，例如 sec_000007。action=get_section 时必填；标准章节语义看 outline 中的 type。",
+                        },
+                        "block_id": {
+                            "type": "string",
+                            "description": "block id。action=get_block 时必填。",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "搜索关键词。action=search_blocks 时必填。",
+                        },
+                        "include_children": {
+                            "type": "boolean",
+                            "description": "章节读取时是否同时返回子章节，默认为 true。",
+                        },
                     },
-                    "section_id": {
-                        "type": "string",
-                        "description": "系统生成的章节 id，例如 sec_000007。action=get_section 时必填；标准章节语义看 outline 中的 type。",
-                    },
-                    "block_id": {
-                        "type": "string",
-                        "description": "block id。action=get_block 时必填。",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "搜索关键词。action=search_blocks 时必填。",
-                    },
-                    "include_children": {
-                        "type": "boolean",
-                        "description": "章节读取时是否同时返回子章节，默认为 true。",
-                    },
+                    "required": ["action"],
                 },
-                "required": ["action"],
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "document_edit",
-            "description": "原子应用一组 operations 写入 disclosure.json。operations 通常来自子 agent 返回的 proposal。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "operations": {
-                        "type": "array",
-                        "description": "按顺序应用的编辑操作。每个操作必须包含 op 字段。append_child_section 必须使用 parent_section_id 和 section；新增或替换 section 的 section 对象不允许携带 id。",
-                        "items": {"type": "object"},
+        {
+            "type": "function",
+            "function": {
+                "name": "document_edit",
+                "description": "原子应用一组 operations 写入 disclosure.json。operations 由主 agent 根据用户目标、当前正文和必要的子 agent pipe content 自行构造。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operations": {
+                            "type": "array",
+                            "description": "按顺序应用的编辑操作。每个操作必须包含 op 字段。append_child_section 必须使用 parent_section_id 和 section；新增或替换 section 的 section 对象不允许携带 id。",
+                            "items": {"type": "object"},
+                        },
                     },
+                    "required": ["operations"],
                 },
-                "required": ["operations"],
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_subagent",
-            "description": "调度一个子 agent 执行局部任务（写作 / 分析 / 收敛 / 审查），返回统一的 envelope 结果。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {
-                        "type": "string",
-                        "enum": [
-                            "section_writer",
-                            "material_analyst",
-                            "solution_refiner",
-                            "consistency_reviewer",
-                        ],
-                        "description": "目标子 agent 的 id。",
+        {
+            "type": "function",
+            "function": {
+                "name": "execute_subagent",
+                "description": _subagent_tool_description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {
+                            "type": "string",
+                            "enum": list(SUBAGENTS),
+                            "description": "目标子 agent 的 id，必须来自已注册子 agent 清单。",
+                        },
+                        "goal": {
+                            "type": "string",
+                            "description": "面向子 agent 的自然语言任务目标；目标范围、输出要求和注意事项都写在这里，并遵守该子 agent 的输入要求和使用边界。",
+                        },
                     },
-                    "goal": {
-                        "type": "string",
-                        "description": "面向子 agent 的自然语言任务目标；目标范围、输出要求和注意事项都写在这里。",
-                    },
+                    "required": ["agent_id", "goal"],
                 },
-                "required": ["agent_id", "goal"],
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "exec_command",
-            "description": exec_command_tool_description(),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "要执行的命令字符串，按当前项目工作区作为 cwd 执行。",
+        {
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "description": exec_command_tool_description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "要执行的命令字符串，按当前项目工作区作为 cwd 执行。",
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": "超时时间，单位秒，默认 30。",
+                        },
                     },
-                    "timeout": {
-                        "type": "number",
-                        "description": "超时时间，单位秒，默认 30。",
-                    },
+                    "required": ["command"],
                 },
-                "required": ["command"],
             },
         },
-    },
-]
+    ]
+
+
+MAIN_AGENT_TOOLS: list[dict[str, Any]] = build_main_agent_tools()
 
 
 async def decide_main_agent_step(

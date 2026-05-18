@@ -1,7 +1,7 @@
 # 提高技术方案生成能力
 
 > 状态：进行中
-> 最后更新：2026-05-15
+> 最后更新：2026-05-18
 > 关闭条件：系统能够稳定把粗粒度软件需求转化为合理、可实施、具备保护价值的技术方案，并且主 agent / 子 agent / 文档写入链路不再因协议问题阻断技术方案落地。
 
 ## 背景
@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在 `001` case 中产出并评分技术方案，但仍存在子 agent 协议失败、工具调用参数退化和工具失败恢复策略不稳定等链路问题。
+文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在多个 case 中产出并评分技术方案，子 agent 的旧 `submit_result` 协议问题也已通过管道协议替换，但复杂 case 中仍存在子 agent 任务边界、过度读取、上下文压缩和主 agent 过晚写入 artifact 等链路稳定性问题。
 
 已关闭子问题：
 
@@ -21,10 +21,13 @@
 - `append_child_section` 参数协议已统一为 `parent_section_id` + `section`。
 - `duplicate_section_id` 的根因已通过 v2 文档结构解决：`section.id` 由系统生成，章节语义迁移到 `section.type`。
 - benchmark runner 已调整为只评价最终技术方案内容，不再把可恢复过程异常作为内容评分或诊断指标。
+- `section-writer-submit-result` 旧协议问题已关闭：当前子 agent 不再使用复杂 `submit_result` envelope，统一通过 `write_pipe(content)` 少量多次传递内容，并通过 `finish({})` 结束。
 
 仍开放子问题：
 
-- `section_writer` 子 agent 仍可能直接回复文本，而不是调用 `submit_result`。
+- 主 agent 仍可能把过重、多段、整章级写作任务交给 `section_writer`，导致轻量子 agent 边界失效。
+- `material_analyst` 等子 agent 在复杂 case 中可能过度读取项目上下文，触发多次上下文压缩，并暴露压缩结果校验失败风险。
+- 主 agent 可能在长时间阅读和多次子 agent 调用后才写入 `technical_solution`，一旦 round 超时就没有可评测 artifact。
 - 主 agent 工具调用参数仍可能退化为字符串化 JSON，虽然工具层已能防御。
 - 工具失败后的恢复策略仍不稳定，曾出现通过 `exec_command` 探索内部文档文件，而不是优先修正同一工具调用重试。
 - 技术方案质量本身仍需要通过更多正式 case 验证和提升。
@@ -33,11 +36,13 @@
 
 P0：
 
-- 技术方案质量验证不足。当前只通过 `001` case 证明链路能跑通，还不能证明系统真的具备稳定生成合理技术方案的能力。该问题需要依赖 benchmark 的 3 个黄金 case 优先闭环。
+- 技术方案质量验证不足。当前已通过至少 3 个 case 证明完整链路能跑通，但样本规模和失败 case 排查还不足以证明系统能稳定生成合理、可实施、具备保护价值的技术方案。
 
 P1：
 
-- `section_writer` 子 agent 协议失败。该问题会让主 agent 失去结构化 proposal，只能失败后自行恢复；虽然当前 benchmark 不把它作为评分指标，但它仍会影响真实写作链路稳定性。
+- `section_writer` 任务边界失效。主 agent 应只把轻量局部候选正文交给 `section_writer`，不能把多段、整章或完整技术方案正文委派给它。
+- 子 agent 过度读取与压缩失败风险。复杂 case 中需要限制子 agent 读代码深度、步数和压缩失败恢复策略，避免把大量时间消耗在单个子 agent 内。
+- 主 agent 过晚写入 artifact。复杂 case 中应优先形成可落盘的 `technical_solution` 草稿，再进行局部补强，避免超时导致完全无产物。
 - 工具失败后的恢复策略不稳定。工具参数错误时，主 agent 应优先修正同一工具调用并重试，而不是通过 `exec_command` 探索或绕开内部文档文件。
 
 P2：
@@ -179,3 +184,38 @@ P2：
    - 现象：`document_edit` 参数错误后，主 agent 曾通过 `exec_command` 查找内部 `disclosure.json`，而不是直接修正 `document_edit` 参数重试。
    - 影响：该行为虽然没有导致本次失败，但会增加无关路径探索，并可能在更复杂 case 中绕开预期文档工具边界。
    - 后续方向：主 agent prompt 与工具错误信息应明确要求：工具参数错误时优先修正同一工具调用，不应通过文件系统直接读写内部交底书数据。
+
+## 2026-05-18 管道协议落地与最难 case 复验补充
+
+基于最新管道协议改造后，使用 `software_patent_solution_github` 的 `010` case 作为复杂样本复验。该 case 的技术主题、项目上下文和目标方案都更复杂，适合观察子 agent 调度、上下文压缩和长轮次写作稳定性。
+
+本次观察结论：
+
+1. 旧的 `section-writer-submit-result` 问题可以关闭。
+   - 当前子 agent 已不再使用 `submit_result` 结构化 envelope。
+   - `solution_refiner` 和两次 `section_writer` 调用均成功使用 `write_pipe` 写入内容，并通过 `finish({})` 结束。
+   - 未观察到旧的 `submit_result` 大 JSON 协议失败，也未观察到 `section_writer` 直接回复文本导致的 `subagent_plain_response`。
+   - 因此，历史 issue `section-writer-submit-result` 从开放列表移入已关闭列表。
+
+2. 新暴露的问题是 `section_writer` 任务边界失效。
+   - 主 agent 仍可能把两个大段落、多组要点或近似整章正文交给 `section_writer`。
+   - 这与当前设计中的“轻量局部写作工具”定位冲突。
+   - 影响是子 agent 虽然能通过 pipe 协议交付结果，但会消耗大量轮次和上下文预算，使复杂 case 更容易超时。
+   - 后续方向：主 agent 调度策略应要求复杂技术方案正文由主 agent 自己写；`section_writer` 只处理一个短段落、一组局部 bullet 或一个待润色片段。执行层也可以在 `execute_subagent` 入口对 `section_writer` 的 goal 做轻量任务边界校验。
+
+3. `material_analyst` 过度读取导致上下文压缩风险。
+   - 复杂 case 中 `material_analyst` 进行了大量项目读取，触发多次上下文压缩。
+   - 第三次压缩曾失败，错误为 `context_compression_invalid_output`，具体表现为压缩后的 assistant message 同时不满足 content / preserved tool call 约束。
+   - 该问题不是 benchmark runner 的评分分类问题，而是 agent 执行器和上下文管理层的鲁棒性问题。
+   - 后续方向：为重读型子 agent 设置更小的步数或读取预算；压缩层对 invalid output 增加一次重试或确定性裁剪 fallback。
+
+4. 主 agent 写入 artifact 太晚。
+   - 复杂 case 中主 agent 在多次子 agent 调用后仍未及时 `document_edit` 写入 `technical_solution`。
+   - 一旦 round timeout，runner 无法抽取有效 artifact，judge 也无法进入。
+   - 后续方向：benchmark 任务下主 agent 应优先落地一个可评测技术方案草稿，再使用子 agent 做局部补强；不要把“充分阅读和委派”放在第一次 artifact 写入之前无限延长。
+
+当前打开的新增 issue：
+
+- `subagent-task-boundary`：收紧 `section_writer` 使用边界，避免主 agent 把长写作任务委派给轻量子 agent。
+- `subagent-overreading-compression`：限制重读型子 agent 的读取深度和压缩失败影响面。
+- `late-artifact-write`：要求复杂 case 先形成可落盘草稿，再做局部增强，避免超时无 artifact。

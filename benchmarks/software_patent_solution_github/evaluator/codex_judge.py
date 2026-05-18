@@ -4,7 +4,14 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
+from typing import Any, Callable
+
+try:
+    from .process_utils import terminate_process_group  # type: ignore[import-not-found]
+except ImportError:
+    from process_utils import terminate_process_group  # type: ignore[no-redef]
 
 
 JUDGE_SCHEMA: dict = {
@@ -67,6 +74,7 @@ def run_codex_judge(
     output_dir: Path,
     codex_bin: str = "codex",
     timeout_seconds: int = 1800,
+    progress: Callable[..., None] | None = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     schema_path = output_dir / "judge_schema.json"
@@ -74,6 +82,7 @@ def run_codex_judge(
     output_path = output_dir / "judge_output.json"
     stdout_path = output_dir / "codex_judge_stdout.txt"
     stderr_path = output_dir / "codex_judge_stderr.txt"
+    events_path = output_dir / "codex_judge_events.jsonl"
 
     schema_path.write_text(json.dumps(JUDGE_SCHEMA, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt_path.write_text(
@@ -90,6 +99,7 @@ def run_codex_judge(
     command = [
         resolve_codex_bin(codex_bin),
         "exec",
+        "--json",
         "--cd",
         str(prepared_repo),
         "--sandbox",
@@ -100,24 +110,117 @@ def run_codex_judge(
         str(output_path),
         "-",
     ]
-    completed = subprocess.run(
+    process = subprocess.Popen(
         command,
-        input=prompt_path.read_text(encoding="utf-8"),
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        check=False,
-        timeout=timeout_seconds,
+        start_new_session=True,
     )
-    stdout_path.write_text(completed.stdout, encoding="utf-8")
-    stderr_path.write_text(completed.stderr, encoding="utf-8")
-    if completed.returncode != 0:
-        message = completed.stderr.strip() or completed.stdout.strip() or "Codex judge 执行失败。"
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    stdout_thread = threading.Thread(
+        target=stream_codex_stdout,
+        args=(process.stdout, stdout_path, events_path, stdout_chunks, progress),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=stream_text_pipe,
+        args=(process.stderr, stderr_path, stderr_chunks),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    if process.stdin is not None:
+        process.stdin.write(prompt_path.read_text(encoding="utf-8"))
+        process.stdin.close()
+    try:
+        returncode = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        raise TimeoutError(f"Codex judge 超时：{timeout_seconds} 秒。")
+    except BaseException:
+        terminate_process_group(process)
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        raise
+    stdout_thread.join()
+    stderr_thread.join()
+    if returncode != 0:
+        stderr = "".join(stderr_chunks)
+        stdout = "".join(stdout_chunks)
+        message = stderr.strip() or stdout.strip() or "Codex judge 执行失败。"
         raise RuntimeError(message)
     if not output_path.exists():
         raise RuntimeError("Codex judge 未生成 judge_output.json。")
     return json.loads(output_path.read_text(encoding="utf-8"))
+
+
+def stream_codex_stdout(
+    pipe: Any,
+    stdout_path: Path,
+    events_path: Path,
+    chunks: list[str],
+    progress: Callable[..., None] | None,
+) -> None:
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    with stdout_path.open("w", encoding="utf-8") as stdout_handle, events_path.open("w", encoding="utf-8") as events_handle:
+        if pipe is None:
+            return
+        for line in pipe:
+            chunks.append(line)
+            stdout_handle.write(line)
+            stdout_handle.flush()
+            events_handle.write(line)
+            events_handle.flush()
+            emit_codex_progress(line, progress)
+
+
+def stream_text_pipe(pipe: Any, path: Path, chunks: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        if pipe is None:
+            return
+        for line in pipe:
+            chunks.append(line)
+            handle.write(line)
+            handle.flush()
+
+
+def emit_codex_progress(line: str, progress: Callable[..., None] | None) -> None:
+    if progress is None:
+        return
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return
+    event_type = str(event.get("type") or "unknown")
+    if event_type == "thread.started":
+        progress("judge_codex", "codex thread started", thread_id=event.get("thread_id"))
+    elif event_type == "turn.started":
+        progress("judge_codex", "codex turn started")
+    elif event_type in {"item.started", "item.completed"}:
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        progress(
+            "judge_codex",
+            f"codex {event_type}",
+            item_type=item.get("type"),
+            item_id=item.get("id"),
+        )
+    elif event_type == "turn.completed":
+        usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+        progress(
+            "judge_codex",
+            "codex turn completed",
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            reasoning_output_tokens=usage.get("reasoning_output_tokens"),
+        )
 
 
 def resolve_codex_bin(codex_bin: str) -> str:
@@ -126,7 +229,7 @@ def resolve_codex_bin(codex_bin: str) -> str:
         return codex_bin
 
     candidates = [codex_bin]
-    if os.name == "nt" and not command_path.suffix:
+    if is_windows() and not command_path.suffix:
         candidates = [f"{codex_bin}.cmd", f"{codex_bin}.bat", f"{codex_bin}.exe", codex_bin]
 
     for candidate in candidates:
@@ -134,6 +237,10 @@ def resolve_codex_bin(codex_bin: str) -> str:
         if resolved:
             return resolved
     return codex_bin
+
+
+def is_windows() -> bool:
+    return os.name == "nt"
 
 
 def build_judge_prompt(

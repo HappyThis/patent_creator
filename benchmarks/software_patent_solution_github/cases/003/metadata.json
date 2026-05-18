@@ -9,8 +9,6 @@
   "source": {
     "repo": "builderz-labs/mission-control",
     "repo_url": "https://github.com/builderz-labs/mission-control",
-    "snapshot_commit": "d87307a4f8764248f818add539b5c30db7701d68",
-    "snapshot_date": "2026-03-16",
     "issue_urls": [
       "https://github.com/builderz-labs/mission-control/issues/374",
       "https://github.com/builderz-labs/mission-control/issues/389"
@@ -29,15 +27,6 @@
       "SQLite",
       "Git"
     ],
-    "snapshot_descriptor": "snapshot.json",
-    "runtime_checkout_dir": "repo",
-    "focus_paths": [
-      "src/app/api/tasks/route.ts",
-      "src/app/api/tasks/[id]/route.ts",
-      "src/components/panels/task-board-panel.tsx",
-      "src/lib/config.ts",
-      "src/lib/github-sync-engine.ts"
-    ],
     "excluded_paths": [
       "PR #396 final implementation",
       "src/lib/gnap-sync.ts from PR #396",
@@ -50,7 +39,6 @@
     "difficulty_score": 3,
     "difficulty_reason": "Git-native 任务同步涉及外部格式映射、非阻塞同步和 Git 操作，但核心边界较集中，需求也更容易抽象为主存储到镜像仓库的同步机制。",
     "context_shape": "prepared_project_environment",
-    "source_project_id": "builderz_labs_mission_control",
     "source_kind": "feature_iteration",
     "expected_capabilities": [
       "codebase_reading",

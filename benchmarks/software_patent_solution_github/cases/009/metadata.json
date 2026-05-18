@@ -1,45 +1,66 @@
 {
-  "case_id": "009",
+  "id": "009",
   "title": "Agent workspace 中多模态文件读取与模型输出转换机制",
-  "project_id": "cloudflare_agents",
-  "repo": "https://github.com/cloudflare/agents",
-  "source_kind": "feature_iteration",
-  "source_pr": "https://github.com/cloudflare/agents/pull/1435",
-  "source_commit": "b197faf0ca79d9e921d2f80c5fcafe4899995d11",
-  "snapshot_commit": "cdf203a799e97f8d8bdc5409622b99e499f8c57d",
-  "date": "2026-05-01",
-  "difficulty": "medium",
-  "difficulty_score": 3,
-  "difficulty_reason": "多模态 workspace read 主要围绕文件类型探测、文本读取、多模态输出转换和大小限制，机制完整但边界清楚，适合作为中等难度样本。",
-  "domain_tags": [
-    "agent",
-    "workspace",
-    "multimodal",
-    "file-tools",
-    "media-detection"
-  ],
+  "benchmark_id": "software_patent_solution_github",
+  "case_version": "1.0.0",
+  "snapshot_version": "1.0.0",
+  "rubric_version": "1.0.0",
+  "status": "active",
+  "source": {
+    "repo": "cloudflare/agents",
+    "repo_url": "https://github.com/cloudflare/agents",
+    "issue_urls": [],
+    "pr_urls": [
+      "https://github.com/cloudflare/agents/pull/1435"
+    ],
+    "solution_merge_commit": "b197faf0ca79d9e921d2f80c5fcafe4899995d11"
+  },
+  "project": {
+    "source_project_id": "cloudflare_agents",
+    "primary_language": "TypeScript",
+    "frameworks": [
+      "Cloudflare Workers",
+      "Durable Objects"
+    ],
+    "excluded_paths": [
+      "PR #1435 final implementation"
+    ]
+  },
+  "case": {
+    "difficulty": "medium",
+    "difficulty_score": 3,
+    "difficulty_reason": "多模态 workspace read 主要围绕文件类型探测、文本读取、多模态输出转换和大小限制，机制完整但边界清楚，适合作为中等难度样本。",
+    "context_shape": "prepared_project_environment",
+    "source_kind": "feature_iteration",
+    "expected_capabilities": [
+      "codebase_reading",
+      "requirement_understanding",
+      "technical_problem_abstraction",
+      "technical_architecture_design",
+      "multimodal_io_design",
+      "workspace_abstraction_analysis",
+      "software_patent_solution_generation"
+    ],
+    "tags": [
+      "agent",
+      "workspace",
+      "multimodal",
+      "file-tools",
+      "media-detection"
+    ]
+  },
   "visibility": {
     "agent_visible": [
       "request.md",
       "prepared project checkout as current working directory or environment path"
     ],
-    "judge_hidden": [
+    "hidden_from_agent": [
       "reference_solution.md",
       "rubric.md",
       "metadata.json",
+      "PR #1435 final diff",
       "snapshot.json",
       "focus_paths"
     ]
-  },
-  "selection_notes": "该 case 来源于 Think workspace read 工具的能力扩展，涉及多模态文件读取、媒体类型探测、模型输出转换、大小限制和后端抽象，属于可专利化的软件机制。",
-  "context_shape": "prepared_project_environment",
-  "expected_capabilities": [
-    "codebase_reading",
-    "requirement_understanding",
-    "technical_problem_abstraction",
-    "technical_architecture_design",
-    "multimodal_io_design",
-    "workspace_abstraction_analysis",
-    "software_patent_solution_generation"
-  ]
+  }
 }

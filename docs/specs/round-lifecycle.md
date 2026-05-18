@@ -17,6 +17,8 @@
 相关文档：
 
 - [Agent 基本设计原则](../core/agent-principles.md)
+- [子 Agent 定义](../core/subagents.md)
+- [子 Agent 管道协议](../core/subagent-pipe-protocol.md)
 - [Tools 设计](../core/tools.md)
 - [Session 事件日志 Schema](session-log.md)
 - [API 设计规范](api-design.md)
@@ -182,7 +184,6 @@ user_input
 但子 agent 的权限边界是：
 
 - 可以多轮调用允许范围内的 tools
-- 可以调用 `document_read`
 - 不允许调用 `document_edit`
 - 不允许调用 `execute_subagent`
 
@@ -197,25 +198,21 @@ user_input
    - SSE 推送 `tool_call_finished`
 3. 工具结果进入子 agent 工作上下文。
 4. 子 agent 继续 loop。
-5. 子 agent 最终输出统一 envelope：
-   - `status`
-   - `summary`
-   - `proposal`
-   - `questions`
-   - `warnings`
+5. 子 agent 最终按当前协议收束。
 
 执行要求：
 
 - 子 agent 内部工具事件的 `parent_call_id` 指向主流程的 `execute_subagent` 调用。
-- 子 agent 只能调用 `document_read` 和 `exec_command`。
-- 子 agent 结束时必须返回合法 JSON envelope；不合法时本轮进入 `round_failed`。
+- 子 agent 可调用的工作工具由自身声明和执行器权限决定。
+- 子 agent 通过 `write_pipe(content)` 写入给主 agent 的内容，并通过 `finish({})` 结束；执行器合并 pipe 内容后返回给主 agent。
+- 子 agent 工具失败不必然导致整个 round 失败，应以 `execute_subagent` 的工具失败结果回填给主 agent，由主 agent 决定恢复策略。
 
 ### 子 agent 收束
 
 1. 执行器把子 agent 最终结果包装成 `execute_subagent` 的 tool result。
 2. 记录 `tool_result`，`scope=main`。
 3. SSE 推送主流程视角的 `tool_call_finished`。
-4. 主 agent 拿到这个结果，决定是否采纳 proposal。
+4. 主 agent 拿到这个结果，决定是否采纳、追问、继续拆分任务或调用 `document_edit`。
 
 ## 九、文档修改时序
 

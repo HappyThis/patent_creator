@@ -8,7 +8,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = Path(__file__).resolve().parents[3]
@@ -74,11 +74,16 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path = case_run_dir / "input_manifest.json"
 
     case_run_dir.mkdir(parents=True, exist_ok=True)
+    progress = case_progress_writer(case_run_dir=case_run_dir, case_id=case_id, run_id=run_id)
+    progress("prepare", "case run directory initialized")
     request_md = (case_dir / "request.md").read_text(encoding="utf-8")
     subject_reused = bool(args.skip_subject)
 
     if not args.skip_subject:
+        progress("prepare", "preparing project checkout", prepared_repo=str(prepared_repo))
         prepare_project_checkout(case_dir, prepared_repo)
+        progress("prepare", "project checkout prepared", prepared_repo=str(prepared_repo))
+        progress("subject", "subject agent started", max_refinement_rounds=max_refinements)
         technical_solution_md, subject_status, diagnostics = await run_subject_agent(
             case_id=case_id,
             prepared_repo=prepared_repo,
@@ -87,14 +92,29 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             max_refinements=max_refinements,
             refinement_instruction=refinement_instruction,
             round_timeout=args.round_timeout,
+            progress=progress,
         )
         write_artifact(artifact_path, technical_solution_md)
+        progress(
+            "artifact",
+            "evaluated artifact written",
+            artifact_path=str(artifact_path),
+            subject_status=subject_status,
+            artifact_extracted=has_effective_solution(technical_solution_md),
+        )
     else:
+        progress("prepare", "preparing project checkout for reused subject", prepared_repo=str(prepared_repo))
         prepare_project_checkout(case_dir, prepared_repo)
         technical_solution_md = artifact_path.read_text(encoding="utf-8")
         subject_status, diagnostics = resolve_reused_subject_state(
             technical_solution_md,
             read_existing_diagnostics(case_run_dir),
+        )
+        progress(
+            "subject",
+            "reused existing evaluated artifact",
+            subject_status=subject_status,
+            artifact_path=str(artifact_path),
         )
 
     manifest = {
@@ -118,15 +138,18 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     if subject_status in {"skipped_no_solution_artifact", "round_failed"}:
         result = {"status": subject_status, **manifest, "diagnostics": diagnostics}
         write_result(case_run_dir, result)
+        progress("result", "case ended before judge", status=subject_status, result_path=str(case_run_dir / "result.json"))
         return result
 
     if args.skip_judge:
         result_status = "artifact_extracted" if has_effective_solution(technical_solution_md) else subject_status
         result = {"status": result_status, **manifest, "diagnostics": diagnostics}
         write_result(case_run_dir, result)
+        progress("result", "case ended with judge skipped", status=result_status, result_path=str(case_run_dir / "result.json"))
         return result
 
     try:
+        progress("judge", "judge started", timeout_seconds=args.judge_timeout)
         judge_result = run_codex_judge(
             prepared_repo=prepared_repo,
             request_md=request_md,
@@ -137,18 +160,27 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             output_dir=judge_dir,
             codex_bin=args.codex_bin,
             timeout_seconds=args.judge_timeout,
+            progress=progress,
         )
     except Exception as exc:
         diagnostics["judge_failed"] = True
         write_json(case_run_dir / "diagnostics.json", diagnostics)
         result = {"status": "judge_failed", **manifest, "diagnostics": diagnostics, "judge_error": str(exc)}
         write_result(case_run_dir, result)
+        progress("judge", "judge failed", status="judge_failed", error=str(exc), result_path=str(case_run_dir / "result.json"))
         return result
 
     diagnostics["judge_failed"] = False
     write_json(case_run_dir / "diagnostics.json", diagnostics)
     result = {"status": "scored", **manifest, "diagnostics": diagnostics, "judge": judge_result}
     write_result(case_run_dir, result)
+    progress(
+        "result",
+        "case scored",
+        status="scored",
+        total_score=judge_result.get("total_score"),
+        result_path=str(case_run_dir / "result.json"),
+    )
     return result
 
 
@@ -161,6 +193,7 @@ async def run_subject_agent(
     max_refinements: int,
     refinement_instruction: str,
     round_timeout: int,
+    progress: Callable[..., None],
 ) -> tuple[str, str, dict[str, Any]]:
     backend_dir = REPO_DIR / "backend"
     if str(backend_dir) not in sys.path:
@@ -185,6 +218,7 @@ async def run_subject_agent(
     if not technical_solution:
         raise RuntimeError("技术方案章节不存在。")
     technical_solution_section_id = technical_solution["id"]
+    progress("subject", "benchmark project created", project_id=project.project_id)
 
     session_id: str | None = None
     runner_md = (BENCHMARK_DIR / "runner.md").read_text(encoding="utf-8")
@@ -203,13 +237,39 @@ async def run_subject_agent(
 
     for index, message in enumerate(messages):
         rounds_run = index + 1
+        progress("subject_round", "round request submitted", round=rounds_run, timeout_seconds=round_timeout)
         response = await services.chat.start_round(
             project.project_id,
             ChatMessageRequest(session_id=session_id, message=message, active_section_id=technical_solution_section_id),
         )
         session_id = response.session_id
+        progress("subject_round", "waiting for round completion", round=rounds_run, session_id=session_id, round_id=response.round_id)
         try:
-            await wait_for_round(services, project.project_id, timeout_seconds=round_timeout)
+            await wait_for_round(
+                services,
+                project.project_id,
+                timeout_seconds=round_timeout,
+                progress=progress,
+                round_index=rounds_run,
+            )
+        except TimeoutError as exc:
+            mark_project_idle(services, project.project_id)
+            disclosure = services.store.get_disclosure(project.project_id)
+            technical_solution_md = extract_technical_solution(disclosure)
+            artifact_after_round = subject_dir / f"technical_solution_after_round_{index + 1}.md"
+            write_artifact(artifact_after_round, technical_solution_md)
+            dump_session_events(services, project.project_id, session_id, subject_dir / "session_events.jsonl")
+            progress(
+                "subject_round",
+                "round timed out",
+                round=rounds_run,
+                timeout_seconds=round_timeout,
+                artifact_extracted=has_effective_solution(technical_solution_md),
+                artifact_path=str(artifact_after_round),
+                error=str(exc),
+            )
+            status = "round_failed"
+            break
         except BaseException:
             mark_project_idle(services, project.project_id)
             raise
@@ -218,6 +278,13 @@ async def run_subject_agent(
         write_artifact(subject_dir / f"technical_solution_after_round_{index + 1}.md", technical_solution_md)
         dump_session_events(services, project.project_id, session_id, subject_dir / "session_events.jsonl")
         events = services.store.read_session_events(project.project_id, session_id)
+        progress(
+            "subject_round",
+            "round completed",
+            round=rounds_run,
+            artifact_extracted=has_effective_solution(technical_solution_md),
+            artifact_path=str(subject_dir / f"technical_solution_after_round_{index + 1}.md"),
+        )
         if has_effective_solution(technical_solution_md):
             status = "completed" if index == 0 else "completed_after_refinement"
             break
@@ -239,14 +306,33 @@ async def run_subject_agent(
     return technical_solution_md, status, diagnostics
 
 
-async def wait_for_round(services: Any, project_id: str, *, timeout_seconds: int) -> None:
+async def wait_for_round(
+    services: Any,
+    project_id: str,
+    *,
+    timeout_seconds: int,
+    progress: Callable[..., None],
+    round_index: int,
+) -> None:
     started = time.monotonic()
+    last_progress = started
     while True:
         project = services.store.get_project(project_id)
         if not project.is_busy:
             return
-        if time.monotonic() - started > timeout_seconds:
+        now = time.monotonic()
+        elapsed = now - started
+        if elapsed > timeout_seconds:
             raise TimeoutError(f"主 agent round 超时：{timeout_seconds} 秒。")
+        if now - last_progress >= 10:
+            progress(
+                "subject_round",
+                "round still running",
+                round=round_index,
+                elapsed_seconds=int(elapsed),
+                timeout_seconds=timeout_seconds,
+            )
+            last_progress = now
         await asyncio.sleep(0.5)
 
 
@@ -357,6 +443,32 @@ def normalize_content_diagnostics(diagnostics: dict[str, Any], *, fallback_statu
 
 def write_result(case_run_dir: Path, result: dict[str, Any]) -> None:
     write_json(case_run_dir / "result.json", result)
+
+
+def case_progress_writer(*, case_run_dir: Path, case_id: str, run_id: str) -> Callable[..., None]:
+    progress_path = case_run_dir / "progress.json"
+    events_path = case_run_dir / "progress.jsonl"
+    started_at = time.monotonic()
+
+    def write_progress(phase: str, message: str, **fields: Any) -> None:
+        elapsed_seconds = round(time.monotonic() - started_at, 1)
+        payload = {
+            "case_id": case_id,
+            "run_id": run_id,
+            "phase": phase,
+            "message": message,
+            "elapsed_seconds": elapsed_seconds,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            **fields,
+        }
+        progress_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        with events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+        suffix = f" {details}" if details else ""
+        print(f"[benchmark] case={case_id} phase={phase} elapsed={elapsed_seconds:.1f}s message={message}{suffix}", flush=True)
+
+    return write_progress
 
 
 def write_json(path: Path, payload: dict[str, Any] | list[Any]) -> None:

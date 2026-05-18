@@ -4,7 +4,7 @@ from .types import AgentScope
 
 TOOL_PERMISSIONS: dict[AgentScope, frozenset[str]] = {
     "main_agent": frozenset({"document_read", "document_edit", "execute_subagent", "exec_command"}),
-    "subagent": frozenset({"document_read", "exec_command"}),
+    "subagent": frozenset({"document_read", "exec_command", "write_pipe", "finish"}),
 }
 
 

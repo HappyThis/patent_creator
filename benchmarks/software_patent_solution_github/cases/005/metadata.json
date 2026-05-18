@@ -9,8 +9,6 @@
   "source": {
     "repo": "cloudflare/agents",
     "repo_url": "https://github.com/cloudflare/agents",
-    "snapshot_commit": "5373f5ca246e756c8c36df915380fbc5319c5162",
-    "snapshot_date": "2026-05-12",
     "issue_urls": [],
     "pr_urls": [
       "https://github.com/cloudflare/agents/pull/1511"
@@ -27,22 +25,6 @@
       "SQLite",
       "React"
     ],
-    "snapshot_descriptor": "snapshot.json",
-    "runtime_checkout_dir": "repo",
-    "focus_paths": [
-      "packages/think/src/think.ts",
-      "packages/think/src/tests/agents/think-session.ts",
-      "packages/agents/src/observability/agent.ts",
-      "packages/agents/src/observability/base.ts",
-      "packages/agents/src/observability/index.ts",
-      "docs/server-driven-messages.md",
-      "docs/think/client-tools.md",
-      "docs/think/index.md",
-      "docs/webhooks.md",
-      "docs/workflows.md",
-      "design/think.md",
-      "design/README.md"
-    ],
     "excluded_paths": [
       "PR #1511 final implementation",
       "design/think-durable-submissions.md from PR #1511",
@@ -56,7 +38,6 @@
     "difficulty_score": 5,
     "difficulty_reason": "Durable submissions 需要设计持久提交 ledger、幂等键、后台领取、Session 消息应用边界、恢复判定、取消和终态更新，是深 runtime 状态机问题。",
     "context_shape": "prepared_project_environment",
-    "source_project_id": "cloudflare_agents",
     "source_kind": "feature_iteration",
     "expected_capabilities": [
       "codebase_reading",

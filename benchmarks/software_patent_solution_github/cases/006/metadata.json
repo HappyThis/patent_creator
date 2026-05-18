@@ -9,8 +9,6 @@
   "source": {
     "repo": "cloudflare/agents",
     "repo_url": "https://github.com/cloudflare/agents",
-    "snapshot_commit": "7090e9eec337ae1496afce1a544044d9c765a021",
-    "snapshot_date": "2026-05-11",
     "issue_urls": [],
     "pr_urls": [
       "https://github.com/cloudflare/agents/pull/1484"
@@ -27,17 +25,6 @@
       "React",
       "WebSocket"
     ],
-    "snapshot_descriptor": "snapshot.json",
-    "runtime_checkout_dir": "repo",
-    "focus_paths": [
-      "packages/ai-chat/src/ws-chat-transport.ts",
-      "packages/ai-chat/src/react.tsx",
-      "packages/ai-chat/src/tests/ws-transport-abort.test.ts",
-      "packages/ai-chat/src/tests/ws-transport-resume.test.ts",
-      "docs/resumable-streaming.md",
-      "docs/chat-agents.md",
-      "packages/ai-chat/README.md"
-    ],
     "excluded_paths": [
       "PR #1484 final implementation",
       "packages/ai-chat/src/tests/ws-transport-cancellation-policy.test.ts from PR #1484",
@@ -49,7 +36,6 @@
     "difficulty_score": 3,
     "difficulty_reason": "取消语义解耦聚焦在客户端 stream 生命周期与服务端 turn 生命周期，虽然要兼容 resume 和工具 continuation，但技术面相对集中。",
     "context_shape": "prepared_project_environment",
-    "source_project_id": "cloudflare_agents",
     "source_kind": "feature_iteration",
     "expected_capabilities": [
       "codebase_reading",

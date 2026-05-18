@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from openai import APIError, APIStatusError, AsyncOpenAI
+import httpcore
+import httpx
+from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 
 from ...core import ApiError, Settings
 from .model_profiles import resolve_model_profile
 
 logger = logging.getLogger("patent_creator.llm")
+
+TRANSIENT_STREAM_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.RemoteProtocolError,
+    httpcore.ConnectError,
+    httpcore.ReadError,
+    httpcore.RemoteProtocolError,
+)
 
 
 class OpenAICompatibleClient:
@@ -119,36 +133,85 @@ class OpenAICompatibleClient:
             tool_names,
             len(messages),
         )
-        started = time.monotonic()
-        try:
-            profile = resolve_model_profile(self.settings)
-            request_payload: dict[str, Any] = {
-                "model": self.settings.openai_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    *profile.prepare_messages_for_request(messages),
-                ],
-                "tools": tools,
-                "tool_choice": "auto",
-                "stream": True,
-            }
-            profile.apply_chat_parameters(request_payload)
-            if response_format_json:
-                request_payload["response_format"] = {"type": "json_object"}
-            stream = await client.chat.completions.create(
-                **request_payload,
-            )
-        except APIStatusError as exc:
-            logger.warning(
-                "generate_with_tools_stream http_error status=%s body=%s",
-                exc.status_code,
-                _describe_api_error(exc),
-            )
-            raise ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}") from exc
-        except APIError as exc:
-            logger.warning("generate_with_tools_stream api_error %s", exc)
-            raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
+        profile = resolve_model_profile(self.settings)
+        request_payload: dict[str, Any] = {
+            "model": self.settings.openai_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                *profile.prepare_messages_for_request(messages),
+            ],
+            "tools": tools,
+            "tool_choice": "auto",
+            "stream": True,
+        }
+        profile.apply_chat_parameters(request_payload)
+        if response_format_json:
+            request_payload["response_format"] = {"type": "json_object"}
 
+        max_attempts = max(1, self.settings.llm_max_retries + 1)
+        for attempt in range(1, max_attempts + 1):
+            text_delta_emitted = False
+
+            async def guarded_on_text_delta(delta: str) -> None:
+                nonlocal text_delta_emitted
+                text_delta_emitted = True
+                if on_text_delta is not None:
+                    await on_text_delta(delta)
+
+            try:
+                started = time.monotonic()
+                if attempt > 1:
+                    logger.info(
+                        "generate_with_tools_stream retry attempt=%d/%d model=%s",
+                        attempt,
+                        max_attempts,
+                        self.settings.openai_model,
+                    )
+                stream = await client.chat.completions.create(**request_payload)
+                return await self._consume_tools_stream(
+                    stream,
+                    started=started,
+                    on_text_delta=guarded_on_text_delta if on_text_delta is not None else None,
+                )
+            except APIStatusError as exc:
+                logger.warning(
+                    "generate_with_tools_stream http_error status=%s body=%s",
+                    exc.status_code,
+                    _describe_api_error(exc),
+                )
+                raise ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}") from exc
+            except TRANSIENT_STREAM_ERRORS as exc:
+                if text_delta_emitted or attempt >= max_attempts:
+                    logger.warning(
+                        "generate_with_tools_stream transient_error final attempt=%d/%d emitted_text=%s error=%s",
+                        attempt,
+                        max_attempts,
+                        text_delta_emitted,
+                        exc,
+                    )
+                    raise ApiError(502, "llm_stream_error", f"模型流式响应中断：{exc}") from exc
+                delay = min(2 ** (attempt - 1), 5)
+                logger.warning(
+                    "generate_with_tools_stream transient_error retrying attempt=%d/%d delay=%ss error=%s",
+                    attempt,
+                    max_attempts,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+            except APIError as exc:
+                logger.warning("generate_with_tools_stream api_error %s", exc)
+                raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
+
+        raise ApiError(502, "llm_stream_error", "模型流式响应中断。")
+
+    async def _consume_tools_stream(
+        self,
+        stream: Any,
+        *,
+        started: float,
+        on_text_delta: Callable[[str], Awaitable[None]] | None,
+    ) -> dict[str, Any]:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}

@@ -6,6 +6,7 @@ import math
 import os
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -14,6 +15,15 @@ from typing import Any
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 RUN_CASE = Path(__file__).resolve().parent / "run_case.py"
+EVALUATOR_DIR = Path(__file__).resolve().parent
+PRINT_LOCK = threading.Lock()
+if str(EVALUATOR_DIR) not in sys.path:
+    sys.path.insert(0, str(EVALUATOR_DIR))
+
+try:
+    from .process_utils import terminate_process_group  # type: ignore[import-not-found]
+except ImportError:
+    from process_utils import terminate_process_group  # type: ignore[no-redef]
 
 
 def main() -> None:
@@ -55,7 +65,7 @@ def run_jobs(jobs: list[dict[str, Any]], *, args: argparse.Namespace, runs_dir: 
 
     results: list[dict[str, Any]] = []
     print(f"running {len(jobs)} jobs with {args.workers} workers", flush=True)
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+    with ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="bench-worker") as executor:
         future_to_job = {
             executor.submit(run_one_job, job, args=args, runs_dir=runs_dir): job
             for job in jobs
@@ -71,6 +81,9 @@ def run_one_job(job: dict[str, Any], *, args: argparse.Namespace, runs_dir: Path
     case_id = str(job["case_id"])
     repeat = int(job["repeat"])
     run_id = str(job["run_id"])
+    run_label = Path(run_id).name
+    worker_label = threading.current_thread().name
+    log_prefix = f"[worker={worker_label} run={run_label} case={case_id} repeat={repeat}/{args.repeats}]"
     command = [
         sys.executable,
         str(RUN_CASE),
@@ -89,31 +102,89 @@ def run_one_job(job: dict[str, Any], *, args: argparse.Namespace, runs_dir: Path
         command.append("--skip-judge")
     child_env = os.environ.copy()
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
-    print(f"\n=== case {case_id} repeat {repeat}/{args.repeats} ===", flush=True)
-    completed = subprocess.run(
+    with PRINT_LOCK:
+        print(f"\n=== {log_prefix} started ===", flush=True)
+    process = subprocess.Popen(
         command,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
         env=child_env,
-        check=False,
+        start_new_session=True,
     )
-    parsed_result = parse_case_result(completed.stdout)
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    stdout_thread = threading.Thread(
+        target=stream_pipe,
+        args=(process.stdout, stdout_chunks, sys.stdout, f"{log_prefix} stdout"),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=stream_pipe,
+        args=(process.stderr, stderr_chunks, sys.stderr, f"{log_prefix} stderr"),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    try:
+        returncode = process.wait()
+    except BaseException:
+        terminate_process_group(process)
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        raise
+    stdout_thread.join()
+    stderr_thread.join()
+    stdout = "".join(stdout_chunks)
+    stderr = "".join(stderr_chunks)
+    case_run_dir = runs_dir / run_id / "cases" / case_id
+    stdout_path = write_text_if_present(case_run_dir / "run_case_stdout.txt", stdout)
+    stderr_path = write_text_if_present(case_run_dir / "run_case_stderr.txt", stderr)
+    parsed_result = read_case_result(case_run_dir) or parse_case_result(stdout)
+    with PRINT_LOCK:
+        print(f"=== {log_prefix} finished returncode={returncode} ===", flush=True)
     result = {
         "case_id": case_id,
         "repeat": repeat,
         "run_id": run_id,
-        "returncode": completed.returncode,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
+        "log_prefix": log_prefix,
+        "returncode": returncode,
+        "stdout_path": str(stdout_path) if stdout_path else None,
+        "stderr_path": str(stderr_path) if stderr_path else None,
         "result": parsed_result,
         "diagnostics": parsed_result.get("diagnostics") if isinstance(parsed_result, dict) else None,
     }
-    print(completed.stdout)
-    if completed.returncode != 0:
-        print(completed.stderr, file=sys.stderr)
     return result
+
+
+def read_case_result(case_run_dir: Path) -> dict[str, Any] | None:
+    result_path = case_run_dir / "result.json"
+    if not result_path.exists():
+        return None
+    try:
+        value = json.loads(result_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def write_text_if_present(path: Path, text: str) -> Path | None:
+    if not text:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def stream_pipe(pipe: Any, chunks: list[str], target: Any, prefix: str) -> None:
+    if pipe is None:
+        return
+    for line in pipe:
+        chunks.append(line)
+        with PRINT_LOCK:
+            print(f"{prefix} {line}", end="", file=target, flush=True)
 
 
 def parse_case_result(stdout: str | None) -> dict[str, Any] | None:

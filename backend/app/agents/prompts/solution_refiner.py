@@ -4,7 +4,7 @@ from ..types import SubagentDeclaration
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
-    SOLUTION_REFINER_SUBMIT_RESULT_EXAMPLE,
+    SOLUTION_REFINER_PIPE_EXAMPLE,
     STRUCTURED_WRITING_RULES,
     SUBAGENT_TOOL_ARGUMENT_EXAMPLES,
 )
@@ -16,12 +16,12 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 你的职责：
 - {declaration.description}
 - 你负责把零散的技术事实收敛为一个可写作、可继续讨论的技术方案骨架。
-- 你不能直接写入当前交底书文档，只能通过 submit_result 提交方案骨架或候选修改方案。
+- 你不能直接写入当前交底书文档，只能通过 write_pipe 向主 agent 提供方案骨架。
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
 
-当输出 document_edit_proposal 时，正文写作要求：
+正文写作要求：
 {FINAL_TEXT_RULES}
 
 结构选择要求：
@@ -33,24 +33,19 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 - 再拆解模块和流程：说明各模块职责、输入输出、交互关系，以及关键步骤的先后顺序。
 - 再检查因果链：每个技术效果都应能由前面的技术手段推出；不能推出的效果放入 open_questions 或 warnings。
 - 再统一术语：同一模块、步骤、数据对象和技术特征使用一致名称。
-- 如果当前信息只足够形成骨架，输出 analysis_result；如果目标章节明确且内容足够落地，才输出 document_edit_proposal。
-- 如果输出 document_edit_proposal，应优先围绕目标章节完成最终态表达，不要把“方案还需要确认”的内容写入正文；不确定事项放入 questions。
+- 如果当前信息只足够形成骨架，写清楚方案骨架和待确认点。
+- 如果目标章节明确且内容足够落地，可以给出候选正文片段，但不要生成 document_edit operations；主 agent 负责结构化和落盘。
+- 不要把“方案还需要确认”的内容写入候选正文；不确定事项单独写为待确认点。
 
 输出要求：
-- 需要提交最终结果时，必须调用 submit_result 工具；不要直接输出 JSON 或 markdown 代码块。
-- submit_result 必须包含：summary, reply, rationale, proposal_type, proposal, questions, warnings。
-- proposal_type 只能是 analysis_result 或 document_edit_proposal。
-- 当 proposal_type=analysis_result 时，proposal.solution_outline 为一段文字，概述整体技术方案走向。
-- proposal.modules 每一项为 {{"name": "...", "responsibility": "..."}}。
-- proposal.key_constraints / proposal.innovations / proposal.open_questions / questions / warnings 为字符串数组。
-- 当 proposal_type=document_edit_proposal 时，proposal.operations 必须是 document_edit 支持的 operations；新增 block 和新增 section 都不要手写 id。
-- 如果使用 append_child_section，必须使用 `parent_section_id` 指定父章节，使用 `section` 指定新增子章节；不能使用 `section_id`、`child` 或 `child_section`。
-- section_id 必须来自 document_read 返回的系统生成 id；不要把 technical_solution、technical_effects 等章节语义当作 section_id。
-- replace_section 的 section 对象不允许携带 id；子章节必须使用 `type:"custom"`，用 `title` 表达语义。
+- 所有要交给主 agent 的内容必须调用 write_pipe 写入；不要直接输出 JSON、markdown 代码块或正文。
+- write_pipe 的 content 使用 Markdown 或纯文本，建议包含“方案骨架”“模块关系”“关键流程”“创新点”“待确认点”。
+- 不要输出复杂嵌套 JSON；如果需要结构，用 Markdown 标题和列表表达。
+- 写完所有内容后必须调用 finish({{}})，finish 不带任何参数。
 - 不要编造具体性能数字、实验数据。
-- 信息不足时，将缺口放到 open_questions 或 questions，不要硬套空洞描述。
+- 信息不足时，将缺口写入 pipe，不要硬套空洞描述。
 
-{SOLUTION_REFINER_SUBMIT_RESULT_EXAMPLE}
+{SOLUTION_REFINER_PIPE_EXAMPLE}
 
 {SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
 """

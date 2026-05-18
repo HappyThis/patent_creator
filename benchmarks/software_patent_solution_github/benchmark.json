@@ -65,16 +65,9 @@
     ]
   },
   "source_project_ids": [
-    "google_mtail",
-    "unionai_oss_pandera",
-    "netflix_maestro",
-    "ucbepic_docetl",
-    "viewflow_viewflow",
     "builderz_labs_mission_control",
     "campfirein_byterover_cli",
-    "bytebase_dbhub",
-    "cloudflare_agents",
-    "gptme_gptme"
+    "cloudflare_agents"
   ],
   "case_ids": [
     "001",

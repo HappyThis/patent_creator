@@ -9,8 +9,6 @@
   "source": {
     "repo": "builderz-labs/mission-control",
     "repo_url": "https://github.com/builderz-labs/mission-control",
-    "snapshot_commit": "7ba1e7765779d8e1e7724df68675a1cb89c42380",
-    "snapshot_date": "2026-03-23",
     "issue_urls": [],
     "pr_urls": [
       "https://github.com/builderz-labs/mission-control/pull/487"
@@ -26,18 +24,6 @@
       "SQLite",
       "MCP"
     ],
-    "snapshot_descriptor": "snapshot.json",
-    "runtime_checkout_dir": "repo",
-    "focus_paths": [
-      "src/lib/spawn-history.ts",
-      "src/lib/event-bus.ts",
-      "src/lib/migrations.ts",
-      "scripts/mc-mcp-server.cjs",
-      "src/app/api/agents/evals/route.ts",
-      "src/app/api/tasks/outcomes/route.ts",
-      "src/app/api/tasks/regression/route.ts",
-      "src/app/api/tasks/route.ts"
-    ],
     "excluded_paths": [
       "PR #487 final implementation",
       "src/lib/runs.ts from PR #487",
@@ -50,7 +36,6 @@
     "difficulty_score": 4,
     "difficulty_reason": "统一运行记录机制覆盖数据模型、provenance、eval 附着、事件流、API 和 MCP 工具访问，跨面较广；但本质是结构化观测与评估沉淀，状态恢复压力不如最高档。",
     "context_shape": "prepared_project_environment",
-    "source_project_id": "builderz_labs_mission_control",
     "source_kind": "feature_iteration",
     "expected_capabilities": [
       "codebase_reading",

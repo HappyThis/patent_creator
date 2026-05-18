@@ -344,32 +344,7 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
     "status": "success",
     "output": {
       "agent_id": "material_analyst",
-      "result": {
-        "status": "success",
-        "summary": "已提炼出技术方向和待确认问题。",
-        "proposal": {
-          "type": "analysis_result",
-          "facts": [
-            {
-              "kind": "technical_direction",
-              "text": "当前主题可归纳为图像检测方向。"
-            }
-          ],
-          "candidate_terms": [
-            "图像检测"
-          ],
-          "recommended_next_actions": [
-            {
-              "action": "ask_user",
-              "question": "是否强调低算力实时性？"
-            }
-          ]
-        },
-        "questions": [
-          "是否强调低算力实时性？"
-        ],
-        "warnings": []
-      }
+      "content": "## 技术方向\n\n- 当前主题可归纳为图像检测方向。\n\n## 待确认问题\n\n- 是否强调低算力实时性？"
     }
   }
 }
@@ -437,7 +412,11 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 {"id":"evt_000002","ts":"2026-04-23T15:30:10+08:00","type":"tool_call","seq":2,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","arguments":{"agent_id":"material_analyst","goal":"从当前用户输入中提炼技术方向、目标和待确认信息。"}}}
 {"id":"evt_000003","ts":"2026-04-23T15:30:11+08:00","type":"tool_call","seq":3,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","arguments":{"action":"get_outline"}}}
 {"id":"evt_000004","ts":"2026-04-23T15:30:11+08:00","type":"tool_result","seq":4,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000002","parent_call_id":"call_000001","payload":{"tool":"document_read","status":"success","output":{"sections":[]}}}
-{"id":"evt_000005","ts":"2026-04-23T15:30:12+08:00","type":"tool_result","seq":5,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","status":"success","output":{"agent_id":"material_analyst","result":{"status":"success","summary":"已提炼出技术方向和待确认问题。","proposal":{"type":"analysis_result","facts":[{"kind":"technical_direction","text":"当前主题可归纳为图像检测方向。"}],"candidate_terms":["图像检测"],"recommended_next_actions":[]},"questions":["是否强调低算力实时性？"],"warnings":[]}}}}
+{"id":"evt_000005","ts":"2026-04-23T15:30:12+08:00","type":"tool_call","seq":5,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000003","parent_call_id":"call_000001","payload":{"tool":"write_pipe","arguments":{"content":"## 技术方向\n\n- 当前主题可归纳为图像检测方向。\n\n## 待确认问题\n\n- 是否强调低算力实时性？"}}}
+{"id":"evt_000006","ts":"2026-04-23T15:30:12+08:00","type":"tool_result","seq":6,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000003","parent_call_id":"call_000001","payload":{"tool":"write_pipe","status":"success","output":{"status":"ok","part_index":1,"written_chars":52,"total_chars":52,"stored_preview":"## 技术方向\n\n- 当前主题可归纳为图像检测方向。\n\n## 待确认问题\n\n- 是否强调低算力实时性？","next":"如果还有内容，继续调用 write_pipe；如果已经完成，调用 finish({})。"}}}
+{"id":"evt_000007","ts":"2026-04-23T15:30:13+08:00","type":"tool_call","seq":7,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000004","parent_call_id":"call_000001","payload":{"tool":"finish","arguments":{}}}
+{"id":"evt_000008","ts":"2026-04-23T15:30:13+08:00","type":"tool_result","seq":8,"scope":"subagent:material_analyst","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000004","parent_call_id":"call_000001","payload":{"tool":"finish","status":"success","output":{"status":"done","parts":1,"total_chars":52}}}
+{"id":"evt_000009","ts":"2026-04-23T15:30:13+08:00","type":"tool_result","seq":9,"scope":"main","round_id":"round_000001","message_id":"msg_000001","call_id":"call_000001","parent_call_id":null,"payload":{"tool":"execute_subagent","status":"success","output":{"agent_id":"material_analyst","content":"## 技术方向\n\n- 当前主题可归纳为图像检测方向。\n\n## 待确认问题\n\n- 是否强调低算力实时性？"}}}
 ```
 
 ## 十一、设计结论

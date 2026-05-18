@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 
-from app.agents import get_subagent
+from app.agents import SUBAGENTS, get_subagent
 from app.agents.prompts import build_main_agent_system_prompt, build_section_writer_system_prompt
 from app.agents.prompts.consistency_reviewer import build_consistency_reviewer_system_prompt
-from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_split_main_agent_system_prompt
+from app.agents.prompts.main_agent import (
+    build_main_agent_system_prompt as build_split_main_agent_system_prompt,
+    render_subagent_catalog,
+)
 from app.agents.prompts.material_analyst import build_material_analyst_system_prompt
 from app.agents.prompts.section_writer import build_section_writer_system_prompt as build_split_section_writer_system_prompt
 from app.agents.prompts.solution_refiner import build_solution_refiner_system_prompt
@@ -84,9 +87,10 @@ def test_subagent_prompts_use_model_visible_context_and_document_rules() -> None
 def test_solution_refiner_document_edit_prompt_uses_final_text_and_structure_rules() -> None:
     prompt = build_solution_refiner_system_prompt(get_subagent("solution_refiner"))
 
-    assert "当输出 document_edit_proposal 时" in prompt
+    assert "正文写作要求" in prompt
     assert "交底书正文必须是最终态文本" in prompt
     assert "章节负责结构，block 负责具体正文" in prompt
+    assert "不要生成 document_edit operations" in prompt
 
 
 def test_subagent_prompts_define_task_execution_methods() -> None:
@@ -98,7 +102,7 @@ def test_subagent_prompts_define_task_execution_methods() -> None:
     assert "可从上下文合理归纳的技术关系" in material_prompt
     assert "不要把推断写成事实" in material_prompt
     assert "technical_problem" in material_prompt
-    assert "recommended_next_actions" in material_prompt
+    assert "建议下一步" in material_prompt
 
     assert "技术问题和约束" in solution_prompt
     assert "核心技术手段" in solution_prompt
@@ -110,14 +114,23 @@ def test_subagent_prompts_define_task_execution_methods() -> None:
     assert "术语一致性" in reviewer_prompt
     assert "问题-方案闭环" in reviewer_prompt
     assert "方案-效果因果链" in reviewer_prompt
-    assert "severity 取值规则" in reviewer_prompt
+    assert "severity" in reviewer_prompt
 
 
 def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> None:
     prompt = build_main_agent_system_prompt()
 
     assert "你具备写作能力" in prompt
-    assert "复杂章节写作" in prompt
+    assert "完整章节规划" in prompt
+    assert "可用子 agent 清单" in prompt
+    assert "选择子 agent 时，必须依据下方" in prompt
+    assert render_subagent_catalog() in prompt
+    for declaration in SUBAGENTS.values():
+        assert declaration.id in prompt
+        assert declaration.description in prompt
+        assert declaration.input_expectation in prompt
+        assert declaration.output_contract in prompt
+        assert declaration.usage_guidance in prompt
     assert "短小、明确、低创造性的最终态正文编辑" in prompt
     assert "默认上下文不包含项目标题、目录树或完整正文" in prompt
     assert "document_read(action=get_project_context)" in prompt
@@ -149,23 +162,37 @@ def test_exec_command_metadata_uses_current_platform() -> None:
     assert profile.examples[0] in prompt
 
 
-def test_section_writer_context_prefers_children_for_complex_sections() -> None:
+def test_section_writer_is_limited_to_lightweight_local_writing() -> None:
     prompt = build_section_writer_system_prompt(get_subagent("section_writer"))
 
-    assert "replace_section" in prompt
-    assert "使用 replace_section 生成 section.children" in prompt
+    assert "轻量局部写作任务" in prompt
+    assert "不是整章技术方案生成器" in prompt
+    assert "一般不超过 800 个中文字符" in prompt
+    assert "不要生成 document_edit operations" in prompt
+    assert "不要用 replace_section 生成包含多个 children 的完整标准章节" in prompt
     assert "最终态文本" in prompt
 
 
 def test_append_child_section_protocol_is_single_shape() -> None:
-    prompt = build_section_writer_system_prompt(get_subagent("section_writer"))
     document_edit = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "document_edit")
     operations_description = document_edit["function"]["parameters"]["properties"]["operations"]["description"]
 
-    assert "parent_section_id" in prompt
-    assert "append_child_section 必须使用 `parent_section_id`" in prompt
-    assert "不能使用 `section_id`、`child` 或 `child_section`" in prompt
     assert "append_child_section 必须使用 parent_section_id 和 section" in operations_description
+
+
+def test_subagent_prompts_use_pipe_protocol() -> None:
+    prompts = [
+        build_section_writer_system_prompt(get_subagent("section_writer")),
+        build_material_analyst_system_prompt(get_subagent("material_analyst")),
+        build_solution_refiner_system_prompt(get_subagent("solution_refiner")),
+        build_consistency_reviewer_system_prompt(get_subagent("consistency_reviewer")),
+    ]
+
+    for prompt in prompts:
+        assert "write_pipe" in prompt
+        assert "finish({})" in prompt
+        assert "submit_result" not in prompt
+        assert "proposal_type" not in prompt
 
 
 def test_execute_subagent_schema_only_uses_agent_id_and_goal() -> None:
@@ -174,6 +201,21 @@ def test_execute_subagent_schema_only_uses_agent_id_and_goal() -> None:
 
     assert params["required"] == ["agent_id", "goal"]
     assert set(params["properties"]) == {"agent_id", "goal"}
+    assert params["properties"]["agent_id"]["enum"] == list(SUBAGENTS)
+    for declaration in SUBAGENTS.values():
+        assert declaration.id in tool["function"]["description"]
+        assert declaration.description in tool["function"]["description"]
+        assert declaration.input_expectation in tool["function"]["description"]
+        assert declaration.output_contract in tool["function"]["description"]
+        assert declaration.usage_guidance in tool["function"]["description"]
+
+
+def test_subagent_tool_schema_uses_pipe_protocol() -> None:
+    tool_names = [tool["function"]["name"] for tool in SUBAGENT_TOOLS]
+
+    assert "write_pipe" in tool_names
+    assert "finish" in tool_names
+    assert "submit_result" not in tool_names
 
 
 def test_barrier_renderer_outputs_user_messages() -> None:

@@ -424,95 +424,45 @@
 
 既然子 agent 在调用层被视为一种特殊工具，那么它必须有统一的标准输出。
 
-输出协议固定为：
+当前输出协议固定为 pipe：
 
-- `status`
-- `summary`
-- `proposal`
-- `questions`
-- `warnings`
+- `write_pipe(content)`：写入要给主 agent 阅读的内容。
+- `finish({})`：结束本次子 agent run。
 
-### 1. status
+### 1. write_pipe
 
-`status` 表示本次执行的最终状态。
+`write_pipe` 是唯一内容通道。
 
-`status` 固定取值：
-
-- `success`
-- `failed`
-
-### 2. summary
-
-`summary` 是给主 agent 阅读的简短结论。
-
-### 3. proposal
-
-`proposal` 是结构化结果。
-
-支持类型：
-
-- `document_edit_proposal`
-- `analysis_result`
-- `review_report`
-
-### 4. questions
-
-`questions` 用于表达需要用户或主 agent 补充确认的信息。
-
-### 5. warnings
-
-`warnings` 用于表达风险、假设和不确定性。
-
-成功示例：
+参数：
 
 ```json
 {
-  "status": "success",
-  "summary": "已生成技术方案章节候选正文。",
-  "proposal": {
-    "type": "document_edit_proposal",
-    "target_section_id": "sec_000007",
-    "intent": "replace_section_blocks",
-    "confidence": 0.84,
-    "rationale": "目标章节适合整体写入候选 blocks。",
-    "operations": [
-      {
-        "op": "replace_section_blocks",
-        "section_id": "sec_000007",
-        "blocks": [
-          {
-            "type": "paragraph",
-            "text": "本发明提供一种图像检测方法。"
-          }
-        ]
-      }
-    ]
-  },
-  "questions": [],
-  "warnings": []
+  "content": "## 候选正文\n\n本发明提供一种图像检测方法。"
 }
 ```
 
-失败示例：
+规则：
+
+1. `content` 必须是字符串。
+2. 内容可以是 Markdown 或纯文本。
+3. 鼓励少量多次写入。
+4. 子 agent 不通过普通 assistant 文本向主 agent 交付结果。
+5. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
+
+### 2. finish
+
+`finish` 是唯一显式结束信号。
 
 ```json
-{
-  "status": "failed",
-  "summary": "当前信息不足，无法完成技术方案收敛。",
-  "proposal": null,
-  "questions": [
-    "请补充现有技术缺陷描述。"
-  ],
-  "warnings": []
-}
+{}
 ```
 
 说明：
 
-- 外层协议固定
-- 内层 `proposal.type` 区分具体结果类型
-- `document_edit_proposal.operations` 只是候选修改
-- 主 agent 负责决定是否采纳候选修改
+- `finish` 不接收任何业务内容。
+- 子 agent 需要先把结果、风险或待确认问题写入 pipe，再调用 `finish({})`。
+- 执行器收到 `finish({})` 后，将 pipe 内容用 `\n` 拼接为 `execute_subagent.output.content`。
+- 主 agent 负责阅读 content，决定是否采纳、追问、继续拆分任务或调用 `document_edit`。
 ## 十一、主 Agent 的推荐 prompt 结构
 
 主 agent 的 prompt 可按以下结构组织：

@@ -1,10 +1,15 @@
 {
-  "repo": "https://github.com/cloudflare/agents",
-  "owner": "cloudflare",
-  "name": "agents",
-  "snapshot_commit": "06fb49b47ac19bd93d0a1064a03839d1187cb170",
-  "snapshot_policy": "checkout_commit_before_solution",
-  "checkout_hint": "git clone https://github.com/cloudflare/agents.git && git checkout 06fb49b47ac19bd93d0a1064a03839d1187cb170",
+  "snapshot_version": "1.0.0",
+  "type": "git_checkout",
+  "repo": "cloudflare/agents",
+  "repo_url": "https://github.com/cloudflare/agents",
+  "commit": "06fb49b47ac19bd93d0a1064a03839d1187cb170",
+  "date": "2026-04-30",
+  "checkout_policy": {
+    "fetch_depth": 1,
+    "include_submodules": false,
+    "materialize_directory": "repo"
+  },
   "focus_paths": [
     "packages/agents/src/index.ts",
     "packages/agents/src/react.tsx",
@@ -17,6 +22,5 @@
     "docs/server-driven-messages.md",
     "examples/agents-as-tools/src/server.ts",
     "examples/agents-as-tools/src/client.tsx"
-  ],
-  "notes": "测试时 snapshot.json 和 focus_paths 仅用于 runner 准备项目环境与维护复核，不作为文本输入提供给 agent；agent 只接收 runner.md、request.md 以及当前工作目录或环境路径。"
+  ]
 }

@@ -26,8 +26,6 @@
 
 P0：
 
-- `benchmark-golden-cases`：黄金 case 不足。目前只有 `001` 完整跑通，尚不能判断技术方案生成能力是否稳定提升。需要至少完成 3 个高质量黄金 case，并跑通完整 subject + Codex-as-judge 链路。
-  - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
 - `solution-quality-validation`：技术方案质量验证不足。系统已经能产出技术方案，但还没有足够样本证明它能稳定生成合理、可实施、具备保护价值的方案。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
 
@@ -35,7 +33,13 @@ P1：
 
 - `case-selection-quality-gate`：case 筛选标准需要继续落实。需要避免 bug fix、小补丁、过细需求或已经暴露技术手段的需求进入核心 benchmark。
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
-- `section-writer-submit-result`：`section_writer` 子 agent 仍可能直接回复文本，而不是调用 `submit_result`，导致主 agent 只能把子 agent 调用视为失败后自行恢复。
+- `benchmark-failed-cases`：全量首轮中 `005`、`007` 仍需单独排查和复跑；复杂 case 在并发下可能需要更高 timeout 或低并发策略。
+  - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
+- `subagent-task-boundary`：主 agent 仍可能把过重、多段、整章级写作任务交给 `section_writer`，导致轻量子 agent 边界失效，增加超时风险。
+  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
+- `subagent-overreading-compression`：`material_analyst` 等子 agent 在复杂 case 中可能过度读取项目上下文，触发多次上下文压缩，并暴露压缩结果校验失败风险。
+  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
+- `late-artifact-write`：主 agent 可能在长时间阅读和多次子 agent 调用后才写入 `technical_solution`，一旦 round 超时就没有可评测 artifact。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
 - `tool-failure-recovery`：工具失败后的恢复策略不稳定。主 agent 曾在 `document_edit` 参数错误后通过 `exec_command` 查找内部 `disclosure.json`，而不是优先修正同一工具调用重试。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
@@ -53,3 +57,5 @@ P2：
 - `append-child-section-contract`：`append_child_section` 参数协议已统一。
 - `duplicate-section-id`：章节 id 语义混用问题已通过 v2 文档结构解决。
 - `benchmark-runtime-error-diagnostics`：技术方案 benchmark 已改为只评价最终技术方案内容，不再统计可恢复过程异常。
+- `section-writer-submit-result`：旧的 `submit_result` 结构化提交协议已移除，子 agent 当前统一通过 `write_pipe(content)` + `finish({})` 交付结果。
+- `benchmark-golden-cases`：`001`、`002`、`003` 已跑通完整 subject + Codex-as-judge 链路，满足至少 3 个黄金 case 的最低闭环要求。

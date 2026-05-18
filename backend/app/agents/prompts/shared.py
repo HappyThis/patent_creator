@@ -19,14 +19,19 @@ SUBAGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
   {"action":"search_blocks","query":"消息平台"}
 - exec_command 执行诊断命令：
   {"command":"__PLATFORM_COMMAND_EXAMPLE__","timeout":30}
-- submit_result 提交最终结果：
-  {"summary":"已完成任务。","reply":"已整理结果。","rationale":"基于当前上下文整理。","proposal_type":"analysis_result","proposal":{},"questions":[],"warnings":[]}
+- write_pipe 写入一小段结果内容：
+  {"content":"这里写入一小段要交给主 agent 的 markdown 或纯文本。"}
+- finish 结束本次子 agent run：
+  {}
 
 工具调用要求：
 - 调用工具时，arguments 必须是严格 JSON 对象。
 - JSON 字符串必须使用双引号；不能使用单引号、注释、尾随逗号或未转义换行。
 - 中文正文中的双引号、反斜杠和换行必须正确转义。
-- 最终结果必须通过 submit_result 工具提交，不要直接回复 JSON 或正文。
+- 所有要展示给主 agent 的内容都必须通过 write_pipe 写入。
+- write_pipe 鼓励少量多次，避免一次写入巨大内容。
+- 工作完成后必须调用 finish，且 finish 的 arguments 必须是空对象 {}。
+- 不要直接回复 JSON、markdown 或正文；直接回复不会被视为完成。
 __PLATFORM_EXEC_COMMAND_GUIDANCE__
 """.replace("__PLATFORM_COMMAND_EXAMPLE__", _EXEC_COMMAND_FIRST_EXAMPLE).replace(
     "__PLATFORM_EXEC_COMMAND_GUIDANCE__",
@@ -51,10 +56,6 @@ MAIN_AGENT_TOOL_ARGUMENT_EXAMPLES = """工具调用参数 JSON 示例：
   {"operations":[{"op":"append_block","section_id":"sec_000007","block":{"type":"paragraph","text":"这里写入追加段落。"}}]}
 - document_edit 追加子章节：
   {"operations":[{"op":"append_child_section","parent_section_id":"sec_000007","section":{"type":"custom","title":"关键模块","blocks":[{"type":"paragraph","text":"这里写入子章节正文。"}],"children":[]}}]}
-- execute_subagent 调度章节写作：
-  {"agent_id":"section_writer","goal":"基于已继承的上下文，为“技术方案”章节生成最终态候选正文，并通过 proposal.operations 指定写入的 section_id。"}
-- execute_subagent 调度资料分析：
-  {"agent_id":"material_analyst","goal":"基于已继承的上下文，提炼用户材料中的技术问题、技术方案和技术效果。"}
 - exec_command 执行诊断命令：
   {"command":"__PLATFORM_COMMAND_EXAMPLE__","timeout":30}
 
@@ -84,7 +85,7 @@ DOCUMENT_ACCESS_RULES = """- 你会看到从调用方继承的历史 messages，
 - 默认上下文不包含项目标题和目录树；需要了解当前交底书结构时，先调用 document_read(action=get_project_context)。
 - 如果任务依赖当前交底书原文，而上下文没有提供足够依据，先调用 document_read 读取相关章节或 block。
 - 如果不知道某个概念、术语或技术点位于哪个章节，先用 document_read 的 search_blocks 搜索，再读取相关章节。
-- 如果缺的是用户意图、真实技术事实、实施条件或取舍偏好，将缺口放入 questions；不要用猜测代替确认。"""
+- 如果缺的是用户意图、真实技术事实、实施条件或取舍偏好，将缺口写入 pipe；不要用猜测代替确认。"""
 
 
 STRUCTURED_WRITING_RULES = """- 章节负责结构，block 负责具体正文；复杂内容不要只用多个 paragraph block 平铺。
@@ -94,24 +95,25 @@ STRUCTURED_WRITING_RULES = """- 章节负责结构，block 负责具体正文；
 - 只有当修改短小、局部、没有独立标题价值时，才只使用 block，例如补一段说明、改写一个段落、补一个短列表。"""
 
 
-SECTION_WRITER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已生成候选正文。","reply":"已补充目标章节候选内容。","rationale":"根据用户诉求和当前章节内容生成。","proposal_type":"document_edit_proposal","proposal":{"intent":"replace_section_content","confidence":0.75,"operations":[{"op":"replace_section_blocks","section_id":"sec_000007","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}]},"questions":[],"warnings":[]}
-
-结构化章节示例：
-{"summary":"已生成结构化技术方案候选正文。","reply":"已补充技术方案结构化内容。","rationale":"目标章节包含整体架构和处理流程，适合拆分子章节。","proposal_type":"document_edit_proposal","proposal":{"intent":"structure_section_content","confidence":0.78,"operations":[{"op":"replace_section","section_id":"sec_000007","section":{"type":"technical_solution","title":"技术方案","blocks":[{"type":"paragraph","text":"本方案采用端侧轻量化检测架构，对输入图像进行候选区域筛选、轻量特征提取和结果校正。"}],"children":[{"type":"custom","title":"整体架构","blocks":[{"type":"paragraph","text":"系统包括图像获取模块、候选区域筛选模块、轻量推理模块和结果校正模块。"}],"children":[]},{"type":"custom","title":"处理流程","blocks":[{"type":"list","ordered":true,"items":["获取待检测图像。","筛选高价值候选区域。","对候选区域执行轻量化检测。","结合时序信息校正检测结果。"]}],"children":[]}]}}]},"questions":[],"warnings":[]}
+SECTION_WRITER_PIPE_EXAMPLE = """pipe 写入示例：
+write_pipe({"content":"## 局部候选正文\n\n系统包括图像获取模块、候选区域筛选模块、轻量推理模块和结果校正模块。图像获取模块输出当前帧及基础元数据；候选区域筛选模块根据亮度变化、边缘密度和历史检测结果筛出高价值区域；轻量推理模块仅对候选区域执行检测；结果校正模块结合相邻帧结果修正抖动。"})
+finish({})
 """
 
 
-MATERIAL_ANALYST_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已完成材料分析。","reply":"已提炼技术事实和待确认项。","rationale":"依据用户材料和当前文档提炼。","proposal_type":"analysis_result","proposal":{"facts":[{"kind":"technical_problem","text":"低算力设备上推理延迟高。"}],"candidate_terms":["低算力设备"],"recommended_next_actions":[{"action":"write_section","section_id":"sec_000006"}]},"questions":[],"warnings":[]}
+MATERIAL_ANALYST_PIPE_EXAMPLE = """pipe 写入示例：
+write_pipe({"content":"## 技术事实\n\n- technical_problem：低算力设备上完整帧推理延迟高。\n- technical_solution：先筛选候选区域，再对候选区域执行轻量检测。\n\n## 候选术语\n\n- 低算力终端\n- 候选区域筛选模块\n\n## 待确认问题\n\n- 是否存在固定摄像头或移动摄像头场景限制？"})
+finish({})
 """
 
 
-SOLUTION_REFINER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已整理技术方案骨架。","reply":"已收敛方案模块和关键约束。","rationale":"根据现有事实归纳方案结构。","proposal_type":"analysis_result","proposal":{"solution_outline":"整体方案包括采集、筛选和反馈。","modules":[{"name":"筛选模块","responsibility":"筛出高价值候选区域。"}],"key_constraints":["端侧算力有限"],"innovations":["复用时序信息降低重复推理"],"open_questions":[]},"questions":[],"warnings":[]}
+SOLUTION_REFINER_PIPE_EXAMPLE = """pipe 写入示例：
+write_pipe({"content":"## 方案骨架\n\n整体方案包括采集、候选区域筛选、轻量推理和结果校正四个阶段。\n\n## 模块关系\n\n- 采集模块：输出当前帧图像和基础元数据。\n- 筛选模块：根据历史结果和图像变化筛出高价值候选区域。\n- 推理模块：仅对候选区域执行检测。\n- 校正模块：结合相邻帧结果修正误检和抖动。"})
+finish({})
 """
 
 
-CONSISTENCY_REVIEWER_SUBMIT_RESULT_EXAMPLE = """submit_result 参数示例：
-{"summary":"已完成一致性审查。","reply":"已列出术语和逻辑问题。","rationale":"对照目标章节与上下游章节检查。","proposal_type":"review_report","proposal":{"issues":[{"severity":"medium","section_id":"sec_000010","block_id":null,"message":"技术效果未呼应实时性问题。","suggested_fix":"补充低延迟收益描述。"}]},"questions":[],"warnings":[]}
+CONSISTENCY_REVIEWER_PIPE_EXAMPLE = """pipe 写入示例：
+write_pipe({"content":"## 一致性问题\n\n- severity: medium\n  位置：技术效果章节\n  问题：低延迟效果没有对应到技术方案中的候选区域筛选机制。\n  建议：补充减少完整帧推理次数如何降低处理时延。\n\n## 风险\n\n- 当前实施例缺少输入数据流转说明。"})
+finish({})
 """
