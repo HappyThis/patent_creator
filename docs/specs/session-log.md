@@ -122,7 +122,7 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 - 子 agent 作为 `execute_subagent` 被调用。
 - 子 agent 过程通过 `scope`、`call_id` 和 `parent_call_id` 记录。
 - barrier 是上下文装配阶段的内部抽象，不作为独立 event 写入 session log。
-- `compressed_context` barrier 渲染后的 message 写入 `context_summary.compressed_messages`。
+- `compressed_context` barrier 不作为 event 单独写入；恢复 `context_summary.compressed_markdown` 时由程序追加到压缩记忆 message 后。
 - `agent_task` barrier 渲染后的 message 只进入子 agent 本次运行的 `messages`，不作为主流程 event 写入。
 
 ## 五、公共字段

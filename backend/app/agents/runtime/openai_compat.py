@@ -31,8 +31,9 @@ class OpenAICompatibleClient:
     """基于官方 openai SDK 的异步封装。
 
     - 指向 OpenAI 兼容的服务（默认 DeepSeek）
-    - 对外暴露两个能力：
-      - generate_json: JSON 输出，供子 agent 使用
+    - 对外暴露三类能力：
+      - generate_text: 普通文本输出，供上下文压缩等低协议负担任务使用
+      - generate_json: JSON 输出，供确需结构化结果的内部任务使用
       - generate_with_tools_stream: 流式 tool-calling，供主 agent loop 使用
     """
 
@@ -56,6 +57,60 @@ class OpenAICompatibleClient:
             max_retries=self.settings.llm_max_retries,
         )
         return self._client
+
+    async def generate_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        timeout: float | None = None,
+    ) -> str:
+        client = self._require_client()
+        if self.settings.log_llm_payload:
+            logger.debug(
+                "generate_text request model=%s system_len=%d user_len=%d timeout=%s",
+                self.settings.openai_model,
+                len(system_prompt),
+                len(user_prompt),
+                timeout if timeout is not None else self.settings.llm_timeout,
+            )
+        started = time.monotonic()
+        try:
+            request_payload: dict[str, Any] = {
+                "model": self.settings.openai_model,
+                "temperature": temperature,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            }
+            profile = resolve_model_profile(self.settings)
+            profile.apply_chat_parameters(request_payload)
+            completion = await client.chat.completions.create(
+                **request_payload,
+                timeout=timeout,
+            )
+        except APIStatusError as exc:
+            logger.warning("generate_text http_error status=%s body=%s", exc.status_code, _describe_api_error(exc))
+            raise ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}") from exc
+        except APIError as exc:
+            logger.warning("generate_text api_error %s", exc)
+            raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
+
+        elapsed = time.monotonic() - started
+        usage = getattr(completion, "usage", None)
+        logger.info(
+            "generate_text done model=%s elapsed=%.2fs timeout=%s usage=%s",
+            self.settings.openai_model,
+            elapsed,
+            timeout if timeout is not None else self.settings.llm_timeout,
+            _describe_usage(usage),
+        )
+        content = self._extract_text(completion)
+        if self.settings.log_llm_payload:
+            logger.debug("generate_text raw_content=%s", content)
+        return content
 
     async def generate_json(
         self,

@@ -14,25 +14,23 @@ from app.services import AppServices
 
 
 class StubLLMClient:
-    async def generate_json(
+    async def generate_text(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
-    ) -> dict[str, Any]:
-        context = json.loads(user_prompt)
-        return {
-            "compressed_messages": [
-                {
-                    "role": "user",
-                    "content": f"我前面已经提供了 {len(context.get('compressible_messages') or [])} 条历史消息相关的信息。",
-                }
-            ],
-            "questions": [],
-            "warnings": [],
-        }
+    ) -> str:
+        context = json.loads(user_prompt[user_prompt.index("{") :])
+        return (
+            "## 已确认事实\n\n"
+            f"- 已压缩 {len(context.get('compressible_messages') or [])} 条历史消息相关的信息。\n\n"
+            "## 当前进展\n\n"
+            "- 当前任务继续沿用压缩前的上下文。\n\n"
+            "## 后续注意\n\n"
+            "- 后续如信息不足，应重新读取必要上下文。"
+        )
 
     async def generate_with_tools_stream(
         self,

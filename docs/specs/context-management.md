@@ -58,7 +58,7 @@ cursor 表示当前可展开上下文窗口的起点：
 context_cursor_seq -> session 最新事件
 ```
 
-早于 cursor 的历史由最近一次 `context_summary` 中的 `compressed_messages` 表达。
+早于 cursor 的历史由最近一次 `context_summary` 中的 `compressed_markdown` 表达。
 
 ### 4. 当前上下文用量
 
@@ -200,13 +200,9 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
 
 压缩结果应写回 session log，事件类型仍为 `context_summary`。
 
-`context_summary` 保存一段压缩后的历史 transcript。该 transcript 不是逐字原文，可以在 message 数量、message 长度和不同角色承载的内容上重新组织，但必须保持 role 身份与语气一致：
+`context_summary` 保存一段压缩后的 Markdown 历史记忆。该记忆不是逐字原文，也不是当前用户的新指令，而是系统为了继续工作而整理出的高密度背景。
 
-- `role=user` 必须像用户自己在说话，不能写成“用户希望……”这类第三人称旁白。
-- `role=assistant` 必须像 assistant 自己在说话，不能写成“助手认为……”这类第三人称旁白。
-- 压缩后的 transcript 表达的是历史上下文，不是当前用户的新指令。
-
-`compressed_messages` 是压缩器输出的中间结构。它不是最终发给模型的完整 OpenAI-compatible messages；其中的 `preserved_tool_call_ids` 会在恢复阶段被程序替换为标准 `assistant.tool_calls` 与紧随其后的 `tool` messages。
+压缩模型只负责生成 Markdown 文本；程序负责把 Markdown 包装成一条 `role=user` 的压缩记忆 message，并在其后追加 `compressed_context` barrier。
 
 ```json
 {
@@ -214,28 +210,8 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
   "covered_seq_start": 1,
   "covered_seq_end": 120,
   "cursor_seq_after": 121,
-  "compressed_messages": [
-    {
-      "role": "user",
-      "content": "我希望主 agent 的工具调用结果能跨轮进入上下文，而且压缩后的历史仍然像自然对话，不要变成机械摘要。"
-    },
-    {
-      "role": "assistant",
-      "content": "明白。我会把上下文压缩设计成 message-level 的历史重写：压缩旧 messages，保留自然对话语气，并让程序恢复必要的工具证据。"
-    },
-    {
-      "role": "assistant",
-      "preserved_tool_call_ids": ["call_000123"]
-    },
-    {
-      "role": "assistant",
-      "content": "我已经确认：压缩器只决定哪些工具调用需要保留，真正的工具参数和工具结果由程序按调用 ID 从原始历史中恢复。"
-    },
-    {
-      "role": "user",
-      "content": "【上下文说明】以上内容为系统压缩后的历史上下文，不是用户的新指令，也不是逐字原文。后续消息为未压缩的真实会话。"
-    }
-  ],
+  "compressed_markdown": "## 已确认事实\n\n- 用户希望压缩后的历史不要伪装成新指令。\n- 已确认工具结果如需保留，应在 Markdown 中摘要关键结论。\n\n## 当前进展\n\n- 压缩协议已改为 Markdown 记忆，由程序包装成 message。\n\n## 后续注意\n\n- 不要求模型输出 JSON、role 或工具调用 ID。",
+  "compression_mode": "markdown_memory",
   "estimated_tokens_before": 62000,
   "estimated_tokens_after": 4200,
   "compression_model": "mimo-v2.5-pro",
@@ -248,27 +224,26 @@ session log 是全量事件事实，但上下文恢复必须按 agent scope 投�
 - `covered_seq_start`
 - `covered_seq_end`
 - `cursor_seq_after`
-- `compressed_messages`
+- `compressed_markdown`
 
 观测字段：
 
 - `estimated_tokens_before`
 - `estimated_tokens_after`
 - `compression_model`
+- `compression_mode`
 - `warnings`
 
-`compressed_messages` 必须满足以下约束：
+`compressed_markdown` 必须满足以下弱约束：
 
-1. 它是一段缩短后的历史 transcript，不是当前用户新指令。
-2. 它只能包含 `role=user` 和 `role=assistant`。
-3. `role=user` 必须使用用户自己的说话身份和自然语气。
-4. `role=assistant` 必须使用 assistant 自己的说话身份和自然语气。
-5. `role=user` 必须包含非空 `content`，不能包含 `preserved_tool_call_ids`。
-6. `role=assistant` 必须二选一：包含非空 `content`，或包含非空 `preserved_tool_call_ids`。
-7. `role=assistant` 不能同时包含 `content` 和 `preserved_tool_call_ids`。
-8. `preserved_tool_call_ids` 中的 ID 必须来自待压缩窗口中真实存在且已闭合的工具调用。
-9. 压缩器不能输出 `tool_calls`、工具参数、`role=tool` 或工具结果。
-10. 最后一条 `compressed_messages` 必须由 `compressed_context` barrier 渲染生成，用于说明以上内容是系统压缩后的历史上下文，不是用户的新指令，也不是逐字原文。
+1. 必须包含 `## 已确认事实`、`## 当前进展`、`## 后续注意` 三个二级标题。
+2. 三个必选标题下都必须有非空内容。
+3. 可以包含 `## 关键片段` 和 `## 待确认问题`。
+4. 可以包含短代码块，用于必要错误、命令输出、配置或代码片段。
+5. 不要求 bullet 格式严格一致。
+6. 如果模型输出 ```markdown 外壳，程序可以剥离外壳后校验。
+7. 如果弱校验失败，不重试模型；程序生成 fallback Markdown 记忆继续执行。
+8. 压缩器不得输出 JSON、`tool_calls`、工具参数、`role=tool` 或工具调用 ID。
 
 ## 六、Barrier Message
 
@@ -306,7 +281,7 @@ barrier：
 }
 ```
 
-`compressed_context` 的渲染结果写入 `context_summary.compressed_messages` 的最后一条。
+`compressed_context` 的渲染结果不写入 `context_summary`；恢复上下文时由程序追加到压缩记忆 message 之后。
 
 ### 2. agent_task
 
@@ -383,13 +358,14 @@ user(current)
 或者：
 
 ```text
-compressed_messages
+user(compressed_markdown_memory)
+user(compressed_context barrier)
 user
 assistant
 user(current)
 ```
 
-其中 `compressed_messages` 是系统压缩重建的早期历史。压缩块最后一条必须是 `compressed_context` barrier 渲染出的上下文说明；说明之后的消息才是未压缩的真实 session 历史。
+其中 `compressed_markdown_memory` 是系统压缩重建的早期历史记忆，由程序包装成 `role=user` message；`compressed_context` barrier 说明上一条消息是压缩历史，不是用户新请求。barrier 之后的消息才是未压缩的真实 session 历史。
 
 跨轮恢复主 agent messages 时，必须恢复主流程历史原始 `assistant(tool_calls)` / `tool` 协议消息。
 
@@ -402,55 +378,27 @@ user(current)
 
 正常运行时，工具结果可以进入当前 agent 的上下文。
 
-执行上下文压缩时，压缩 agent 应能看到完整待压缩上下文，包括工具结果原文。这样它才能判断哪些工具调用对后续任务仍有价值，以及这些工具调用应位于压缩后消息块中的哪个语义位置。
+执行上下文压缩时，压缩 agent 可以看到完整待压缩上下文，包括工具结果原文。压缩 agent 只在 Markdown 中保留必要事实、短代码块、错误码、路径、配置值或关键命令输出。
 
-压缩 agent 不输出工具调用结构、工具参数和工具结果。它只在压缩后的 transcript 中用 `preserved_tool_call_ids` 标记需要保留的工具调用：
+压缩 agent 不输出工具调用结构、工具参数、工具调用 ID、`role=tool` 或完整工具结果。恢复 `context_summary` 时，程序也不再把压缩结果还原为历史 tool call 协议块。
 
-```json
-{
-  "role": "assistant",
-  "preserved_tool_call_ids": ["call_000123"]
-}
+如果某个工具结果对后续有价值，应写成 Markdown 摘要，例如：
+
+````markdown
+## 已确认事实
+
+- 已读取 `backend/app/runtime/context/compression.py`，压缩失败来自模型输出了结构化协议而不是 Markdown 记忆。
+- case 010 中的压缩失败来自 `context_compression_invalid_output`。
+
+## 关键片段
+
+```text
+context_compression_invalid_output
+压缩结果缺少必要 Markdown 标题。
 ```
+````
 
-恢复 `context_summary` 时，程序负责把该占位替换为标准 OpenAI-compatible 工具消息块。恢复后的 assistant 工具调用消息使用原始工具调用参数：
-
-```json
-{
-  "role": "assistant",
-  "content": "",
-  "tool_calls": [
-    {
-      "id": "call_000123",
-      "type": "function",
-      "function": {
-        "name": "document_read",
-        "arguments": "{\"action\":\"get_section\",\"section_id\":\"sec_000007\"}"
-      }
-    }
-  ]
-}
-```
-
-并紧随原始工具结果：
-
-```json
-{
-  "role": "tool",
-  "tool_call_id": "call_000123",
-  "content": "原始工具结果"
-}
-```
-
-恢复规则：
-
-1. 遍历 `compressed_messages`。
-2. 遇到 `role=assistant` 且包含 `preserved_tool_call_ids` 时，按 ID 从待压缩原始 messages 或 session log 中查找原始工具调用及对应工具结果。
-3. 将该压缩消息替换为一条独立的 `assistant` 工具调用消息，`content` 固定为空字符串，`tool_calls` 使用原始工具调用结构。
-4. 在其后紧跟对应 `role=tool` 消息，`content` 使用原始工具结果。
-5. 如果找不到对应工具调用、工具结果，或工具调用未闭合，则本次压缩结果视为不可用，进入兜底裁剪。
-
-工具是否保留不按工具类型硬编码。压缩 agent 应根据语义价值判断：当某个工具调用的原始结果对后续对话、任务完成、事实判断、文档或代码修改、用户意图延续有明显帮助，且压缩文本不足以可靠承载时，才保留该工具调用 ID。
+工具证据的精确追溯由 `context_summary` 的 `covered_seq_start` / `covered_seq_end` 和 session log 原始事件承担，不由模型在压缩文本中维护调用 ID。
 
 ## 十、Context Compressor
 
@@ -458,62 +406,29 @@ user(current)
 
 它的职责：
 
-- 将调用方当前历史 messages 重写为更短的自然对话 transcript。
-- 可以重新组织 message 数量、message 长度和不同角色承载的内容。
-- 保持每条 message 的 role 身份和语气一致。
+- 将调用方当前历史 messages 压缩为固定模板 Markdown。
 - 生成高密度、可继续工作的项目记忆，而不是逐轮聊天复盘。
 - 大幅减少冗余文本，但不做极端压缩；优先保证后续任务连续性和关键信息保真。
-- 保留后续任务需要的事实、用户偏好、决策、重要修改、事实核查结论、未解决问题和必要工具证据。
+- 保留后续任务需要的事实、用户偏好、决策、重要修改、事实核查结论、未解决问题和必要工具结果摘要。
+- 必须包含 `## 已确认事实`、`## 当前进展`、`## 后续注意` 三个标题。
+- 必要时可以追加 `## 关键片段` 和 `## 待确认问题`。
 - 不编造新事实。
 - 不把压缩后的历史消息伪装成用户新指令。
-- 输出结构化的 `compressed_messages`。
-- 当保留工具调用时，只输出 `preserved_tool_call_ids`，由程序恢复原始工具调用和工具结果。
+- 不输出 JSON、role、工具调用结构或工具调用 ID。
 
-压缩 agent 的输入应是结构化 JSON，至少包含：
-
-```json
-{
-  "task": "compress_agent_context_messages",
-  "current_user_message": {
-    "content": "当前用户问题",
-    "usage": "仅用于判断压缩重点，不得写入 compressed_messages。"
-  },
-  "rules": [
-    "把 compressible_messages 重写成更短的自然对话 transcript。",
-    "压缩输出只允许 role=user + content、role=assistant + content、role=assistant + preserved_tool_call_ids。",
-    "不要逐轮复盘历史对话；合并重复意图、重复确认、相同结论和已经完成的执行细节。",
-    "大幅减少冗余文本，但不要极端压缩；优先保证后续任务连续性和关键信息保真。",
-    "覆盖已经出现且对后续有价值的项目/文档状态、用户稳定偏好、已确认技术方案、重要修改、事实核查和纠偏、未决问题、必要工具证据。",
-    "role=user 只承载用户的目标、要求、偏好、纠偏和确认；不要把 assistant 已完成的工作写成 user 的话。",
-    "role=assistant + content 承载 assistant 已完成的工作、判断、总结和后续注意事项。",
-    "必须输出完整合法 JSON；信息较多时用高密度要点合并，避免输出到一半被截断。",
-    "事实核查、版本号、来源、文档读取、代码检查类工具结果如后续可能追溯，优先保留 preserved_tool_call_ids。"
-  ],
-  "compressible_messages": [],
-  "output_schema": {
-    "compressed_messages": [
-      {
-        "role": "user|assistant",
-        "content": "自然语言内容；role=user 必填；role=assistant 与 preserved_tool_call_ids 二选一",
-        "preserved_tool_call_ids": ["role=assistant 保留工具调用时使用"]
-      }
-    ],
-    "warnings": []
-  }
-}
-```
+压缩 agent 的输入是自然语言任务说明加结构化上下文文本，至少包含当前用户消息和 `compressible_messages`。
 
 输入规则：
 
 1. `compressible_messages` 是 cursor 到当前用户输入之前的完整待压缩 message transcript。
 2. `compressible_messages` 应包含完整工具结果原文，便于压缩 agent 判断是否保留对应工具调用。
-3. `current_user_message` 只作为保留重点参考，不属于压缩范围，不得写入 `compressed_messages`。
+3. `current_user_message` 只作为保留重点参考，不属于压缩范围，不得写成当前用户的新请求。
 4. 压缩 agent 不直接接收未投影的 `scope=subagent:*` 内部过程。
 5. 压缩 agent 不接收比例预算字段；系统不把理想压缩比例作为模型可见的软限制或硬限制。
 
 压缩 agent 的事件写入 session log，方便 debug。
 
-但压缩 agent 的内部过程不进入调用方上下文；调用方只接收最终 `context_summary.compressed_messages`。
+但压缩 agent 的内部过程不进入调用方上下文；调用方只接收最终 `context_summary.compressed_markdown`。
 
 ## 十一、子 Agent 的上下文压缩
 
@@ -529,7 +444,7 @@ user(current)
 
 每个 session 的 context state 由 session log 中最近的 marker 事件恢复：
 
-- `context_summary` 表示 cursor 之前的历史已被压缩为 `compressed_messages`。
+- `context_summary` 表示 cursor 之前的历史已被压缩为 `compressed_markdown`。
 - `context_pruned` 表示压缩失败或仍超限后，cursor 已移动到新的可见起点。
 
 系统不额外维护独立 `.context.json` 文件，避免 session log 与 state 文件出现双写不一致。
@@ -537,7 +452,7 @@ user(current)
 恢复时以最近一条 `context_summary` 或 `context_pruned` 为准：
 
 ```text
-context_summary -> 注入 compressed_messages，按 preserved_tool_call_ids 恢复原始工具调用与工具结果，并从 cursor_seq_after 继续展开后续事件
+context_summary -> 注入 compressed_markdown memory message 和 compressed_context barrier，并从 cursor_seq_after 继续展开后续事件
 context_pruned  -> 不注入摘要，直接从 new_cursor_seq 继续展开后续事件
 ```
 
@@ -554,4 +469,4 @@ session log 继续保持 append-only，是上下文恢复的唯一权威来源�
 7. 子 agent run-local 压缩只作用于单次子 agent run。
 8. 压缩失败不能阻塞主流程，必须有 cursor 移动兜底。
 9. 兜底窗口第一条业务消息必须是 user。
-10. 压缩 agent 可以看到完整待压缩上下文，但不得复写工具调用参数或工具结果；工具证据由程序按 `preserved_tool_call_ids` 恢复为原始工具调用与工具结果。
+10. 压缩 agent 可以看到完整待压缩上下文，但只输出 Markdown 记忆；必要工具证据以摘要或短代码块形式进入 Markdown，不恢复原始工具调用协议块。

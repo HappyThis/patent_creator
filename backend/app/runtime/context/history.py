@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from ...schemas import SessionEvent
-from .compression import restore_compressed_messages_from_events
+from .compression import prepare_compressed_markdown_messages
 
 MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_message", "agent_output", "tool_call", "tool_result"}
 
@@ -17,13 +17,8 @@ def restore_main_chat_messages(
 ) -> list[dict[str, Any]]:
     anchor = context_anchor(events)
     messages: list[dict[str, Any]] = []
-    if anchor["compressed_messages"]:
-        messages.extend(
-            restore_compressed_messages_from_events(
-                anchor["compressed_messages"],
-                source_tool_blocks=_main_tool_blocks(events),
-            )
-        )
+    if anchor["compressed_markdown"]:
+        messages.extend(prepare_compressed_markdown_messages(anchor["compressed_markdown"]))
 
     visible = [
         event
@@ -52,19 +47,19 @@ def context_anchor(events: list[SessionEvent]) -> dict[str, Any]:
         None,
     )
     if marker is None:
-        return {"cursor_seq": 1, "compressed_messages": []}
+        return {"cursor_seq": 1, "compressed_markdown": ""}
     if marker.type == "context_summary":
         cursor_seq = int(marker.payload.get("cursor_seq_after") or marker.payload.get("covered_seq_end") or 0) + (
             0 if marker.payload.get("cursor_seq_after") else 1
         )
-        compressed_messages = marker.payload.get("compressed_messages")
+        compressed_markdown = marker.payload.get("compressed_markdown")
         return {
             "cursor_seq": max(1, cursor_seq),
-            "compressed_messages": compressed_messages if isinstance(compressed_messages, list) else [],
+            "compressed_markdown": compressed_markdown if isinstance(compressed_markdown, str) else "",
         }
     return {
         "cursor_seq": max(1, int(marker.payload.get("new_cursor_seq") or 1)),
-        "compressed_messages": [],
+        "compressed_markdown": "",
     }
 
 
@@ -225,38 +220,3 @@ def _tool_result_message(event: SessionEvent) -> dict[str, Any]:
         "tool_call_id": str(event.call_id or ""),
         "content": json.dumps(payload, ensure_ascii=False),
     }
-
-
-def _main_tool_blocks(events: list[SessionEvent]) -> dict[str, dict[str, Any]]:
-    assistant_messages: dict[str, dict[str, Any]] = {}
-    calls: dict[str, dict[str, Any]] = {}
-    results: dict[str, str] = {}
-    for event in events:
-        if event.scope == "main" and event.type == "agent_message":
-            message = _agent_message(event)
-            if message is not None:
-                for call in message.get("tool_calls") or []:
-                    if isinstance(call, dict) and call.get("id"):
-                        assistant_messages[str(call["id"])] = message
-        if event.scope == "main" and event.type == "tool_call" and event.call_id:
-            calls[str(event.call_id)] = _assistant_tool_call(event)
-        if event.scope == "main" and event.type == "tool_result" and event.call_id:
-            results[str(event.call_id)] = _tool_result_message(event)["content"]
-    return {
-        call_id: {
-            "tool_call": calls[call_id],
-            "tool_result": results[call_id],
-            **_assistant_metadata_for_call(assistant_messages.get(call_id)),
-        }
-        for call_id in calls.keys() & results.keys()
-    }
-
-
-def _assistant_metadata_for_call(message: dict[str, Any] | None) -> dict[str, Any]:
-    if not message:
-        return {}
-    metadata: dict[str, Any] = {"assistant_content": str(message.get("content") or "")}
-    reasoning_content = message.get("reasoning_content")
-    if isinstance(reasoning_content, str) and reasoning_content:
-        metadata["reasoning_content"] = reasoning_content
-    return metadata

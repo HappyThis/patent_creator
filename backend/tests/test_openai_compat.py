@@ -112,6 +112,21 @@ def test_generate_json_can_override_timeout(tmp_path: Path) -> None:
     assert fake.completions.calls[0]["timeout"] == 180
 
 
+def test_generate_text_does_not_request_json_response_format(tmp_path: Path) -> None:
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="plain memory"))],
+        usage=None,
+    )
+    fake = FakeOpenAIClient(completion)
+    client = OpenAICompatibleClient(make_settings(tmp_path), client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(client.generate_text(system_prompt="system", user_prompt="user", timeout=180))
+
+    assert result == "plain memory"
+    assert fake.completions.calls[0]["timeout"] == 180
+    assert "response_format" not in fake.completions.calls[0]
+
+
 def test_generate_with_tools_stream_sends_deepseek_disabled_thinking(tmp_path: Path) -> None:
     fake = FakeOpenAIClient(FakeStream("ok"))
     client = OpenAICompatibleClient(make_settings(tmp_path, provider="deepseek", thinking="disabled"), client=fake)  # type: ignore[arg-type]

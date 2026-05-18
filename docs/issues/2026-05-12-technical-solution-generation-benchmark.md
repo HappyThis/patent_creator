@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：至少 3 个黄金 case 已经跑通完整 subject + Codex-as-judge 链路，但全量首轮仍存在失败 case，需要继续排查并沉淀稳定回归流程。
+文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：至少 4 个 case 已经跑通完整 subject + Codex-as-judge 链路，其中包含复杂 `010`；但全量首轮仍存在失败 case，需要继续排查并沉淀稳定回归流程。
 
 已关闭子问题：
 
@@ -23,6 +23,7 @@
 - 已跑通 `001` 的 subject 与 Codex-as-judge 完整评分链路。
 - 已跑通 `001`、`002`、`003` 的 subject 与 Codex-as-judge 完整评分链路，满足“至少 3 个黄金 case”的最低闭环要求。
 - `010` 在单独提高 `round-timeout` 到 `1200` 秒后可完成闭环，说明该 case 本身不是不可运行样本。
+- `010` 在 Markdown memory 压缩改造后复跑成功：`20260518-compression-md-010-rerun2` 完成 subject + artifact + Codex-as-judge，得分 `72`。
 
 仍开放子问题：
 
@@ -253,6 +254,7 @@ P2：
 | 001 | `scored` | 72 |
 | 002 | `scored` | 76 |
 | 003 | `scored` | 82 |
+| 010 | `scored` | 72 |
 
 因此，历史 issue `benchmark-golden-cases` 已满足最低关闭条件：不再是“只有 `001` 完整跑通”。后续 benchmark 重点从“能否跑通 3 个 case”转为“全量回归是否稳定、失败 case 是否能被准确排查、结果是否可横向比较”。
 
@@ -262,10 +264,20 @@ P2：
 - `010` 在全量并发批次中曾因 `900` 秒 round timeout 未写出 result；单独复跑并将 `round-timeout` 提高到 `1200` 秒后完成评分，说明该 case 可运行，但复杂 case 对并发和 timeout 更敏感。
 - `005`、`007` 仍需要单独查看 stderr/progress 并复跑，区分 timeout、provider transient、runner 工程缺口或 agent 调度问题。
 
+Markdown memory 压缩改造后，`010` 再次完成单 case 闭环：
+
+- run id：`20260518-compression-md-010-rerun2`
+- subject：`completed`
+- artifact：`artifact_extracted=true`
+- judge：`scored`
+- score：`72`
+- 观察：压缩协议稳定，2 次 `context_summary` 均为 `compression_mode=markdown_memory` 且 `warnings=[]`。中途仍出现两次可恢复 `document_edit` 失败，但 runner 不将其作为内容评分指标。
+
 当前 benchmark 侧开放 issue：
 
 - `benchmark-failed-cases`：排查并复跑 `005`、`007`。
 - `benchmark-stable-full-run`：沉淀全量低并发、复杂 case timeout、失败 case 单独复跑和结果汇总规范。
+- `benchmark-run-transient-failures`：记录 provider streaming `ReadError`、quota、timeout 等外部或长轮次不稳定因素，避免将偶发运行失败误判为 case 不可运行。
 
 ## 暂不处理
 

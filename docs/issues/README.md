@@ -28,6 +28,8 @@ P0：
 
 - `solution-quality-validation`：技术方案质量验证不足。系统已经能产出技术方案，但还没有足够样本证明它能稳定生成合理、可实施、具备保护价值的方案。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
+- `provider-stream-readerror-recovery`：长轮次仍可能因 provider streaming `httpx.ReadError` / `llm_stream_error` 中断，导致已完成大量分析但未落地产物。
+  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
 
 P1：
 
@@ -35,18 +37,20 @@ P1：
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
 - `benchmark-failed-cases`：全量首轮中 `005`、`007` 仍需单独排查和复跑；复杂 case 在并发下可能需要更高 timeout 或低并发策略。
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
-- `subagent-task-boundary`：主 agent 仍可能把过重、多段、整章级写作任务交给 `section_writer`，导致轻量子 agent 边界失效，增加超时风险。
-  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
-- `subagent-overreading-compression`：`material_analyst` 等子 agent 在复杂 case 中可能过度读取项目上下文，触发多次上下文压缩，并暴露压缩结果校验失败风险。
-  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
 - `late-artifact-write`：主 agent 可能在长时间阅读和多次子 agent 调用后才写入 `technical_solution`，一旦 round 超时就没有可评测 artifact。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
-- `tool-failure-recovery`：工具失败后的恢复策略不稳定。主 agent 曾在 `document_edit` 参数错误后通过 `exec_command` 查找内部 `disclosure.json`，而不是优先修正同一工具调用重试。
+- `document-edit-segmented-write-policy`：复杂技术方案仍可能先尝试一次性大块 `document_edit`，失败后才拆分；应默认采用主体摘要 + 子章节逐段追加。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
+- `document-edit-argument-preflight`：`document_edit` 仍可能出现字符串化 `operations`、未转义引号或过大操作体等可预防参数错误。
+  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
+- `benchmark-run-transient-failures`：provider streaming `ReadError`、quota、timeout 等偶发运行失败需要与 case 不可运行区分开。
+  - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
 
 P2：
 
 - `operations-stringified-json`：主 agent 仍可能把 `document_edit.operations` 输出成字符串化 JSON。真实工具已有窄口径防御，短期不阻塞主线，但会增加轮次和弱模型失败概率。
+  - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
+- `compression-cost-reuse`：Markdown memory 压缩已经稳定，但复杂 case 中重复压缩相同主上下文仍会带来耗时和 token 成本。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
 - `benchmark-regression-scale`：正式回归集、批量运行、趋势对比和模型横向比较还没建设起来。
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
@@ -58,4 +62,7 @@ P2：
 - `duplicate-section-id`：章节 id 语义混用问题已通过 v2 文档结构解决。
 - `benchmark-runtime-error-diagnostics`：技术方案 benchmark 已改为只评价最终技术方案内容，不再统计可恢复过程异常。
 - `section-writer-submit-result`：旧的 `submit_result` 结构化提交协议已移除，子 agent 当前统一通过 `write_pipe(content)` + `finish({})` 交付结果。
+- `context-compression-invalid-json`：旧 JSON / preserved tool call 压缩协议已移除，当前使用 Markdown memory 压缩并通过弱校验与 fallback 保底。
+- `subagent-task-boundary`：`section_writer` 阻断级边界问题已关闭；复杂正文已转为主 agent 直接落盘或轻量局部写作。
+- `tool-failure-recovery`：工具失败后绕行内部文件的问题已关闭为阻断级问题；`010` 复跑中主 agent 能修正同一 `document_edit` 调用并继续。
 - `benchmark-golden-cases`：`001`、`002`、`003` 已跑通完整 subject + Codex-as-judge 链路，满足至少 3 个黄金 case 的最低闭环要求。

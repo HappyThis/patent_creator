@@ -5,163 +5,67 @@ import json
 import pytest
 
 from app.core.errors import ApiError
+from app.runtime.context.barrier import COMPRESSED_CONTEXT_MESSAGE
 from app.runtime.context.compression import (
-    prepare_compressed_messages_with_warnings,
-    prepare_compressed_messages_for_storage,
-    restore_compressed_messages_from_messages,
+    COMPRESSED_MEMORY_PREFIX,
+    fallback_compressed_markdown,
+    prepare_compressed_markdown_messages,
+    validate_compressed_markdown,
 )
 from app.runtime.context.history import restore_main_chat_messages
 from app.schemas import SessionEvent
 
 
-def _source_messages_with_tool_call() -> list[dict[str, object]]:
-    arguments = {"action": "get_outline"}
-    return [
-        {"role": "user", "content": "先读取目录。"},
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": "call_read_outline",
-                    "type": "function",
-                    "function": {
-                        "name": "document_read",
-                        "arguments": json.dumps(arguments, ensure_ascii=False),
-                    },
-                }
-            ],
-        },
-        {
-            "role": "tool",
-            "tool_call_id": "call_read_outline",
-            "content": json.dumps({"status": "success", "output": {"sections": ["技术方案"]}}, ensure_ascii=False),
-        },
-        {"role": "assistant", "content": "已读取目录。"},
+VALID_MARKDOWN = """## 已确认事实
+
+- 用户要求使用 Markdown 轻结构压缩上下文。
+
+## 当前进展
+
+- 已确定程序负责包装压缩 message 和边界。
+
+## 后续注意
+
+- 不要再要求模型输出 JSON。"""
+
+
+def test_compressed_markdown_wraps_memory_and_barrier() -> None:
+    messages = prepare_compressed_markdown_messages(VALID_MARKDOWN)
+
+    assert messages == [
+        {"role": "user", "content": f"{COMPRESSED_MEMORY_PREFIX}\n\n{VALID_MARKDOWN}"},
+        {"role": "user", "content": COMPRESSED_CONTEXT_MESSAGE},
     ]
 
 
-def test_compressed_messages_store_preserved_tool_ids_and_restore_original_tool_block() -> None:
-    source_messages = _source_messages_with_tool_call()
-    compressed = prepare_compressed_messages_for_storage(
-        [
-            {"role": "user", "content": "我让你先读取目录。"},
-            {"role": "assistant", "preserved_tool_call_ids": ["call_read_outline"]},
-            {"role": "assistant", "content": "已读取目录，后续围绕技术方案继续。"},
-        ],
-        source_messages=source_messages,
-    )
+def test_compressed_markdown_strips_markdown_fence() -> None:
+    wrapped = f"```markdown\n{VALID_MARKDOWN}\n```"
 
-    assert compressed[1] == {"role": "assistant", "preserved_tool_call_ids": ["call_read_outline"]}
-    assert "tool_calls" not in compressed[1]
-    assert compressed[-1]["content"].startswith("【上下文说明】")
-
-    restored = restore_compressed_messages_from_messages(compressed, source_messages=source_messages)
-    restored_tool_call_message = restored[1]
-    assert restored_tool_call_message["role"] == "assistant"
-    assert restored_tool_call_message["content"] == ""
-    assert restored_tool_call_message["tool_calls"][0]["id"] == "call_read_outline"
-    assert restored_tool_call_message["tool_calls"][0]["function"]["name"] == "document_read"
-    assert restored[2]["role"] == "tool"
-    assert restored[2]["tool_call_id"] == "call_read_outline"
-    assert json.loads(restored[2]["content"])["status"] == "success"
-
-
-def test_compressed_messages_restore_preserved_tool_reasoning_content() -> None:
-    source_messages = _source_messages_with_tool_call()
-    source_messages[1]["reasoning_content"] = "需要读取目录再继续。"
-
-    compressed = prepare_compressed_messages_for_storage(
-        [
-            {"role": "assistant", "preserved_tool_call_ids": ["call_read_outline"]},
-            {"role": "assistant", "content": "已保留工具证据。"},
-        ],
-        source_messages=source_messages,
-    )
-
-    restored = restore_compressed_messages_from_messages(compressed, source_messages=source_messages)
-
-    assert restored[0]["role"] == "assistant"
-    assert restored[0]["reasoning_content"] == "需要读取目录再继续。"
-    assert restored[0]["tool_calls"][0]["id"] == "call_read_outline"
-
-
-def test_compressed_messages_drop_unavailable_preserved_tool_ids() -> None:
-    compressed, warnings = prepare_compressed_messages_with_warnings(
-        [
-            {"role": "user", "content": "我让你读取目录。"},
-            {"role": "assistant", "preserved_tool_call_ids": ["call_missing", "call_read_outline"]},
-            {"role": "assistant", "preserved_tool_call_ids": ["call_missing_only"]},
-            {"role": "assistant", "content": "已保留可恢复的工具证据。"},
-        ],
-        source_messages=_source_messages_with_tool_call(),
-    )
-
-    assert {"role": "assistant", "preserved_tool_call_ids": ["call_read_outline"]} in compressed
-    assert {"role": "assistant", "preserved_tool_call_ids": ["call_missing_only"]} not in compressed
-    assert warnings == [
-        {
-            "code": "dropped_unavailable_tool_calls",
-            "message": "压缩输出引用了不存在或未闭合的工具调用，已丢弃。",
-            "message_index": 1,
-            "tool_call_ids": ["call_missing"],
-        },
-        {
-            "code": "dropped_unavailable_tool_calls",
-            "message": "压缩输出引用了不存在或未闭合的工具调用，已丢弃。",
-            "message_index": 2,
-            "tool_call_ids": ["call_missing_only"],
-        },
-    ]
+    assert validate_compressed_markdown(wrapped) == VALID_MARKDOWN
 
 
 @pytest.mark.parametrize(
-    "raw_messages",
+    "markdown",
     [
-        [{"role": "tool", "tool_call_id": "call_read_outline", "content": ""}],
-        [
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": "call_read_outline",
-                        "type": "function",
-                        "function": {"name": "document_read", "arguments": "{}"},
-                    }
-                ],
-            }
-        ],
-        [{"role": "assistant", "content": "已读取目录。", "preserved_tool_call_ids": ["call_read_outline"]}],
-        [{"role": "user", "content": "我让你读取目录。", "preserved_tool_call_ids": ["call_read_outline"]}],
+        "",
+        "## 已确认事实\n\n- 只有一个标题。",
+        "## 已确认事实\n\n- A\n\n## 当前进展\n\n\n## 后续注意\n\n- C",
+        json.dumps({"compressed_" + "messages": [{"role": "user", "content": "旧格式"}]}),
     ],
 )
-def test_compressed_messages_reject_old_tool_shapes(raw_messages: list[dict[str, object]]) -> None:
+def test_compressed_markdown_rejects_missing_required_sections(markdown: str) -> None:
     with pytest.raises(ApiError):
-        prepare_compressed_messages_for_storage(raw_messages, source_messages=_source_messages_with_tool_call())
+        validate_compressed_markdown(markdown)
 
 
-def test_restore_rejects_stored_old_tool_shapes() -> None:
-    with pytest.raises(ApiError):
-        restore_compressed_messages_from_messages(
-            [
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "call_read_outline",
-                            "type": "function",
-                            "function": {"name": "document_read", "arguments": "{}"},
-                        }
-                    ],
-                }
-            ],
-            source_messages=_source_messages_with_tool_call(),
-        )
+def test_fallback_compressed_markdown_is_valid() -> None:
+    markdown = fallback_compressed_markdown("模型输出缺少必要标题。")
+
+    assert validate_compressed_markdown(markdown) == markdown
+    assert "模型输出缺少必要标题" in markdown
 
 
-def test_restore_main_chat_messages_expands_preserved_tool_ids_from_session_events() -> None:
+def test_restore_main_chat_messages_injects_compressed_markdown_memory() -> None:
     events = [
         SessionEvent(
             id="evt_1",
@@ -205,23 +109,16 @@ def test_restore_main_chat_messages_expands_preserved_tool_ids_from_session_even
             message_id="msg_2",
             payload={
                 "cursor_seq_after": 4,
-                "compressed_messages": [
-                    {"role": "assistant", "preserved_tool_call_ids": ["call_read_outline"]},
-                    {"role": "user", "content": "上述消息经过系统压缩，后续继续正常对话。"},
-                ],
+                "compressed_markdown": VALID_MARKDOWN,
             },
         ),
     ]
 
     messages = restore_main_chat_messages(events, current_user_message="继续完善", current_message_id="msg_2")
 
-    assert messages[0]["role"] == "assistant"
-    assert messages[0]["content"] == ""
-    assert messages[0]["tool_calls"][0]["id"] == "call_read_outline"
-    assert messages[0]["tool_calls"][0]["function"]["name"] == "document_read"
-    assert messages[1]["role"] == "tool"
-    assert messages[1]["tool_call_id"] == "call_read_outline"
-    assert json.loads(messages[1]["content"])["status"] == "success"
+    assert messages[0] == {"role": "user", "content": f"{COMPRESSED_MEMORY_PREFIX}\n\n{VALID_MARKDOWN}"}
+    assert messages[1] == {"role": "user", "content": COMPRESSED_CONTEXT_MESSAGE}
+    assert not any(message.get("role") == "tool" for message in messages)
     assert messages[-1] == {"role": "user", "content": "继续完善"}
 
 
@@ -245,56 +142,26 @@ def test_restore_main_chat_messages_uses_saved_agent_message_reasoning() -> None
         SessionEvent(
             id="evt_1",
             ts="2026-05-09T00:00:00Z",
-            type="user_input",
+            type="agent_message",
             seq=1,
             scope="main",
             round_id="round_1",
             message_id="msg_1",
-            payload={"text": "先读取目录。"},
+            payload={"message": assistant_message},
         ),
         SessionEvent(
             id="evt_2",
             ts="2026-05-09T00:00:01Z",
-            type="agent_message",
+            type="tool_result",
             seq=2,
             scope="main",
             round_id="round_1",
             message_id="msg_1",
-            payload={
-                "message": assistant_message,
-                "model": "deepseek-reasoner",
-                "provider": "deepseek",
-                "thinking": "enabled",
-            },
-        ),
-        SessionEvent(
-            id="evt_3",
-            ts="2026-05-09T00:00:02Z",
-            type="tool_call",
-            seq=3,
-            scope="main",
-            round_id="round_1",
-            message_id="msg_1",
             call_id="call_read_outline",
-            payload={"tool": "document_read", "arguments": {"action": "get_outline"}},
-        ),
-        SessionEvent(
-            id="evt_4",
-            ts="2026-05-09T00:00:03Z",
-            type="tool_result",
-            seq=4,
-            scope="main",
-            round_id="round_1",
-            message_id="msg_1",
-            call_id="call_read_outline",
-            payload={"tool": "document_read", "status": "success", "output": {"sections": ["技术方案"]}},
+            payload={"tool": "document_read", "status": "success"},
         ),
     ]
 
-    messages = restore_main_chat_messages(events, current_user_message="继续完善", current_message_id="msg_2")
+    messages = restore_main_chat_messages(events)
 
-    assert messages[1]["role"] == "assistant"
-    assert messages[1]["reasoning_content"] == "先读取目录。"
-    assert messages[1]["tool_calls"][0]["id"] == "call_read_outline"
-    assert messages[2]["role"] == "tool"
-    assert messages[2]["tool_call_id"] == "call_read_outline"
+    assert messages[0]["reasoning_content"] == "先读取目录。"

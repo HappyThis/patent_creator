@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from app.agents import SUBAGENTS, get_subagent
 from app.agents.prompts import build_main_agent_system_prompt, build_section_writer_system_prompt
 from app.agents.prompts.consistency_reviewer import build_consistency_reviewer_system_prompt
@@ -229,26 +227,15 @@ def test_barrier_renderer_outputs_user_messages() -> None:
     assert "检查提示词冲突" in task["content"]
 
 
-def test_context_compressor_prompt_contains_parseable_json_examples() -> None:
+def test_context_compressor_prompt_defines_markdown_memory_template() -> None:
     prompt = context_compressor_system_prompt()
 
-    assert "换行写成 \\n" in prompt
-    assert "双引号写成 \\\"" in prompt
-    assert "反斜杠写成 \\\\" in prompt
+    assert "只输出 Markdown 正文" in prompt
+    assert "不要输出 JSON" in prompt
+    assert "## 已确认事实" in prompt
+    assert "## 当前进展" in prompt
+    assert "## 后续注意" in prompt
+    assert "## 关键片段" in prompt
+    assert "## 待确认问题" in prompt
+    assert "工具调用 ID" in prompt
     assert "target_estimated_tokens" not in prompt
-    assert "25%" not in prompt
-
-    minimal_label = "高密度项目记忆示例：\n"
-    tool_label = "\n需要保留工具证据时的合法输出示例：\n"
-    minimal_example = prompt.split(minimal_label, 1)[1].split(tool_label, 1)[0]
-    tool_example = prompt.split(tool_label, 1)[1]
-
-    minimal = json.loads(minimal_example)
-    with_tool = json.loads(tool_example)
-
-    assert set(minimal) == {"compressed_messages", "warnings"}
-    assert set(with_tool) == {"compressed_messages", "warnings"}
-    assert with_tool["compressed_messages"][-1] == {
-        "role": "assistant",
-        "preserved_tool_call_ids": ["call_read_context_doc"],
-    }

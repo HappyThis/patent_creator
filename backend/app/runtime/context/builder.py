@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import logging
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -9,9 +8,10 @@ from ...agents.runtime.model_profiles import prepare_messages_for_model_request
 from ...core import Settings
 from ...storage.workspace_store import WorkspaceStore
 from .compression import (
-    build_compression_payload,
-    prepare_compressed_messages_with_warnings,
-    restore_compressed_messages_from_messages,
+    build_compression_prompt,
+    fallback_compressed_markdown,
+    prepare_compressed_markdown_messages,
+    validate_compressed_markdown,
 )
 from .history import MAIN_CONTEXT_EVENT_TYPES, context_anchor, current_user_event, project_main_events, restore_main_chat_messages
 from .prompts import context_compressor_system_prompt
@@ -23,14 +23,14 @@ ContextEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class SupportsContextCompression(Protocol):
-    async def generate_json(
+    async def generate_text(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
-    ) -> dict[str, Any]:
+    ) -> str:
         ...
 
 
@@ -343,25 +343,32 @@ class ContextManager:
             source_estimated_tokens,
             self.settings.openai_model,
         )
-        payload = build_compression_payload(
+        prompt = build_compression_prompt(
             current_user_message=str(current_event.payload.get("text") or ""),
             compressible_messages=_strip_reasoning_content(source_messages),
         )
-        result = await llm_client.generate_json(
-            system_prompt=context_compressor_system_prompt(),
-            user_prompt=json.dumps(payload, ensure_ascii=False, indent=2),
-            temperature=0.1,
-            timeout=self.settings.context_compression_timeout,
-        )
-        compressed_messages, compression_warnings = prepare_compressed_messages_with_warnings(
-            result.get("compressed_messages"),
-            source_messages=source_messages,
-        )
-        estimated_messages = restore_compressed_messages_from_messages(
-            compressed_messages,
-            source_messages=source_messages,
-        )
-        warnings = _combined_compression_warnings(result.get("warnings"), compression_warnings)
+        warnings: list[Any] = []
+        try:
+            raw_markdown = await llm_client.generate_text(
+                system_prompt=context_compressor_system_prompt(),
+                user_prompt=prompt,
+                temperature=0.1,
+                timeout=self.settings.context_compression_timeout,
+            )
+            compressed_markdown = validate_compressed_markdown(raw_markdown)
+        except Exception as exc:
+            logger.warning(
+                "context compression markdown fallback scope=main project_id=%s session_id=%s round_id=%s message_id=%s error=%s",
+                project_id,
+                session_id,
+                round_id,
+                current_message_id,
+                exc,
+            )
+            compressed_markdown = fallback_compressed_markdown(str(exc))
+            warnings.append({"code": "compression_markdown_fallback", "message": str(exc)})
+        compressed_memory_messages = prepare_compressed_markdown_messages(compressed_markdown)
+        estimated_messages = compressed_memory_messages
         estimated_tokens_after = estimate_messages_tokens(estimated_messages)
         self.store.append_session_event(
             project_id,
@@ -374,23 +381,24 @@ class ContextManager:
                 "agent_scope": "main",
                 "covered_seq_start": compressible[0].seq,
                 "covered_seq_end": compressible[-1].seq,
-                "compressed_messages": compressed_messages,
+                "compressed_markdown": compressed_markdown,
                 "estimated_tokens_before": usage_before.used_tokens,
                 "estimated_tokens_after": estimated_tokens_after,
                 "compression_model": self.settings.openai_model,
+                "compression_mode": "markdown_memory",
                 "cursor_seq_after": compressible[-1].seq + 1,
                 "warnings": warnings,
             },
         )
         logger.info(
-            "context compression completed scope=main project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_start=%s covered_seq_end=%s compressed_messages=%s estimated_tokens_before=%s estimated_tokens_after=%s warnings=%s cursor_seq_after=%s",
+            "context compression completed scope=main project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_start=%s covered_seq_end=%s compressed_chars=%s estimated_tokens_before=%s estimated_tokens_after=%s warnings=%s cursor_seq_after=%s",
             project_id,
             session_id,
             round_id,
             current_message_id,
             compressible[0].seq,
             compressible[-1].seq,
-            len(compressed_messages),
+            len(compressed_markdown),
             usage_before.used_tokens,
             estimated_tokens_after,
             len(warnings),
@@ -399,7 +407,7 @@ class ContextManager:
         return {
             "covered_seq_start": compressible[0].seq,
             "covered_seq_end": compressible[-1].seq,
-            "compressed_message_count": len(compressed_messages),
+            "compressed_chars": len(compressed_markdown),
             "estimated_tokens_before": usage_before.used_tokens,
             "estimated_tokens_after": estimated_tokens_after,
             "cursor_seq_after": compressible[-1].seq + 1,
@@ -530,8 +538,3 @@ def _strip_reasoning_content(messages: list[dict[str, Any]]) -> list[dict[str, A
         if message.get("role") == "assistant":
             message.pop("reasoning_content", None)
     return stripped
-
-
-def _combined_compression_warnings(raw_warnings: Any, generated_warnings: list[dict[str, Any]]) -> list[Any]:
-    warnings = raw_warnings if isinstance(raw_warnings, list) else []
-    return [*warnings, *generated_warnings]

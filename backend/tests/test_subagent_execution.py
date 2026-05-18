@@ -150,7 +150,7 @@ async def test_main_agent_restores_execute_subagent_result_without_subagent_inte
 async def test_execute_subagent_compresses_run_local_messages(tmp_path: Path) -> None:
     def subagent_finish(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [str(message.get("content") or "") for message in messages]
-        assert any("我前面已经提供了" in content for content in contents)
+        assert any("## 已确认事实" in content for content in contents)
         assert any("【上下文说明】" in content for content in contents)
         assert messages[-1]["role"] == "user"
         assert "【任务说明】" in messages[-1]["content"]
@@ -163,7 +163,7 @@ async def test_execute_subagent_compresses_run_local_messages(tmp_path: Path) ->
         }
 
     settings = make_settings(tmp_path)
-    settings.context_max_tokens = 120
+    settings.context_max_tokens = 500
     settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.5
     settings.context_compression_timeout = 123
@@ -188,11 +188,12 @@ async def test_execute_subagent_compresses_run_local_messages(tmp_path: Path) ->
     assert result["status"] == "success"
     events = services.store.read_session_events(project_id, session_id)
     summary_event = next(event for event in events if event.type == "context_summary")
-    compression_payload = llm.generated_json_payloads[-1]
+    compression_payload = llm.generated_text_prompts[-1]
     assert compression_payload["_timeout"] == 123
     assert "target_estimated_tokens" not in compression_payload
     assert summary_event.scope == "subagent:material_analyst"
-    assert summary_event.payload["compressed_messages"][-1]["content"].startswith("【上下文说明】")
+    assert summary_event.payload["compression_mode"] == "markdown_memory"
+    assert summary_event.payload["compressed_markdown"].startswith("## 已确认事实")
 
 @pytest.mark.anyio
 async def test_subagent_plain_response_fails_without_protocol_retry(tmp_path: Path) -> None:

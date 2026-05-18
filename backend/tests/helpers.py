@@ -25,7 +25,7 @@ class ScriptedLLMClient:
         self._script = list(script)
         self._cursor = 0
         self._script_subagents = script_subagents
-        self.generated_json_payloads: list[dict[str, Any]] = []
+        self.generated_text_prompts: list[dict[str, Any]] = []
 
     async def generate_with_tools_stream(
         self,
@@ -97,33 +97,32 @@ class ScriptedLLMClient:
             }
         return {"role": "assistant", "content": ""}
 
-    async def generate_json(
+    async def generate_text(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
-    ) -> dict[str, Any]:
+    ) -> str:
         if "上下文压缩 agent" in system_prompt:
-            context = json.loads(user_prompt)
+            marker = "待压缩上下文："
+            if marker in user_prompt:
+                context = json.loads(user_prompt.split(marker, 1)[1].strip())
+            else:
+                context = json.loads(user_prompt[user_prompt.index("{") :])
             context["_timeout"] = timeout
-            self.generated_json_payloads.append(context)
+            self.generated_text_prompts.append(context)
             message_count = len(context.get("compressible_messages") or [])
-            return {
-                "compressed_messages": [
-                    {
-                        "role": "user",
-                        "content": f"我前面已经提供了 {message_count} 条历史消息相关的信息，现在继续同一任务。",
-                    }
-                ],
-                "warnings": [],
-            }
-        return {
-            "compressed_messages": [{"role": "user", "content": "压缩后的历史。"}],
-            "questions": [],
-            "warnings": [],
-        }
+            return (
+                "## 已确认事实\n\n"
+                f"- 已压缩 {message_count} 条历史消息相关的信息。\n\n"
+                "## 当前进展\n\n"
+                "- 当前任务继续沿用压缩前的上下文。\n\n"
+                "## 后续注意\n\n"
+                "- 后续如信息不足，应重新读取必要上下文。"
+            )
+        return "## 已确认事实\n\n- 压缩后的历史。\n\n## 当前进展\n\n- 暂无。\n\n## 后续注意\n\n- 暂无。"
 
 
 def make_settings(tmp_path: Path) -> Settings:

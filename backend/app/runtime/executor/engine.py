@@ -22,9 +22,10 @@ from ...storage.workspace_store import WorkspaceStore
 from ..context import ContextManager
 from ..context.barrier import render_barrier_message
 from ..context.compression import (
-    build_compression_payload,
-    prepare_compressed_messages_with_warnings,
-    restore_compressed_messages_from_messages,
+    build_compression_prompt,
+    fallback_compressed_markdown,
+    prepare_compressed_markdown_messages,
+    validate_compressed_markdown,
 )
 from ..context.messages import closed_message_prefix
 from ..context.prompts import context_compressor_system_prompt
@@ -394,85 +395,79 @@ class ExecutorEngine:
             source_estimated_tokens,
             self.settings.openai_model,
         )
-        payload = build_compression_payload(
+        prompt = build_compression_prompt(
             current_user_message=goal,
             compressible_messages=messages,
         )
+        warnings: list[Any] = []
         try:
-            result = await self.llm_client.generate_json(
+            raw_markdown = await self.llm_client.generate_text(
                 system_prompt=context_compressor_system_prompt(),
-                user_prompt=json.dumps(payload, ensure_ascii=False, indent=2),
+                user_prompt=prompt,
                 temperature=0.1,
                 timeout=self.settings.context_compression_timeout,
             )
-            compressed_messages, compression_warnings = prepare_compressed_messages_with_warnings(
-                result.get("compressed_messages"),
-                source_messages=messages,
+            compressed_markdown = validate_compressed_markdown(raw_markdown)
+        except Exception as exc:
+            logger.warning(
+                "context compression markdown fallback scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s error=%s",
+                agent_id,
+                project_id,
+                session_id,
+                round_id,
+                message_id,
+                parent_call_id,
+                exc,
             )
-            restored_messages = restore_compressed_messages_from_messages(
-                compressed_messages,
-                source_messages=messages,
+            compressed_markdown = fallback_compressed_markdown(str(exc))
+            warnings.append({"code": "compression_markdown_fallback", "message": str(exc)})
+        compressed_memory_messages = prepare_compressed_markdown_messages(compressed_markdown)
+        task_message = render_barrier_message({"kind": "agent_task", "task": goal})
+        next_messages = [*compressed_memory_messages, task_message]
+        estimated_tokens_after = estimate_messages_tokens(next_messages)
+        if session_id:
+            self.store.append_session_event(
+                project_id,
+                session_id,
+                event_type="context_summary",
+                scope=f"subagent:{agent_id}",
+                round_id=round_id,
+                message_id=message_id or "",
+                parent_call_id=parent_call_id,
+                payload={
+                    "agent_scope": f"subagent:{agent_id}",
+                    "covered_message_count": len(messages),
+                    "compressed_markdown": compressed_markdown,
+                    "estimated_tokens_before": usage.used_tokens,
+                    "estimated_tokens_after": estimated_tokens_after,
+                    "compression_model": self.settings.openai_model,
+                    "compression_mode": "markdown_memory",
+                    "warnings": warnings,
+                },
             )
-            task_message = render_barrier_message({"kind": "agent_task", "task": goal})
-            next_messages = [*restored_messages, task_message]
-            warnings = _combined_compression_warnings(result.get("warnings"), compression_warnings)
-            estimated_tokens_after = estimate_messages_tokens(next_messages)
-            if session_id:
-                self.store.append_session_event(
-                    project_id,
-                    session_id,
-                    event_type="context_summary",
-                    scope=f"subagent:{agent_id}",
-                    round_id=round_id,
-                    message_id=message_id or "",
-                    parent_call_id=parent_call_id,
-                    payload={
-                        "agent_scope": f"subagent:{agent_id}",
-                        "covered_message_count": len(messages),
-                        "compressed_messages": compressed_messages,
-                        "estimated_tokens_before": usage.used_tokens,
-                        "estimated_tokens_after": estimated_tokens_after,
-                        "compression_model": self.settings.openai_model,
-                        "warnings": warnings,
-                    },
-                )
-            else:
-                logger.info(
-                    "context compression event skipped scope=subagent reason=no_session agent_id=%s project_id=%s round_id=%s message_id=%s parent_call_id=%s",
-                    agent_id,
-                    project_id,
-                    round_id,
-                    message_id,
-                    parent_call_id,
-                )
+        else:
             logger.info(
-                "context compression completed scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s compressed_messages=%s estimated_tokens_before=%s estimated_tokens_after=%s warnings=%s",
+                "context compression event skipped scope=subagent reason=no_session agent_id=%s project_id=%s round_id=%s message_id=%s parent_call_id=%s",
                 agent_id,
                 project_id,
-                session_id,
                 round_id,
                 message_id,
                 parent_call_id,
-                len(compressed_messages),
-                usage.used_tokens,
-                estimated_tokens_after,
-                len(warnings),
             )
-            return next_messages
-        except Exception:
-            logger.exception(
-                "context compression failed scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s used_tokens=%s threshold_tokens=%s message_count=%s",
-                agent_id,
-                project_id,
-                session_id,
-                round_id,
-                message_id,
-                parent_call_id,
-                usage.used_tokens,
-                usage.threshold_tokens,
-                len(messages),
-            )
-            raise
+        logger.info(
+            "context compression completed scope=subagent agent_id=%s project_id=%s session_id=%s round_id=%s message_id=%s parent_call_id=%s compressed_chars=%s estimated_tokens_before=%s estimated_tokens_after=%s warnings=%s",
+            agent_id,
+            project_id,
+            session_id,
+            round_id,
+            message_id,
+            parent_call_id,
+            len(compressed_markdown),
+            usage.used_tokens,
+            estimated_tokens_after,
+            len(warnings),
+        )
+        return next_messages
 
     def _subagent_system_prompt(self, agent_id: str) -> str:
         declaration = get_subagent(agent_id)
@@ -485,8 +480,3 @@ class ExecutorEngine:
         if agent_id == "consistency_reviewer":
             return build_consistency_reviewer_system_prompt(declaration)
         raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")
-
-
-def _combined_compression_warnings(raw_warnings: Any, generated_warnings: list[dict[str, Any]]) -> list[Any]:
-    warnings = raw_warnings if isinstance(raw_warnings, list) else []
-    return [*warnings, *generated_warnings]
