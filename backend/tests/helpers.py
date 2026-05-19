@@ -36,7 +36,9 @@ class ScriptedLLMClient:
         on_text_delta: Any = None,
         response_format_json: bool = False,
     ) -> dict[str, Any]:
-        if "子 agent：" in system_prompt and not self._script_subagents:
+        tool_names = {str(tool.get("function", {}).get("name") or "") for tool in tools}
+        is_subagent_turn = {"write_pipe", "finish"}.issubset(tool_names)
+        if is_subagent_turn and not self._script_subagents:
             task_content = str(messages[-1].get("content") or "")
             target_section_id = "sec_000010" if "技术效果" in task_content else "sec_000007"
             arguments = {"content": f"目标章节：{target_section_id}\n\n正文占位。"}

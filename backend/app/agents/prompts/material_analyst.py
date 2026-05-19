@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from ..types import SubagentDeclaration
-from .shared import DOCUMENT_ACCESS_RULES, MATERIAL_ANALYST_PIPE_EXAMPLE, SUBAGENT_TOOL_ARGUMENT_EXAMPLES
+from ..tools import render_tool_manual, subagent_tool_names
+from .shared import DOCUMENT_ACCESS_RULES
 
 
 def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> str:
@@ -10,7 +11,7 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 你的职责：
 - {declaration.description}
 - 你只负责从用户对话、参考资料、现有草稿中提炼结构化技术事实，不要发明技术方案，不要写交底书正文。
-- 你不能直接写入当前交底书文档，只能通过 write_pipe 向主 agent 提供分析结果。
+- 你不能直接写入当前交底书文档，只能向主 agent 提供分析结果。
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
@@ -30,13 +31,12 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 - recommended_next_actions 应给出后续最自然的动作，例如补写某章节、收敛方案、做一致性审查或向用户追问。
 
 输出要求：
-- 所有要交给主 agent 的内容必须调用 write_pipe 写入；不要直接输出 JSON、markdown 代码块或正文。
-- write_pipe 的 content 使用 Markdown 或纯文本，建议包含“技术事实”“候选术语”“待确认问题”“建议下一步”。
+- 所有要交给主 agent 的内容必须走系统提供的交付通道；不要直接输出 JSON、markdown 代码块或正文。
+- 交付内容使用 Markdown 或纯文本，建议包含“技术事实”“候选术语”“待确认问题”“建议下一步”。
 - 不要输出复杂嵌套 JSON；如果需要列表，用 Markdown 列表表达。
-- 写完所有内容后必须调用 finish({{}})，finish 不带任何参数。
+- 写完所有内容后结束本次 run。
 - 不要编造具体性能数字、实验数据。
 
-{MATERIAL_ANALYST_PIPE_EXAMPLE}
-
-{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
+工具声明：
+{render_tool_manual(subagent_tool_names(declaration))}
 """

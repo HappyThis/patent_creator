@@ -152,6 +152,33 @@ def test_document_edit_rejects_invalid_stringified_operations(tmp_path: Path) ->
     assert scalar_items["output"]["message"] == "document_edit.operations 中的每一项都必须是对象。"
 
 
+def test_document_edit_rejects_overlong_single_edit(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    technical_problem_id = section_id(executor, project_id, "technical_problem")
+
+    overlong_text = "超" * 1501
+    edit_result = executor.document_edit(
+        project_id,
+        {
+            "operations": [
+                {
+                    "op": "append_block",
+                    "section_id": technical_problem_id,
+                    "block": {"type": "paragraph", "text": overlong_text},
+                }
+            ]
+        },
+    )
+
+    assert edit_result["status"] == "failed"
+    assert edit_result["output"]["code"] == "edit_too_large"
+    assert "不能超过 1500 字" in edit_result["output"]["message"]
+
+    search_result = executor.document_read(project_id, {"action": "search_blocks", "query": "过长正文"})
+    assert search_result["status"] == "success"
+    assert search_result["output"]["matches"] == []
+
+
 def test_append_child_section_requires_parent_section_id_and_section(tmp_path: Path) -> None:
     executor, project_id = make_executor(tmp_path)
     technical_solution_id = section_id(executor, project_id, "technical_solution")
@@ -285,6 +312,20 @@ def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path)
     assert read_result["status"] == "success"
     assert read_result["output"]["exit_code"] == 0
     assert "中文测试" in read_result["output"]["stdout"]
+
+    null_timeout = executor.exec_command(project_id, {"command": python_command("print('ok')"), "timeout": None})
+    assert null_timeout["status"] == "success"
+    assert null_timeout["output"]["stdout"].strip() == "ok"
+
+    invalid_timeout = executor.exec_command(project_id, {"command": "pwd", "timeout": "bad"})
+    assert invalid_timeout["status"] == "failed"
+    assert invalid_timeout["output"]["code"] == "invalid_operation"
+    assert invalid_timeout["output"]["message"] == "timeout 必须是数字。"
+
+    zero_timeout = executor.exec_command(project_id, {"command": "pwd", "timeout": 0})
+    assert zero_timeout["status"] == "failed"
+    assert zero_timeout["output"]["code"] == "invalid_operation"
+    assert zero_timeout["output"]["message"] == "timeout 必须大于 0。"
 
     denied_scope = executor.exec_command(project_id, {"command": "pwd"}, scope="unknown")  # type: ignore[arg-type]
     assert denied_scope["status"] == "failed"

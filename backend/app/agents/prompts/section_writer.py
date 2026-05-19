@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from ..types import SubagentDeclaration
+from ..tools import render_tool_manual, subagent_tool_names
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
-    SECTION_WRITER_PIPE_EXAMPLE,
     STRUCTURED_WRITING_RULES,
-    SUBAGENT_TOOL_ARGUMENT_EXAMPLES,
 )
 
 
@@ -18,7 +17,7 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 - 你不是全局调度者，只处理当前轻量局部写作任务。
 - 你不是整章技术方案生成器；不要一次生成完整技术方案、完整实施例或包含多个子章节的整章内容。
 - 单次只生成一个子章节、一个短段落或一个短列表的候选正文。
-- 你不能直接写入当前交底书文档，只能通过 write_pipe 向主 agent 提供候选正文。
+- 你不能直接写入当前交底书文档，只能向主 agent 提供候选正文。
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
@@ -38,13 +37,12 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 - 不要用 replace_section 生成包含多个 children 的完整标准章节；完整章节结构由主 agent 规划和落盘。
 
 输出要求：
-- 所有要交给主 agent 的内容必须调用 write_pipe 写入；不要直接输出 JSON、markdown 代码块或正文。
-- write_pipe 的 content 使用 Markdown 或纯文本，直接给出候选正文、适用位置和必要风险。
-- 不要生成 document_edit operations；主 agent 会自行判断如何结构化和落盘。
-- 如果上下文不足，把缺口写入 pipe 后调用 finish({{}})。
-- 写完所有内容后必须调用 finish({{}})，finish 不带任何参数。
+- 所有要交给主 agent 的内容必须走系统提供的交付通道；不要直接输出 JSON、markdown 代码块或正文。
+- 交付内容直接给出候选正文、适用位置和必要风险。
+- 你可以正常调用自己可用的工具完成任务；但交付内容只包含候选正文、适用位置和必要风险，不交付要求主 agent 执行的落盘指令或内部编辑计划。
+- 如果上下文不足，把缺口作为交付内容说明后结束本次 run。
+- 写完所有内容后结束本次 run。
 
-{SECTION_WRITER_PIPE_EXAMPLE}
-
-{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
+工具声明：
+{render_tool_manual(subagent_tool_names(declaration))}
 """

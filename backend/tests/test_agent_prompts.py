@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import inspect
+
 from app.agents import SUBAGENTS, get_subagent
 from app.agents.prompts import build_main_agent_system_prompt, build_section_writer_system_prompt
 from app.agents.prompts.consistency_reviewer import build_consistency_reviewer_system_prompt
-from app.agents.prompts.main_agent import (
-    build_main_agent_system_prompt as build_split_main_agent_system_prompt,
-    render_subagent_catalog,
-)
+from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_split_main_agent_system_prompt
 from app.agents.prompts.material_analyst import build_material_analyst_system_prompt
 from app.agents.prompts.section_writer import build_section_writer_system_prompt as build_split_section_writer_system_prompt
 from app.agents.prompts.solution_refiner import build_solution_refiner_system_prompt
+from app.agents.tools import MAIN_AGENT_TOOL_NAMES, render_tool_manual
 from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
-from app.core.command_platform import current_command_platform
 from app.runtime.context.barrier import render_barrier_message
 from app.runtime.context.prompts import context_compressor_system_prompt
 from app.runtime.executor.engine import SUBAGENT_TOOLS
@@ -30,9 +29,9 @@ def test_main_agent_prompt_requires_reading_source_before_uncertain_document_ans
 
     assert "先判断用户任务是否依赖当前交底书正文" in prompt
     assert "缺的是当前正文依据" in prompt
-    assert "先用 document_read 读取相关章节或 block" in prompt
-    assert "先用 search_blocks 搜索" in prompt
-    assert "include_children=true" in prompt
+    assert "先读取相关章节或 block" in prompt
+    assert "先搜索" in prompt
+    assert "必要时包含子章节" in prompt
 
 
 def test_main_agent_prompt_uses_model_visible_action_words() -> None:
@@ -88,7 +87,9 @@ def test_solution_refiner_document_edit_prompt_uses_final_text_and_structure_rul
     assert "正文写作要求" in prompt
     assert "交底书正文必须是最终态文本" in prompt
     assert "章节负责结构，block 负责具体正文" in prompt
-    assert "不要生成 document_edit operations" in prompt
+    assert "你可以正常调用自己可用的工具完成任务" in prompt
+    assert "不交付要求主 agent 执行的落盘指令或内部编辑计划" in prompt
+    assert "document_edit operations" not in prompt
 
 
 def test_subagent_prompts_define_task_execution_methods() -> None:
@@ -120,9 +121,9 @@ def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> 
 
     assert "你具备写作能力" in prompt
     assert "完整章节规划" in prompt
-    assert "可用子 agent 清单" in prompt
-    assert "选择子 agent 时，必须依据下方" in prompt
-    assert render_subagent_catalog() in prompt
+    assert "选择子 agent 时，以 execute_subagent 工具说明" in prompt
+    assert "六、子 agent 注册信息" not in prompt
+    assert "七、自动生成工具声明" not in prompt
     for declaration in SUBAGENTS.values():
         assert declaration.id in prompt
         assert declaration.description in prompt
@@ -131,7 +132,7 @@ def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> 
         assert declaration.usage_guidance in prompt
     assert "短小、明确、低创造性的最终态正文编辑" in prompt
     assert "默认上下文不包含项目标题、目录树或完整正文" in prompt
-    assert "document_read(action=get_project_context)" in prompt
+    assert "读取标题和完整目录树" in prompt
 
 
 def test_main_agent_document_read_supports_search_blocks() -> None:
@@ -143,21 +144,18 @@ def test_main_agent_document_read_supports_search_blocks() -> None:
     assert "query" in properties
 
 
-def test_exec_command_metadata_uses_current_platform() -> None:
-    profile = current_command_platform()
+def test_exec_command_metadata_comes_from_tool_docstring() -> None:
     main_tool = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "exec_command")
     subagent_tool = next(tool for tool in SUBAGENT_TOOLS if tool["function"]["name"] == "exec_command")
 
     for tool in (main_tool, subagent_tool):
         description = tool["function"]["description"]
-        assert profile.platform in description
-        assert profile.shell in description
-        assert profile.examples[0] in description
+        assert description == "在项目工作区内执行命令字符串，cwd 为当前 project 工作区。"
+        assert tool["function"]["parameters"]["properties"]["command"]["description"] == "要执行的命令字符串，按当前项目工作区作为 cwd 执行。"
 
     prompt = build_main_agent_system_prompt()
-    assert profile.platform in prompt
-    assert profile.shell in prompt
-    assert profile.examples[0] in prompt
+    assert "命令超时时返回 command_timeout" in prompt
+    assert '执行诊断命令：{"command":"ls -la","timeout":30}' in prompt
 
 
 def test_section_writer_is_limited_to_lightweight_local_writing() -> None:
@@ -166,7 +164,9 @@ def test_section_writer_is_limited_to_lightweight_local_writing() -> None:
     assert "轻量局部写作任务" in prompt
     assert "不是整章技术方案生成器" in prompt
     assert "一般不超过 800 个中文字符" in prompt
-    assert "不要生成 document_edit operations" in prompt
+    assert "你可以正常调用自己可用的工具完成任务" in prompt
+    assert "不交付要求主 agent 执行的落盘指令或内部编辑计划" in prompt
+    assert "document_edit operations" not in prompt
     assert "不要用 replace_section 生成包含多个 children 的完整标准章节" in prompt
     assert "最终态文本" in prompt
 
@@ -176,6 +176,51 @@ def test_append_child_section_protocol_is_single_shape() -> None:
     operations_description = document_edit["function"]["parameters"]["properties"]["operations"]["description"]
 
     assert "append_child_section 必须使用 parent_section_id 和 section" in operations_description
+    assert "不得超过 1500 字" in operations_description
+
+
+def test_main_agent_prompt_requires_small_document_edits() -> None:
+    prompt = build_main_agent_system_prompt()
+    tool_manual = render_tool_manual(MAIN_AGENT_TOOL_NAMES)
+
+    assert "自动生成工具声明" in prompt
+    assert tool_manual in prompt
+    assert "单次正文写入总量不得超过 1500 字" in tool_manual
+    assert "先 replace_section_blocks 写根章节总述" in tool_manual
+    assert "再逐个 append_child_section 写子章节" in tool_manual
+
+
+def test_execute_subagent_manual_renders_registered_subagents() -> None:
+    manual = render_tool_manual(("execute_subagent",))
+
+    assert "可用子 agent" in manual
+    for declaration in SUBAGENTS.values():
+        assert declaration.id in manual
+        assert declaration.description in manual
+        assert declaration.input_expectation in manual
+        assert declaration.output_contract in manual
+        assert declaration.usage_guidance in manual
+
+
+def test_agent_prompt_sources_do_not_hardcode_tool_call_examples() -> None:
+    sources = [
+        inspect.getsource(build_main_agent_system_prompt),
+        inspect.getsource(build_section_writer_system_prompt),
+        inspect.getsource(build_material_analyst_system_prompt),
+        inspect.getsource(build_solution_refiner_system_prompt),
+        inspect.getsource(build_consistency_reviewer_system_prompt),
+    ]
+    forbidden = [
+        "finish({})",
+        "write_pipe({",
+        "append_child_section 必须",
+        "document_edit 单次正文写入",
+        "document_read(action=get_project_context)",
+    ]
+
+    for source in sources:
+        for phrase in forbidden:
+            assert phrase not in source
 
 
 def test_subagent_prompts_use_pipe_protocol() -> None:
@@ -188,7 +233,8 @@ def test_subagent_prompts_use_pipe_protocol() -> None:
 
     for prompt in prompts:
         assert "write_pipe" in prompt
-        assert "finish({})" in prompt
+        assert "### finish" in prompt
+        assert "调用实例" in prompt
         assert "submit_result" not in prompt
         assert "proposal_type" not in prompt
 
@@ -200,12 +246,14 @@ def test_execute_subagent_schema_only_uses_agent_id_and_goal() -> None:
     assert params["required"] == ["agent_id", "goal"]
     assert set(params["properties"]) == {"agent_id", "goal"}
     assert params["properties"]["agent_id"]["enum"] == list(SUBAGENTS)
+    assert tool["function"]["description"] == "调度一个已注册子 agent 执行局部任务，返回合并后的 pipe content。"
+    prompt = build_main_agent_system_prompt()
     for declaration in SUBAGENTS.values():
-        assert declaration.id in tool["function"]["description"]
-        assert declaration.description in tool["function"]["description"]
-        assert declaration.input_expectation in tool["function"]["description"]
-        assert declaration.output_contract in tool["function"]["description"]
-        assert declaration.usage_guidance in tool["function"]["description"]
+        assert declaration.id in prompt
+        assert declaration.description in prompt
+        assert declaration.input_expectation in prompt
+        assert declaration.output_contract in prompt
+        assert declaration.usage_guidance in prompt
 
 
 def test_subagent_tool_schema_uses_pipe_protocol() -> None:

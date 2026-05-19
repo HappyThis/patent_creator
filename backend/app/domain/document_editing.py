@@ -17,12 +17,19 @@ from .document_tree import (
 )
 from .document_validation import validate_disclosure
 
+MAX_DOCUMENT_EDIT_TEXT_CHARS = 1500
+_EDIT_CONTENT_KEYS = {"text", "title", "items", "caption", "alt", "columns", "rows"}
+
 
 def apply_document_edit(disclosure: dict[str, Any], arguments: dict[str, Any]) -> ToolResult:
     operations_result = normalize_operations(arguments.get("operations"))
     if operations_result["status"] == "failed":
         return operations_result
     operations = operations_result["output"]["operations"]
+
+    size_result = validate_edit_size(operations)
+    if size_result["status"] == "failed":
+        return size_result
 
     draft = copy.deepcopy(disclosure)
     validation_error = validate_disclosure(draft)
@@ -88,6 +95,43 @@ def normalize_operations(raw_operations: Any) -> ToolResult:
     if not all(isinstance(operation, dict) for operation in operations):
         return tool_failed("invalid_operation", "document_edit.operations 中的每一项都必须是对象。")
     return tool_success({"operations": operations})
+
+
+def validate_edit_size(operations: list[dict[str, Any]]) -> ToolResult:
+    total_chars = sum(_count_edit_text_chars(operation) for operation in operations)
+    if total_chars > MAX_DOCUMENT_EDIT_TEXT_CHARS:
+        return tool_failed(
+            "edit_too_large",
+            (
+                f"document_edit 单次正文写入不能超过 {MAX_DOCUMENT_EDIT_TEXT_CHARS} 字；"
+                f"当前约 {total_chars} 字。请拆成多次小步写入：先写根章节总述，"
+                "再逐个 append_child_section 或 append_block，每次只写一个短章节或少量段落。"
+            ),
+        )
+    return tool_success({"text_chars": total_chars})
+
+
+def _count_edit_text_chars(value: Any, key: str | None = None) -> int:
+    if isinstance(value, str):
+        return len(value) if key in _EDIT_CONTENT_KEYS else 0
+    if isinstance(value, list):
+        if key in _EDIT_CONTENT_KEYS:
+            return sum(_count_all_strings(item) for item in value)
+        return sum(_count_edit_text_chars(item) for item in value)
+    if isinstance(value, dict):
+        return sum(_count_edit_text_chars(item, item_key) for item_key, item in value.items())
+    return 0
+
+
+def _count_all_strings(value: Any) -> int:
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, list):
+        return sum(_count_all_strings(item) for item in value)
+    if isinstance(value, dict):
+        return sum(_count_all_strings(item) for item in value.values())
+    return 0
+
 
 def apply_operation(disclosure: dict[str, Any], operation: dict[str, Any]) -> ToolResult:
     op = operation["op"]

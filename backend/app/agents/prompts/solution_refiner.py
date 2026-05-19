@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from ..types import SubagentDeclaration
+from ..tools import render_tool_manual, subagent_tool_names
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
-    SOLUTION_REFINER_PIPE_EXAMPLE,
     STRUCTURED_WRITING_RULES,
-    SUBAGENT_TOOL_ARGUMENT_EXAMPLES,
 )
 
 
@@ -16,7 +15,7 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 你的职责：
 - {declaration.description}
 - 你负责把零散的技术事实收敛为一个可写作、可继续讨论的技术方案骨架。
-- 你不能直接写入当前交底书文档，只能通过 write_pipe 向主 agent 提供方案骨架。
+- 你不能直接写入当前交底书文档，只能向主 agent 提供方案骨架。
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
@@ -34,18 +33,17 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 - 再检查因果链：每个技术效果都应能由前面的技术手段推出；不能推出的效果放入 open_questions 或 warnings。
 - 再统一术语：同一模块、步骤、数据对象和技术特征使用一致名称。
 - 如果当前信息只足够形成骨架，写清楚方案骨架和待确认点。
-- 如果目标章节明确且内容足够落地，可以给出候选正文片段，但不要生成 document_edit operations；主 agent 负责结构化和落盘。
+- 如果目标章节明确且内容足够落地，可以给出候选正文片段；主 agent 负责判断是否采纳和落盘。
 - 不要把“方案还需要确认”的内容写入候选正文；不确定事项单独写为待确认点。
 
 输出要求：
-- 所有要交给主 agent 的内容必须调用 write_pipe 写入；不要直接输出 JSON、markdown 代码块或正文。
-- write_pipe 的 content 使用 Markdown 或纯文本，建议包含“方案骨架”“模块关系”“关键流程”“创新点”“待确认点”。
-- 不要输出复杂嵌套 JSON；如果需要结构，用 Markdown 标题和列表表达。
-- 写完所有内容后必须调用 finish({{}})，finish 不带任何参数。
+- 所有要交给主 agent 的内容必须走系统提供的交付通道；不要直接输出 JSON、markdown 代码块或正文。
+- 交付内容使用 Markdown 或纯文本，建议包含“方案骨架”“模块关系”“关键流程”“创新点”“待确认点”。
+- 你可以正常调用自己可用的工具完成任务；但交付内容只包含方案骨架、候选正文和待确认点，不交付要求主 agent 执行的落盘指令或内部编辑计划。
+- 写完所有内容后结束本次 run。
 - 不要编造具体性能数字、实验数据。
-- 信息不足时，将缺口写入 pipe，不要硬套空洞描述。
+- 信息不足时，将缺口作为交付内容说明，不要硬套空洞描述。
 
-{SOLUTION_REFINER_PIPE_EXAMPLE}
-
-{SUBAGENT_TOOL_ARGUMENT_EXAMPLES}
+工具声明：
+{render_tool_manual(subagent_tool_names(declaration))}
 """

@@ -12,11 +12,11 @@ from ...agents.prompts import (
     build_solution_refiner_system_prompt,
 )
 from ...agents.runtime.openai_compat import OpenAICompatibleClient
+from ...agents.tools import build_openai_tools, build_subagent_tools
 from ...agents.workers import (
     MainAgentToolCall,
 )
 from ...core import ApiError, Settings
-from ...core.command_platform import exec_command_tool_description
 from ...domain.document_tools import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
 from ..context import ContextManager
@@ -40,73 +40,7 @@ ToolEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 logger = logging.getLogger("patent_creator.executor")
 
-SUBAGENT_TOOLS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "document_read",
-            "description": "读取当前交底书的元信息、目录、章节、block 或搜索文本。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["get_meta", "get_project_context", "get_outline", "get_section", "get_block", "search_blocks"],
-                    },
-                    "section_id": {"type": "string"},
-                    "block_id": {"type": "string"},
-                    "query": {"type": "string"},
-                    "include_children": {"type": "boolean"},
-                },
-                "required": ["action"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "exec_command",
-            "description": exec_command_tool_description(),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string"},
-                    "timeout": {"type": "number"},
-                },
-                "required": ["command"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_pipe",
-            "description": "把一小段需要展示给主 agent 的内容写入本次子 agent 内存管道。可以少量多次调用。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "要追加到 pipe 的 Markdown 或纯文本内容。避免一次写入巨大内容。",
-                    },
-                },
-                "required": ["content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "finish",
-            "description": "结束当前子 agent run。finish 不承载任何业务内容；业务内容必须先通过 write_pipe 写入。",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
-]
+SUBAGENT_TOOLS: list[dict[str, Any]] = build_openai_tools(("document_read", "exec_command", "write_pipe", "finish"))
 
 class ExecutorEngine:
     def __init__(
@@ -201,7 +135,9 @@ class ExecutorEngine:
         parent_call_id: str | None,
         on_tool_event: ToolEventSink | None,
     ) -> dict[str, Any]:
+        declaration = get_subagent(agent_id)
         system_prompt = self._subagent_system_prompt(agent_id)
+        tools = build_subagent_tools(declaration)
         messages: list[dict[str, Any]] = [dict(message) for message in initial_messages]
         max_steps = max(1, self.settings.subagent_max_steps)
         pipe = SubagentPipe()
@@ -220,7 +156,7 @@ class ExecutorEngine:
             action = await self.llm_client.generate_with_tools_stream(
                 system_prompt=system_prompt,
                 messages=messages,
-                tools=SUBAGENT_TOOLS,
+                tools=tools,
                 on_text_delta=None,
             )
             assistant_message = action.get("assistant_message")
