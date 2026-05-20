@@ -45,7 +45,7 @@
 - 子 agent JSON 输出：子 agent 最终响应启用 JSON mode；若仍返回非法 JSON，会转为 `execute_subagent` 的 failed 工具结果交回主 agent 决策
 - 子 agent SSE：子 agent 内部工具调用会以 `scope=subagent:<agent_id>` 写入 session log 并实时推送
 - `section_writer`：已接入真实 LLM runtime，输出 `document_edit_proposal` 后再通过 `document_edit` 落盘
-- `material_analyst` / `solution_refiner` / `consistency_reviewer`：已接入真实 LLM runtime，并输出各自 proposal envelope
+- `material_analyst` / `solution_refiner`：已接入真实 LLM runtime，并通过 pipe 返回轻量事实或方案骨架
 - `solution_refiner`：支持 `analysis_result`，也支持在必要时返回 `document_edit_proposal`
 - `execute_subagent`：主 agent 提供 `agent_id` 和 `goal`，`ContextManager` 自动装配子 agent `messages`，并通过 `agent_task` barrier 追加任务说明
 - `exec_command`：已接入主 agent 与子 agent，以项目工作区为 cwd 执行命令字符串，不做命令白名单限制

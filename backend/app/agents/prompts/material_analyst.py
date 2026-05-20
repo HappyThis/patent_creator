@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..types import SubagentDeclaration
 from ...tools import render_tool_manual, subagent_tool_names
-from .shared import DOCUMENT_ACCESS_RULES
+from .shared import DOCUMENT_ACCESS_RULES, SUBAGENT_WORKLOAD_RULES
 
 
 def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> str:
@@ -15,6 +15,9 @@ def build_material_analyst_system_prompt(declaration: SubagentDeclaration) -> st
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
+
+任务边界要求：
+{SUBAGENT_WORKLOAD_RULES}
 
 分析方法：
 - 先区分三类内容：用户明确陈述的事实、可从上下文合理归纳的技术关系、无法确认且需要追问的问题。

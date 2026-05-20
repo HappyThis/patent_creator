@@ -5,6 +5,7 @@ from ...tools import render_tool_manual, subagent_tool_names
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
+    SUBAGENT_WORKLOAD_RULES,
     STRUCTURED_WRITING_RULES,
 )
 
@@ -19,6 +20,9 @@ def build_solution_refiner_system_prompt(declaration: SubagentDeclaration) -> st
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
+
+任务边界要求：
+{SUBAGENT_WORKLOAD_RULES}
 
 正文写作要求：
 {FINAL_TEXT_RULES}

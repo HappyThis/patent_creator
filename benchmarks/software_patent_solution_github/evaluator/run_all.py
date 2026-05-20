@@ -214,20 +214,22 @@ def aggregate_results(results: list[dict[str, Any]], *, case_ids: list[str]) -> 
         parsed = [item.get("result") for item in case_results if isinstance(item.get("result"), dict)]
         scored = [item for item in parsed if item.get("status") == "scored" and isinstance(item.get("judge"), dict)]
         scores = [float(item["judge"]["total_score"]) for item in scored if item.get("judge", {}).get("total_score") is not None]
-        successes = [
+        artifact_successes = [
             item
             for item in parsed
-            if item.get("status") == "scored"
+            if item.get("diagnostics", {}).get("artifact_extracted") is True
             and item.get("subject_status") in {"completed", "completed_after_refinement"}
-            and item.get("diagnostics", {}).get("artifact_extracted") is True
         ]
+        status_counts = count_statuses(parsed)
         failure_statuses = sorted({str(item.get("status")) for item in parsed if item.get("status") != "scored"})
         row = {
             "case_id": case_id,
             "runs": len(case_results),
             "parsed_runs": len(parsed),
             "scored_runs": len(scored),
-            "success_rate": len(successes) / len(case_results) if case_results else 0,
+            "success_rate": len(artifact_successes) / len(case_results) if case_results else 0,
+            "artifact_success_runs": len(artifact_successes),
+            "status_counts": status_counts,
             "scores": scores,
             "average_score": mean(scores) if scores else None,
             "min_score": min(scores) if scores else None,
@@ -244,6 +246,14 @@ def aggregate_results(results: list[dict[str, Any]], *, case_ids: list[str]) -> 
         row["recommendation_reason"] = reason
         rows.append(row)
     return rows
+
+
+def count_statuses(parsed: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in parsed:
+        status = str(item.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def top_text_items(scored: list[dict[str, Any]], key: str, *, limit: int = 5) -> list[str]:
@@ -263,6 +273,15 @@ def recommend_case(row: dict[str, Any]) -> tuple[str, str]:
     success_rate = float(row["success_rate"])
     avg = row["average_score"]
     stddev = row["score_stddev"]
+    status_counts = row.get("status_counts", {})
+    runs = int(row.get("runs") or 0)
+    artifact_success_runs = int(row.get("artifact_success_runs") or 0)
+    if avg is None and artifact_success_runs:
+        if status_counts.get("artifact_extracted") == runs:
+            return "未评分 / 仅验证 artifact", "subject 已产出可评测 artifact，但本批次跳过 judge，不生成质量去留建议。"
+        if status_counts.get("judge_failed"):
+            return "未评分 / judge 失败", "subject 已产出可评测 artifact，但 Codex-as-judge 失败，应单独复跑 judge，不能按 case 淘汰处理。"
+        return "未评分 / 待补 judge", "subject 已产出可评测 artifact，但没有有效评分结果。"
     if success_rate < 0.67:
         return "淘汰或暂缓", "成功率过低，不适合作为第一批黄金 case。"
     if avg is None:

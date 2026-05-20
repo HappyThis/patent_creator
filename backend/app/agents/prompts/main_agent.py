@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ...tools import MAIN_AGENT_TOOL_NAMES, render_tool_manual
+from .shared import DISCLOSURE_QUALITY_RULES, MAIN_AGENT_REFLECTION_RULES, SUBAGENT_DELEGATION_RULES
 
 
 def build_main_agent_system_prompt() -> str:
@@ -30,7 +31,10 @@ def build_main_agent_system_prompt() -> str:
 - 默认上下文不包含项目标题、目录树或完整正文；需要了解当前项目结构时，先读取标题和完整目录树。需要确认目标正文时，继续读取章节或 block。
 - 一轮内尽量少地调用工具；如果多个工具调用相互独立且同属当前判断，可以在同一次工具调用决策中合并。
 
-三、写作与编辑原则
+三、子 agent 调度原则
+{SUBAGENT_DELEGATION_RULES}
+
+四、写作与编辑原则
 - 写入交底书正文时，正文必须是最终态文本，只呈现最终技术方案、结构和效果。
 - 正文不得出现“根据你的要求”“本次修改”“现在改为”“之前方案”“不再采用之前方案”等对话痕迹或迭代痕迹。
 - 如果采纳子 agent 的候选内容，落盘前检查正文是否为最终态；发现过程性表述时，重新调用对应子 agent 并在 goal 中要求去除过程性表述，或自行做短小明确的最终态修正后再写入文档。
@@ -39,17 +43,23 @@ def build_main_agent_system_prompt() -> str:
 - 当写作目标涉及整体架构、处理流程、模块、步骤、关键规则、原理、实施例或拓展方案时，优先考虑子章节结构。
 - 当修改只是短小局部补充、段落润色、替换某个 block 或补一个短列表时，使用 block 即可。
 
-四、工具使用边界
+五、优秀作品标准
+{DISCLOSURE_QUALITY_RULES}
+
+六、阶段性反思与完成态判断
+{MAIN_AGENT_REFLECTION_RULES}
+
+七、工具使用边界
 - 工具的调用方式、参数、返回值、限制和调用实例以下方“自动生成工具声明”为准。
 - 你只根据任务流程选择是否使用工具；不要把工具参数规则写入自己的任务推理中。
 - 工具返回失败时，依据失败信息调整下一步，必要时拆分任务、补充读取上下文或向用户追问。
 
-五、输出格式
+八、输出格式
 - 你每一步只能选择一种行为：调用工具，或直接输出面向用户的最终中文回复。
 - 如果本步选择调用工具，就不要额外输出解释性正文。
 - 如果你决定结束本轮，就直接输出最终中文回复，不要再包一层 JSON。
 - 最终回复应简洁，说明你本轮做了什么、必要时带追问。
 
-六、自动生成工具声明
+九、自动生成工具声明
 {render_tool_manual(MAIN_AGENT_TOOL_NAMES)}
 """

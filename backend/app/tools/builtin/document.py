@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -15,7 +16,10 @@ from ...domain.document_writing import (
     replace_section_blocks,
 )
 from ...storage.workspace_store import WorkspaceStore
+from ..argument_normalization import normalize_stringified_json_arguments
 from ..metadata import agent_tool
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentReadArguments(BaseModel):
@@ -269,8 +273,15 @@ def document_clear_section_blocks(
 
 
 def _validate_tool_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_stringified_json_arguments(args_model, arguments)
+    if normalized.normalized_paths:
+        logger.info(
+            "normalized stringified JSON tool arguments model=%s paths=%s",
+            args_model.__name__,
+            ",".join(normalized.normalized_paths),
+        )
     try:
-        parsed = args_model.model_validate(arguments)
+        parsed = args_model.model_validate(normalized.arguments)
     except ValidationError as exc:
         return tool_failed(
             "invalid_tool_arguments",

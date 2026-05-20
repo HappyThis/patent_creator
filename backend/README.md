@@ -54,4 +54,4 @@ export OPENAI_MODEL=mimo-v2.5-pro
 
 - Keep splitting `app/api/routes/` by bounded context as project, chat, export, and session concerns grow.
 - Keep the main agent planner in `app/services/` light, and continue moving concrete reasoning/writing behaviors into `app/agents/`.
-- Expand real-model coverage from `section_writer` to `material_analyst` and `consistency_reviewer`.
+- Keep real-model coverage focused on the registered lightweight subagents: `section_writer`, `material_analyst`, and `solution_refiner`.

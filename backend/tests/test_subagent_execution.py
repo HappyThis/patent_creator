@@ -433,8 +433,8 @@ async def test_subagent_auto_finishes_when_pipe_write_budget_is_exhausted(tmp_pa
                 tool_call(
                     "execute_subagent",
                     {
-                        "agent_id": "consistency_reviewer",
-                        "goal": "检查技术方案一致性，输出有限问题清单。",
+                        "agent_id": "material_analyst",
+                        "goal": "提炼技术事实，输出有限事实清单。",
                     },
                     "call_auto_finish_pipe",
                 )
@@ -473,7 +473,7 @@ async def test_subagent_auto_finishes_when_pipe_write_budget_is_exhausted(tmp_pa
         event
         for event in events
         if event.type == "tool_result"
-        and event.scope == "subagent:consistency_reviewer"
+        and event.scope == "subagent:material_analyst"
         and event.payload.get("tool") == "write_pipe"
     ]
     assert len(sub_write_results) == 10

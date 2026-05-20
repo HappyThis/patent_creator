@@ -9,7 +9,7 @@ EVALUATOR_DIR = Path(__file__).resolve().parent
 if str(EVALUATOR_DIR) not in sys.path:
     sys.path.insert(0, str(EVALUATOR_DIR))
 
-from run_all import parse_case_result, read_case_result, stream_pipe, write_text_if_present
+from run_all import aggregate_results, parse_case_result, read_case_result, stream_pipe, write_text_if_present
 
 
 def test_stream_pipe_prefixes_terminal_output_without_mutating_chunks() -> None:
@@ -55,3 +55,43 @@ def test_parse_case_result_ignores_prefixed_progress_and_finds_final_json() -> N
     )
 
     assert parse_case_result(stdout) == {"status": "scored", "judge": {"total_score": 76}}
+
+
+def test_aggregate_marks_judge_failed_as_unscored_infrastructure_failure() -> None:
+    aggregate = aggregate_results(
+        [
+            {
+                "case_id": "008",
+                "repeat": 1,
+                "result": {
+                    "status": "judge_failed",
+                    "subject_status": "completed",
+                    "diagnostics": {"artifact_extracted": True},
+                },
+            }
+        ],
+        case_ids=["008"],
+    )
+
+    assert aggregate[0]["success_rate"] == 1
+    assert aggregate[0]["recommendation"] == "未评分 / judge 失败"
+
+
+def test_aggregate_marks_skip_judge_artifact_as_unscored_smoke_result() -> None:
+    aggregate = aggregate_results(
+        [
+            {
+                "case_id": "001",
+                "repeat": 1,
+                "result": {
+                    "status": "artifact_extracted",
+                    "subject_status": "completed",
+                    "diagnostics": {"artifact_extracted": True},
+                },
+            }
+        ],
+        case_ids=["001"],
+    )
+
+    assert aggregate[0]["success_rate"] == 1
+    assert aggregate[0]["recommendation"] == "未评分 / 仅验证 artifact"

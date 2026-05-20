@@ -16,26 +16,24 @@
 
 ## 一、总体原则
 
-系统提供 4 个业务子 agent：
+系统提供 3 个业务子 agent：
 
 1. `material_analyst`
 2. `solution_refiner`
 3. `section_writer`
-4. `consistency_reviewer`
 
-这 4 个子 agent 对应四类核心能力：
+这 3 个子 agent 对应三类核心能力：
 
 1. 从资料和对话中抽取事实
 2. 将事实收敛为技术方案
 3. 面向局部 section 或 block 生成候选正文
-4. 对已有内容做一致性审查
 
 统一原则：
 
 1. 用户始终只与主 agent 对话。
 2. 子 agent 不直接面向用户。
 3. 主 agent 负责决定何时调用哪个子 agent。
-4. 子 agent 只提供分析、骨架、候选正文或审查意见。
+4. 子 agent 只提供分析、骨架或候选正文。
 5. 主 agent 负责解释子 agent 内容，并决定是否采纳。
 6. `document_edit` 只能由主 agent 调用。
 7. 子 agent 不直接修改 `disclosure.json`。
@@ -49,7 +47,7 @@
 - 分析用户资料和已有正文
 - 读取自身权限范围内允许读取的上下文
 - 使用自身权限范围内允许使用的工作工具
-- 生成分析、方案骨架、局部候选正文或审查意见
+- 生成分析、方案骨架或局部候选正文
 - 将需要展示给主 agent 的内容写入 pipe
 - 调用 `finish({})` 结束本次子 agent run
 
@@ -159,30 +157,6 @@
 - 目标 section 或 block 已经明确
 - 主 agent 需要一个轻量正文候选，而不是完整章节
 
-### 4. consistency_reviewer
-
-`consistency_reviewer` 用于检查当前内容在术语、逻辑、章节关系和技术闭环上的一致性。
-
-它主要负责：
-
-- 检查术语是否统一
-- 检查技术问题、技术方案、技术效果是否闭环
-- 检查实施例是否支撑方案
-- 检查章节是否冲突、跳步、空泛
-- 给主 agent 提供问题清单、风险和建议
-
-它不直接负责：
-
-- 直接改正文
-- 决定是否最终采纳修改
-- 接管写作任务
-
-适合场景：
-
-- 用户要求“检查一下”
-- 主 agent 判断当前文本值得做一次 review
-- 某次写作或重写后需要局部审查
-
 ## 五、子 agent 声明字段
 
 每个子 agent 声明包含：
@@ -253,28 +227,12 @@
 }
 ```
 
-### consistency_reviewer
-
-```json
-{
-  "id": "consistency_reviewer",
-  "description": "检查术语、逻辑链路和章节闭环的一致性。",
-  "input_expectation": "提供待审查章节、相关上下游章节和审查目标。",
-  "output_contract": "通过 pipe 返回问题清单、风险和建议。",
-  "usage_guidance": "适合在正文已有草稿后检查术语一致性、问题-方案闭环和方案-效果因果链；不要要求它直接改写或落盘文档。",
-  "tool_permissions": [
-    "document_read",
-    "exec_command"
-  ]
-}
-```
-
 ## 七、设计结论
 
 子 agent 设计如下：
 
-1. 子 agent 清单为 `material_analyst`、`solution_refiner`、`section_writer`、`consistency_reviewer`。
-2. 子 agent 只提供分析、骨架、候选正文或审查意见，不直接修改文档。
+1. 子 agent 清单为 `material_analyst`、`solution_refiner`、`section_writer`。
+2. 子 agent 只提供分析、骨架或候选正文，不直接修改文档。
 3. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
 4. 子 agent 的结果内容通过 `write_pipe(content)` 进入 pipe。
 5. 子 agent 通过 `finish({})` 显式结束本次 run。

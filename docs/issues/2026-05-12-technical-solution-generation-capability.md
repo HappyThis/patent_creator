@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在多个 case 中产出并评分技术方案，子 agent 的旧 `submit_result` 协议问题、复杂 JSON 压缩协议问题、旧 `document_edit + operations` 心智负担和工具失败后绕路恢复问题已经明显收敛；但复杂 case 中仍存在 provider 流式中断、写入策略成本、工具参数预防、写作阶段上下文成本和技术方案质量不足等链路稳定性与能力质量问题。
+文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在多个 case 中产出并评分技术方案，子 agent 的旧 `submit_result` 协议问题、复杂 JSON 压缩协议问题、旧 `document_edit + operations` 心智负担、工具失败后绕路恢复、reviewer timeout 和子 agent 不 finish 风险已经明显收敛；但复杂 case 中仍存在 provider 流式中断、重复委派、任务规模边界、写入策略成本、工具参数预防、写作阶段上下文成本和技术方案质量不足等链路稳定性与能力质量问题。
 
 已关闭子问题：
 
@@ -26,14 +26,16 @@
 - `subagent-task-boundary` 的阻断级问题已关闭：`section_writer` 已被重新定位为轻量局部写作工具，实测中不再承担旧式整章大 JSON 提交；复杂正文主要由主 agent 基于分析结果直接落盘。
 - `tool-failure-recovery` 已关闭为阻断级问题：`010` 复跑中两次 `document_edit` 失败后，主 agent 均优先修正同一工具调用并重试成功，未再绕行读取内部文档文件。
 - `benchmark-failed-cases` 已关闭：`005`、`007` 均已完成单独排查和复跑，证明不是不可运行 case。
+- `benchmark-artifact-after-review-timeout` 已关闭：`consistency_reviewer` 已移除，`20260520-after-reviewer-removal-010` 验证不再因 reviewer timeout 失败。
+- `subagent-finish-boundary` 已关闭：`write_pipe` 预算、预算 ack 和无参 `finish` 已能兜住子 agent 无限写 pipe / 不 finish 的旧协议收尾风险。
 
 仍开放子问题：
 
 - provider 流式响应仍可能在长轮次中断；`010` 首次复验在 `1056s` 处因 `httpx.ReadError` 结束为 `round_failed`。
 - 主 agent 虽然能自恢复，但仍会先尝试超过 1500 字的文档写入，导致可预防的 `edit_too_large` 失败。
 - 主 agent 仍可能在较晚阶段才写入 `technical_solution`；成功复跑中约 `585s` 才开始落盘，若 provider 在此之前中断仍可能无 artifact。
-- 主 agent 已有 artifact 后仍可能继续重型 review / analyst 子 agent，导致已有产物无法进入 judge。
-- 子 agent 移除最大步数后不再被机械截断，但 reviewer / analyst 类任务需要更强的语义收尾约束。
+- 主 agent 已有 artifact 后仍可能重复委派同类 analyst / refiner 子 agent，导致压缩、读取和 pipe 预算重复消耗。
+- 子 agent 单次任务规模仍可能过大；pipe 预算限制了交付内容，但不能限制子 agent 在写 pipe 前的读取、分析和压缩成本。
 - 主 agent 缺少“够了就停”的完成策略，复杂任务中可能持续补查、补写、补审查，直到 round timeout。
 - 复杂 case 中上下文压缩已稳定，但重复压缩和长上下文读取仍会带来明显耗时与 token 成本。
 - 子 agent pipe 预算已经生效，但子 agent 仍常先超预算写入再压缩，预算规划不足。
@@ -46,8 +48,8 @@ P0：
 
 - 技术方案质量验证不足。当前已通过至少 3 个 case 证明完整链路能跑通，但样本规模和失败 case 排查还不足以证明系统能稳定生成合理、可实施、具备保护价值的技术方案。
 - provider 流式中断会直接破坏长轮次产物落地。需要设计对 `httpx.ReadError` / `llm_stream_error` 的恢复策略，尤其是已经有部分输出或工具调用历史时如何安全继续。
-- 已有 artifact 后仍继续重型 review 的问题会导致本可评分的 case 变成 `round_failed`。主 agent 需要先保证可提交，再做有限增强。
-- 子 agent 无最大步数后需要语义边界和父 agent 调度边界，避免 reviewer / analyst 长跑。
+- 子 agent 任务规模边界仍需升级为工具层约束，避免主 agent 把全项目、多主题、跨模块分析交给轻量子 agent。
+- 主 agent 重复委派同类子 agent 的问题会显著拉长复杂 case，需要在 `execute_subagent` 层做近似 goal 去重或要求明确新增缺口。
 - 主 agent 需要明确“够了就停”的完成策略，避免复杂 case 持续补全到 timeout。
 
 P1：
@@ -56,6 +58,7 @@ P1：
 - 默认分段写入策略不足。复杂技术方案应默认采用 `replace_section` 写摘要、再逐个 `append_child_section` 追加子章节，而不是先尝试一次性写完整大 section。
 - 工具参数预防不足。旧 `operations` 问题已关闭，但模型仍可能超过单次 1500 字正文写入限制，需要从工具 schema、prompt 和可选预检查层降低可恢复失败出现概率。
 - 子 agent pipe 预算规划不足。预算机制已能拒绝超长内容，但模型仍常先超额写入，再根据工具反馈压缩，增加调用成本。
+- 子 agent 读取预算不足。pipe 预算不限制 `document_read` / `exec_command` 次数，analyst / refiner 仍可能拖慢复杂 case。
 
 P2：
 
@@ -268,14 +271,14 @@ P2：
    - `010` subject 约 `248s` 完成，最终 `scored=82`，相比此前接近 `1200s` 才收尾有明显改善。
    - 当前更主要的问题不是 `write_pipe + finish` 是否能传回结果，而是长任务如何及时结束。
 
-2. `005` 暴露出已有 artifact 后仍继续重型 review 的问题。
+2. `005` 曾暴露出已有 artifact 后仍继续重型 review 的问题。
    - `005` 已写出并提取 `evaluated_artifact.md`，但 subject 状态仍为 `round_failed`。
    - 原因是主流程在已有技术方案后继续调用 `consistency_reviewer`，最终耗尽 `1200s` round timeout。
-   - 这说明主 agent 需要“先可提交，再有限增强”的完成策略，不能把完整 review 作为结束前置条件。
+   - 后续 `consistency_reviewer` 已移除，旧 reviewer timeout 问题关闭；该现象沉淀为更一般的完成策略和重复委派问题。
 
 3. 移除子 agent 最大步数后，不能再依赖机械截断保证收尾。
    - 该改动解决了 `007` 一类复杂子 agent 被硬切断的问题。
-   - 但 reviewer / analyst 类子 agent 仍需要任务语义边界：只输出短结论、缺口列表或局部证据，不承担完整长链路闭环。
+   - 当前 pipe 预算和无参 `finish` 已关闭“不及时 finish”旧风险；剩余问题转为 analyst / refiner 的任务规模、读取预算和重复委派控制。
 
 4. 文档写入工具小步写入有效，旧复杂 `operations` 入口已移除。
    - `010` 基本按多次追加子章节写入，说明单次写入限制和提示策略有效。
@@ -301,8 +304,29 @@ P2：
 
 新增或仍开放的问题：
 
-- 主 agent 已有 artifact 后仍调用 `consistency_reviewer`，完成策略仍未收束。
-- pipe 预算只限制交付内容，不限制 reviewer 在写 pipe 前大量读取章节。
+- `consistency_reviewer` 后续已移除，旧 reviewer timeout 问题关闭；但主 agent 已有主体后仍可能重复调用 `material_analyst` 等同类子 agent，完成策略仍未收束。
+- pipe 预算只限制交付内容，不限制 analyst / refiner 在写 pipe 前大量读取章节。
 - 主 agent 仍可能重复提交同一批文档写入工具调用，生成重复子章节。
 - 当前文档写入工具不支持删除子章节，模型可能通过清空 blocks 留下空壳章节。
 - 主 agent 通过 `exec_command` 直接修改 `disclosure.json`，绕过文档写入工具边界。这是新的 P0 工具权限问题。
+
+## 2026-05-20 reviewer 移除后复测补充
+
+复跑 `010`：
+
+- run id：`20260520-after-reviewer-removal-010`
+- subject 状态：`completed`
+- subject 用时：约 `687s`
+- judge 状态：`scored`
+- 分数：`78`
+
+已关闭：
+
+- 旧 `benchmark-artifact-after-review-timeout`：移除 `consistency_reviewer` 后，`010` 不再因 reviewer 链路耗尽 `1200s` round timeout。
+- 旧 `subagent-finish-boundary`：本次所有子 agent 均能通过 `finish` 结束，旧的“无限写 pipe / 不 finish”风险已由 pipe 预算和无参 finish 兜住。
+
+新增或仍开放的问题：
+
+- 主 agent 在已有主体技术方案并自检后，又重复调用 `material_analyst`，且 goal 与第一次高度相似。
+- 第二次 `material_analyst` 触发 context compression，`used_tokens=118436`，说明重复委派会放大读取、压缩和 pipe 成本。
+- 该问题已转入专项 issue：`subagent-duplicate-delegation`、`subagent-large-task-boundary` 和 `agent-completion-policy`。

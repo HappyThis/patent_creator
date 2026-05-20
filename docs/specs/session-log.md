@@ -173,7 +173,6 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 - `subagent:material_analyst`
 - `subagent:solution_refiner`
 - `subagent:section_writer`
-- `subagent:consistency_reviewer`
 
 ## 七、事件结构
 

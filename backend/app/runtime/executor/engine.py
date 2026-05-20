@@ -6,7 +6,6 @@ from typing import Any, Awaitable, Callable
 
 from ...agents import get_subagent
 from ...agents.prompts import (
-    build_consistency_reviewer_system_prompt,
     build_material_analyst_system_prompt,
     build_section_writer_system_prompt,
     build_solution_refiner_system_prompt,
@@ -461,6 +460,4 @@ class ExecutorEngine:
             return build_material_analyst_system_prompt(declaration)
         if agent_id == "solution_refiner":
             return build_solution_refiner_system_prompt(declaration)
-        if agent_id == "consistency_reviewer":
-            return build_consistency_reviewer_system_prompt(declaration)
         raise ApiError(400, "unsupported_agent", f"未实现的子 agent：{agent_id}")

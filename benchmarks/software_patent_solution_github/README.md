@@ -9,7 +9,6 @@
 - [GitHub 中型项目软件专利技术方案评测基准](../../docs/benchmarks/software-patent-solution-github.md)
 - [GitHub 中型项目候选清单](../../docs/benchmarks/github-project-candidates.md)
 - [测试项难度复评](./difficulty_review.md)
-- [测试项筛选评估](./case_selection_report.md)
 
 ## 概念模型
 
@@ -67,7 +66,7 @@ benchmark runner 根据 `snapshot.json` 拉取仓库并 checkout 到指定 commi
 
 评估器应在主 agent 写作结束后读取当前交底书文档，抽取 `technical_solution` 章节，生成 `evaluated_artifact.md` 并交给评分器。最终聊天回复、工具调用轨迹、子 agent proposal、session event、文档 diff 等不作为评分输入。
 
-评估器运行时会在工具层限制文档写入工具，只允许写入 `technical_solution` 章节。主 agent 若尝试编辑其他章节，工具会返回失败结果；该失败不直接计入评分，但能防止评测产物被其他章节污染。
+评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能从 `disclosure.json` 中提取有效的 `technical_solution` 内容，就进入内容评分。
 
 如果 `technical_solution` 章节为空，或内容明显不是技术方案，评估器可以继续向同一主 agent 会话发送固定补充指令，要求“继续充实技术方案章节”。补充次数由 runner 配置控制；超过次数后仍未形成有效技术方案的 case 记为 `skipped_no_solution_artifact`，不对聊天回复进行兜底评分。
 

@@ -166,6 +166,89 @@ def test_document_write_tools_reject_overlong_single_edit(tmp_path: Path) -> Non
     assert search_result["output"]["matches"] == []
 
 
+def test_document_write_tools_normalize_stringified_json_containers(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    technical_problem_id = section_id(executor, project_id, "technical_problem")
+    technical_solution_id = section_id(executor, project_id, "technical_solution")
+
+    append_block = run_tool(
+        executor,
+        project_id,
+        "document_append_block",
+        {
+            "section_id": technical_problem_id,
+            "block": json.dumps({"type": "paragraph", "text": "字符串化 block 会被还原。"}, ensure_ascii=False),
+        },
+    )
+    assert append_block["status"] == "success"
+
+    append_child = run_tool(
+        executor,
+        project_id,
+        "document_append_child_section",
+        {
+            "parent_section_id": technical_solution_id,
+            "title": "参数归一化",
+            "blocks": json.dumps(
+                [
+                    {"type": "paragraph", "text": "字符串化 blocks 会被还原。"},
+                    {"type": "list", "ordered": False, "items": json.dumps(["A", "B"], ensure_ascii=False)},
+                ],
+                ensure_ascii=False,
+            ),
+        },
+    )
+    assert append_child["status"] == "success"
+
+    disclosure = executor.store.get_disclosure(project_id)
+    problem = next(section for section in disclosure["sections"] if section["type"] == "technical_problem")
+    solution = next(section for section in disclosure["sections"] if section["type"] == "technical_solution")
+    assert problem["blocks"][0]["text"] == "字符串化 block 会被还原。"
+    assert solution["children"][0]["blocks"][0]["text"] == "字符串化 blocks 会被还原。"
+    assert solution["children"][0]["blocks"][1]["items"] == ["A", "B"]
+
+
+def test_document_write_tools_do_not_parse_text_as_json(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    technical_problem_id = section_id(executor, project_id, "technical_problem")
+    json_like_text = '{"保留为正文": true}'
+
+    append_block = run_tool(
+        executor,
+        project_id,
+        "document_append_block",
+        {
+            "section_id": technical_problem_id,
+            "block": {"type": "paragraph", "text": json_like_text},
+        },
+    )
+
+    assert append_block["status"] == "success"
+    disclosure = executor.store.get_disclosure(project_id)
+    problem = next(section for section in disclosure["sections"] if section["type"] == "technical_problem")
+    assert problem["blocks"][0]["text"] == json_like_text
+
+
+def test_document_write_tools_reject_stringified_json_with_wrong_container_type(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    technical_solution_id = section_id(executor, project_id, "technical_solution")
+
+    append_child = run_tool(
+        executor,
+        project_id,
+        "document_append_child_section",
+        {
+            "parent_section_id": technical_solution_id,
+            "title": "错误容器",
+            "blocks": json.dumps({"type": "paragraph", "text": "blocks 需要数组。"}, ensure_ascii=False),
+        },
+    )
+
+    assert append_child["status"] == "failed"
+    assert append_child["output"]["code"] == "invalid_tool_arguments"
+    assert "blocks" in append_child["output"]["message"]
+
+
 def test_append_child_section_rejects_legacy_section_object_shape(tmp_path: Path) -> None:
     executor, project_id = make_executor(tmp_path)
     technical_solution_id = section_id(executor, project_id, "technical_solution")

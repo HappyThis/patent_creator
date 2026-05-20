@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：至少 4 个 case 已经跑通完整 subject + Codex-as-judge 链路，其中包含复杂 `010`；`005`、`007` 已完成单独排查和复跑，证明它们不是不可运行 case，但仍需要沉淀稳定回归流程、case 分层和结果报告规范。
+文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：`20260520-full-10cases-5workers-after-reviewer-removal` 已经证明 10 个 case 的 subject 均可完成并抽取 artifact，其中 9 个进入 Codex-as-judge 并评分；但仍有 `008` 因 Codex judge 启动阶段插件同步 403 / Cloudflare challenge 而 `judge_failed`，还需要沉淀稳定回归流程、case 分层、judge 失败重试和结果报告规范。
 
 已关闭子问题：
 
@@ -25,11 +25,13 @@
 - `010` 在单独提高 `round-timeout` 到 `1200` 秒后可完成闭环，说明该 case 本身不是不可运行样本。
 - `010` 在 Markdown memory 压缩改造后复跑成功：`20260518-compression-md-010-rerun2` 完成 subject + artifact + Codex-as-judge，得分 `72`。
 - `005`、`007` 已完成单独排查与复跑：`007` 在 `20260520-094905-007` 中 `scored=82`，`005` 在 `20260520-113247-005` 中 `scored=75`，历史 `benchmark-failed-cases` 子问题关闭。
+- `20260520-full-10cases-5workers-after-reviewer-removal` 全量运行中，10 个 case 的 subject 全部完成，9 个 scored；历史“复杂 case 无法产出 artifact”已不再是当前主阻断。
 
 仍开放子问题：
 
 - 继续复核和筛选正式 case 的质量门槛。
 - 将复杂 case 的低并发、timeout 和失败复跑策略沉淀为稳定回归流程。
+- 处理 Codex-as-judge 启动阶段的偶发基础设施失败，例如插件同步 403 / Cloudflare challenge 导致的 `judge_failed`。
 - 修正 `--skip-judge` subject-only smoke run 的报告分类，避免把 `artifact_extracted` 未评分结果显示为 0% / 淘汰。
 - 沉淀批量运行、汇总和横向比较流程。
 - 将 case 分层为核心质量 case、待校准 case、压力 / 回归 case，避免内容质量分与长链路稳定性混在一起。
@@ -43,12 +45,45 @@ P1：
 - 继续筛选正式 case 来源，优先覆盖 agent / AI 工具链、开发工具、同步系统、权限系统等机制型软件项目。
 - 统一 case 质量门槛，避免把 bug fix、小补丁、过细需求或已经暴露答案的需求放入核心 benchmark。
 - 明确 case 分层：`005`、`007` 这类会强烈测试长链路收尾、子 agent 调度和 timeout 的样本，短期更适合归入压力 / 回归 case；`010` 可作为高难质量 case，但需要检查 request 与 rubric 是否对齐。
+- Codex-as-judge 运行失败应与 subject agent 失败区分。`008` 本轮 subject 已完成并抽取 artifact，但 judge 因插件同步访问 `chatgpt.com/backend-api/plugins/featured` 返回 403 / Cloudflare challenge 而失败。
 - 修正 subject-only smoke run 的 `case_selection_report.md` 分类逻辑：`--skip-judge` 时应显示“未评分 / 仅验证 artifact”，而不是按 0% 通过率给出“淘汰或暂缓”。
 
 P2：
 
 - 从黄金 case 扩展到正式 20 个左右的回归集。
 - 建立长期批量运行、结果趋势对比和模型横向比较流程。
+
+## 2026-05-20 全量 10 case / 5 worker 运行
+
+本次运行：
+
+- run id：`20260520-full-10cases-5workers-after-reviewer-removal`
+- 并发：`--workers 5`
+- timeout：`--round-timeout 1200 --judge-timeout 900`
+- subject：10/10 完成并抽取 `evaluated_artifact.md`
+- judge：9/10 scored，`008` 为 `judge_failed`
+
+结果：
+
+| Case | Status | Score | 备注 |
+| --- | --- | ---: | --- |
+| 001 | `scored` | 72 | 方向正确但 transcript / continue / PTY gating 等关键机制不足。 |
+| 002 | `scored` | 82 | Run Record 方向较完整，但 provenance / MCP / leaderboard 等机制不足。 |
+| 003 | `scored` | 82 | Git 镜像方向正确，但初始化、UI、冲突和 tombstone 不足。 |
+| 004 | `scored` | 78 | 仍暴露重型子 agent 链路；质量扣分来自字段分层和清理一致性等机制不足。 |
+| 005 | `scored` | 74 | reviewer timeout 已消失；质量仍偏中档。 |
+| 006 | `scored` | 89 | 本轮最高分，但 subject 用时约 711 秒，仍属长链路。 |
+| 007 | `scored` | 80 | 原压力样本已能跑通；仍缺 headless client tools 降级等关键边界。 |
+| 008 | `judge_failed` | - | subject 约 734 秒完成；judge 失败来自 Codex 插件同步 403 / Cloudflare challenge，不是无 artifact。 |
+| 009 | `scored` | 78 | 多模态 read 方向正确，但模型输出转换层和 PDF/file-data 不足。 |
+| 010 | `scored` | 78 | 父子 agent 方向正确，但 Workspace proxy、MCP proxy 和 RPC 权限边界不完整。 |
+
+本次结论：
+
+- benchmark 主链路可运行性比此前明显改善，复杂 case 基本能产出可评测 artifact。
+- 全量均分若只算 scored case 为 `79.22`，但 `008` 因 judge 基础设施失败缺分，因此这不是完整质量均分。
+- `008` 的失败应归入 `benchmark-judge-plugin-sync-failure`，不应归入 subject agent 能力失败。
+- case 分层仍需要推进：`006/007/008` 等样本对长链路、子 agent 和 judge 稳定性压力较大；核心质量均分应与压力 / 回归样本分开呈现。
 
 ## 当前决策
 

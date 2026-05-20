@@ -5,6 +5,7 @@ from ...tools import render_tool_manual, subagent_tool_names
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
+    SUBAGENT_WORKLOAD_RULES,
     STRUCTURED_WRITING_RULES,
 )
 
@@ -21,6 +22,9 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 
 上下文使用要求：
 {DOCUMENT_ACCESS_RULES}
+
+任务边界要求：
+{SUBAGENT_WORKLOAD_RULES}
 
 写作要求：
 - 优先忠实吸收用户输入中的有效信息。

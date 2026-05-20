@@ -4,7 +4,6 @@ import inspect
 
 from app.agents import SUBAGENTS, get_subagent
 from app.agents.prompts import build_main_agent_system_prompt, build_section_writer_system_prompt
-from app.agents.prompts.consistency_reviewer import build_consistency_reviewer_system_prompt
 from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_split_main_agent_system_prompt
 from app.agents.prompts.material_analyst import build_material_analyst_system_prompt
 from app.agents.prompts.section_writer import build_section_writer_system_prompt as build_split_section_writer_system_prompt
@@ -20,7 +19,6 @@ def test_agent_prompts_are_split_by_agent_module() -> None:
     assert build_section_writer_system_prompt is build_split_section_writer_system_prompt
     assert "material_analyst" in build_material_analyst_system_prompt(get_subagent("material_analyst"))
     assert "solution_refiner" in build_solution_refiner_system_prompt(get_subagent("solution_refiner"))
-    assert "consistency_reviewer" in build_consistency_reviewer_system_prompt(get_subagent("consistency_reviewer"))
 
 
 def test_main_agent_prompt_requires_reading_source_before_uncertain_document_answers() -> None:
@@ -66,7 +64,6 @@ def test_subagent_prompts_use_model_visible_context_and_document_rules() -> None
         build_section_writer_system_prompt(get_subagent("section_writer")),
         build_material_analyst_system_prompt(get_subagent("material_analyst")),
         build_solution_refiner_system_prompt(get_subagent("solution_refiner")),
-        build_consistency_reviewer_system_prompt(get_subagent("consistency_reviewer")),
     ]
 
     for prompt in prompts:
@@ -94,7 +91,6 @@ def test_solution_refiner_prompt_uses_final_text_and_structure_rules() -> None:
 def test_subagent_prompts_define_task_execution_methods() -> None:
     material_prompt = build_material_analyst_system_prompt(get_subagent("material_analyst"))
     solution_prompt = build_solution_refiner_system_prompt(get_subagent("solution_refiner"))
-    reviewer_prompt = build_consistency_reviewer_system_prompt(get_subagent("consistency_reviewer"))
 
     assert "用户明确陈述的事实" in material_prompt
     assert "可从上下文合理归纳的技术关系" in material_prompt
@@ -108,11 +104,20 @@ def test_subagent_prompts_define_task_execution_methods() -> None:
     assert "检查因果链" in solution_prompt
     assert "只足够形成骨架" in solution_prompt
 
-    assert "审查清单" in reviewer_prompt
-    assert "术语一致性" in reviewer_prompt
-    assert "问题-方案闭环" in reviewer_prompt
-    assert "方案-效果因果链" in reviewer_prompt
-    assert "severity" in reviewer_prompt
+
+def test_subagent_prompts_can_report_overbroad_tasks() -> None:
+    prompts = [
+        build_section_writer_system_prompt(get_subagent("section_writer")),
+        build_material_analyst_system_prompt(get_subagent("material_analyst")),
+        build_solution_refiner_system_prompt(get_subagent("solution_refiner")),
+    ]
+
+    for prompt in prompts:
+        assert "任务边界要求" in prompt
+        assert "开始实质分析或写作前，先快速判断" in prompt
+        assert "任务过重时，向主 agent 写入“任务边界反馈”" in prompt
+        assert "建议拆成哪些更小目标" in prompt
+        assert "正常执行时只交付服务本次 goal 的最小有用内容" in prompt
 
 
 def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> None:
@@ -122,7 +127,6 @@ def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> 
     assert "完整章节规划" in prompt
     assert "选择子 agent 时，以 execute_subagent 工具说明" in prompt
     assert "六、子 agent 注册信息" not in prompt
-    assert "七、自动生成工具声明" not in prompt
     for declaration in SUBAGENTS.values():
         assert declaration.id in prompt
         assert declaration.description in prompt
@@ -132,6 +136,32 @@ def test_main_agent_prompt_defines_writing_boundary_and_real_context_shape() -> 
     assert "短小、明确、低创造性的最终态正文编辑" in prompt
     assert "默认上下文不包含项目标题、目录树或完整正文" in prompt
     assert "读取标题和完整目录树" in prompt
+
+
+def test_main_agent_prompt_requires_workload_assessment_before_delegation() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "子 agent 调度原则" in prompt
+    assert "调度子 agent 前先评估工作量" in prompt
+    assert "局部、单目标、可用短交付物" in prompt
+    assert "不要把完整技术方案生成" in prompt
+    assert "全项目深度分析" in prompt
+    assert "收到子 agent 的任务边界反馈" in prompt
+    assert "不要机械连续追加 refiner 或 writer" in prompt
+
+
+def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "优秀作品标准" in prompt
+    assert "内容合理性、内容正确性、技术创新性、表达与规划" in prompt
+    assert "语言简洁易懂而不失专业" in prompt
+    assert "阶段性反思与完成态判断" in prompt
+    assert "每完成一次关键读取、子 agent 交付采纳、正文写入或结构调整后，做一次轻量自检" in prompt
+    assert "问题-方案-效果是否闭合" in prompt
+    assert "当前材料条件下已经形成合理、正确、有创新度且结构清晰的完成态" in prompt
+    assert "继续写只能带来重复、扩散或细枝末节补充" in prompt
+    assert "反思结论用于决定下一步行动，不写入交底书正文" in prompt
 
 
 def test_main_agent_document_read_supports_search_blocks() -> None:
@@ -234,7 +264,6 @@ def test_agent_prompt_sources_do_not_hardcode_tool_call_examples() -> None:
         inspect.getsource(build_section_writer_system_prompt),
         inspect.getsource(build_material_analyst_system_prompt),
         inspect.getsource(build_solution_refiner_system_prompt),
-        inspect.getsource(build_consistency_reviewer_system_prompt),
     ]
     forbidden = [
         "finish({})",
@@ -255,7 +284,6 @@ def test_subagent_prompts_use_pipe_protocol() -> None:
         build_section_writer_system_prompt(get_subagent("section_writer")),
         build_material_analyst_system_prompt(get_subagent("material_analyst")),
         build_solution_refiner_system_prompt(get_subagent("solution_refiner")),
-        build_consistency_reviewer_system_prompt(get_subagent("consistency_reviewer")),
     ]
 
     for prompt in prompts:

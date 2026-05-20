@@ -28,14 +28,6 @@ SUBAGENTS: dict[str, SubagentDeclaration] = {
         usage_guidance="轻量局部写作工具；不要用于完整技术方案、完整实施例或多子章节整章生成。单次正文一般不超过 800 个中文字符。",
         tool_permissions=("document_read", "exec_command"),
     ),
-    "consistency_reviewer": SubagentDeclaration(
-        id="consistency_reviewer",
-        description="检查术语、逻辑链路和章节闭环的一致性。",
-        input_expectation="提供待审查章节、相关上下游章节和审查目标。",
-        output_contract="通过 pipe 返回问题清单、风险和建议。",
-        usage_guidance="适合在正文已有草稿后检查术语一致性、问题-方案闭环和方案-效果因果链；不要要求它直接改写或落盘文档。",
-        tool_permissions=("document_read", "exec_command"),
-    ),
 }
 
 
