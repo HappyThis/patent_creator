@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..tools import MAIN_AGENT_TOOL_NAMES, render_tool_manual
+from ...tools import MAIN_AGENT_TOOL_NAMES, render_tool_manual
 
 
 def build_main_agent_system_prompt() -> str:

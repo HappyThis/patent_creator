@@ -67,7 +67,7 @@ benchmark runner 根据 `snapshot.json` 拉取仓库并 checkout 到指定 commi
 
 评估器应在主 agent 写作结束后读取当前交底书文档，抽取 `technical_solution` 章节，生成 `evaluated_artifact.md` 并交给评分器。最终聊天回复、工具调用轨迹、子 agent proposal、session event、文档 diff 等不作为评分输入。
 
-评估器运行时会在工具层限制 `document_edit`，只允许写入 `technical_solution` 章节。主 agent 若尝试编辑其他章节，工具会返回失败结果；该失败不直接计入评分，但能防止评测产物被其他章节污染。
+评估器运行时会在工具层限制文档写入工具，只允许写入 `technical_solution` 章节。主 agent 若尝试编辑其他章节，工具会返回失败结果；该失败不直接计入评分，但能防止评测产物被其他章节污染。
 
 如果 `technical_solution` 章节为空，或内容明显不是技术方案，评估器可以继续向同一主 agent 会话发送固定补充指令，要求“继续充实技术方案章节”。补充次数由 runner 配置控制；超过次数后仍未形成有效技术方案的 case 记为 `skipped_no_solution_artifact`，不对聊天回复进行兜底评分。
 
@@ -146,6 +146,8 @@ benchmarks/software_patent_solution_github/bench.py status <run_id> --case 001
 Codex-as-judge 使用本机 `codex exec`，在同一个项目快照目录中以只读方式阅读源码并打分。
 
 运行中会在终端输出 `[benchmark]` 状态行，批量运行也会实时转发单 case 子进程输出，不再等整个 case 结束后一次性打印。多 worker 并发时，终端中的每条转发日志都会带来源前缀，例如 `[worker=bench-worker_0 run=r01-001 case=001 repeat=1/2] stdout ...` 或 `[worker=bench-worker_1 run=r02-003 case=003 repeat=2/2] stderr ...`，用于区分是哪一个 worker/case/repeat 产生的输出；落盘的 `run_case_stdout.txt` 和 `run_case_stderr.txt` 仍保留原始内容，不额外写入终端前缀。若终端中断或需要从文件判断卡点，可查看 `runs/<run_id>/cases/<case_id>/progress.json` 的最新阶段，或用 `tail -f runs/<run_id>/cases/<case_id>/progress.jsonl` 查看完整状态流。状态阶段包括 `prepare`、`subject`、`subject_round`、`artifact`、`judge`、`judge_codex` 和 `result`。其中 `judge_codex` 来自 `codex exec --json` 的事件流，会记录 Codex thread、turn、item 和 token usage；原始事件保存到 `runs/<run_id>/cases/<case_id>/judge/codex_judge_events.jsonl`。
+
+需要观察 subject agent 实际发给大模型的 system prompt、messages 和 tools schema 时，可临时开启 `PATENT_CREATOR_LOG_LLM_PAYLOAD=true`。开启后普通 `app.log` 只记录轻量索引和 payload 文件路径，完整请求按“一次模型调用一个 JSON 文件”写入 `logs/llm_payloads/`，并追加 `logs/llm_payloads/index.jsonl`。该目录可能包含用户输入、交底书正文和工具返回结果，只用于本地调试，不应提交到版本控制。
 
 每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，只记录 subject 状态、补充轮次、产物抽取、round 硬失败和 judge 状态。完整运行轨迹仍保留在 `subject/session_events.jsonl`，用于调试，不作为技术方案质量评分依据。批量运行会写入轻量 `runs/<run_id>/run_summary.json`，其中只保留解析结果、诊断和 `run_case_stdout.txt` / `run_case_stderr.txt` 路径，不再内嵌完整 stdout/stderr；多次重复运行会额外写入 `case_selection_summary.json` 和 `case_selection_report.md`，并在 benchmark 根目录更新 `latest_run_report.md`，用于观察成功率、平均分、分数波动和候选 case 去留。
 

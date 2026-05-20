@@ -1,7 +1,7 @@
 # 提高技术方案生成能力
 
 > 状态：进行中
-> 最后更新：2026-05-18
+> 最后更新：2026-05-20
 > 关闭条件：系统能够稳定把粗粒度软件需求转化为合理、可实施、具备保护价值的技术方案，并且主 agent / 子 agent / 文档写入链路不再因协议问题阻断技术方案落地。
 
 ## 背景
@@ -12,12 +12,12 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在多个 case 中产出并评分技术方案，子 agent 的旧 `submit_result` 协议问题、复杂 JSON 压缩协议问题和工具失败后绕路恢复问题已经明显收敛；但复杂 case 中仍存在 provider 流式中断、写入策略成本、工具参数预防和技术方案质量不足等链路稳定性与能力质量问题。
+文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在多个 case 中产出并评分技术方案，子 agent 的旧 `submit_result` 协议问题、复杂 JSON 压缩协议问题、旧 `document_edit + operations` 心智负担和工具失败后绕路恢复问题已经明显收敛；但复杂 case 中仍存在 provider 流式中断、写入策略成本、工具参数预防、写作阶段上下文成本和技术方案质量不足等链路稳定性与能力质量问题。
 
 已关闭子问题：
 
 - `reasoning_content` 保存与回放已按 provider/profile 处理。
-- `document_edit.operations` 字符串化输入已有窄口径工具层防御。
+- 旧 `document_edit + operations` 公开入口已移除，当前拆分为低负担文档写入工具，内部 op 分发器也已移除。
 - `append_child_section` 参数协议已统一为 `parent_section_id` + `section`。
 - `duplicate_section_id` 的根因已通过 v2 文档结构解决：`section.id` 由系统生成，章节语义迁移到 `section.type`。
 - benchmark runner 已调整为只评价最终技术方案内容，不再把可恢复过程异常作为内容评分或诊断指标。
@@ -25,14 +25,19 @@
 - `context-compression-invalid-json` 旧压缩协议问题已关闭：上下文压缩不再要求模型输出 JSON 或历史 tool call 协议块，当前改为 Markdown memory，并由程序包装为单条历史记忆 message。
 - `subagent-task-boundary` 的阻断级问题已关闭：`section_writer` 已被重新定位为轻量局部写作工具，实测中不再承担旧式整章大 JSON 提交；复杂正文主要由主 agent 基于分析结果直接落盘。
 - `tool-failure-recovery` 已关闭为阻断级问题：`010` 复跑中两次 `document_edit` 失败后，主 agent 均优先修正同一工具调用并重试成功，未再绕行读取内部文档文件。
+- `benchmark-failed-cases` 已关闭：`005`、`007` 均已完成单独排查和复跑，证明不是不可运行 case。
 
 仍开放子问题：
 
 - provider 流式响应仍可能在长轮次中断；`010` 首次复验在 `1056s` 处因 `httpx.ReadError` 结束为 `round_failed`。
-- 主 agent 虽然能自恢复，但仍会先尝试过大的 `document_edit` 或含未转义引号的字符串化参数，导致可预防的工具失败。
+- 主 agent 虽然能自恢复，但仍会先尝试超过 1500 字的文档写入，导致可预防的 `edit_too_large` 失败。
 - 主 agent 仍可能在较晚阶段才写入 `technical_solution`；成功复跑中约 `585s` 才开始落盘，若 provider 在此之前中断仍可能无 artifact。
+- 主 agent 已有 artifact 后仍可能继续重型 review / analyst 子 agent，导致已有产物无法进入 judge。
+- 子 agent 移除最大步数后不再被机械截断，但 reviewer / analyst 类任务需要更强的语义收尾约束。
+- 主 agent 缺少“够了就停”的完成策略，复杂任务中可能持续补查、补写、补审查，直到 round timeout。
 - 复杂 case 中上下文压缩已稳定，但重复压缩和长上下文读取仍会带来明显耗时与 token 成本。
-- 主 agent 工具调用参数仍可能退化为字符串化 JSON，虽然工具层已能防御。
+- 子 agent pipe 预算已经生效，但子 agent 仍常先超预算写入再压缩，预算规划不足。
+- 写作阶段上下文仍可能过重，复杂 case 中小步写入仍携带大量材料历史，带来明显 token 成本。
 - 技术方案质量本身仍需要通过更多正式 case 验证和提升。
 
 ## 开放问题优先级
@@ -41,17 +46,21 @@ P0：
 
 - 技术方案质量验证不足。当前已通过至少 3 个 case 证明完整链路能跑通，但样本规模和失败 case 排查还不足以证明系统能稳定生成合理、可实施、具备保护价值的技术方案。
 - provider 流式中断会直接破坏长轮次产物落地。需要设计对 `httpx.ReadError` / `llm_stream_error` 的恢复策略，尤其是已经有部分输出或工具调用历史时如何安全继续。
+- 已有 artifact 后仍继续重型 review 的问题会导致本可评分的 case 变成 `round_failed`。主 agent 需要先保证可提交，再做有限增强。
+- 子 agent 无最大步数后需要语义边界和父 agent 调度边界，避免 reviewer / analyst 长跑。
+- 主 agent 需要明确“够了就停”的完成策略，避免复杂 case 持续补全到 timeout。
 
 P1：
 
 - 主 agent 过晚写入 artifact。复杂 case 中应优先形成可落盘的 `technical_solution` 草稿，再进行局部补强，避免超时或流式中断导致完全无产物。
 - 默认分段写入策略不足。复杂技术方案应默认采用 `replace_section` 写摘要、再逐个 `append_child_section` 追加子章节，而不是先尝试一次性写完整大 section。
-- 工具参数预防不足。模型仍可能生成字符串化 `operations`、未转义引号或过大的操作体；需要从工具 schema、prompt 和可选预检查层降低可恢复失败出现概率。
+- 工具参数预防不足。旧 `operations` 问题已关闭，但模型仍可能超过单次 1500 字正文写入限制，需要从工具 schema、prompt 和可选预检查层降低可恢复失败出现概率。
+- 子 agent pipe 预算规划不足。预算机制已能拒绝超长内容，但模型仍常先超额写入，再根据工具反馈压缩，增加调用成本。
 
 P2：
 
-- 主 agent 工具调用参数退化为字符串化 JSON。真实 `document_edit` 已有窄口径防御，短期不阻塞技术方案落地，但会增加轮次、token 消耗和弱模型失败概率。
 - 子 agent 压缩复用与成本优化。当前 Markdown 压缩已稳定，但相同主上下文下反复启动子 agent 时可能重复压缩，后续可考虑按 parent context anchor 复用压缩记忆或减少压缩输入规模。
+- 写作阶段上下文瘦身。复杂 case 进入写作阶段后不应继续携带完整项目读取历史，后续可考虑构造更轻的写作上下文。
 
 ## 问题
 
@@ -243,7 +252,57 @@ P2：
 仍需保留或新增的 issue：
 
 - `provider-stream-readerror-recovery`：长轮次仍可能因 provider streaming `httpx.ReadError` 失败。需要设计在已有部分上下文、部分子 agent 结果或部分文档写入时的安全续跑策略。
-- `document-edit-segmented-write-policy`：主 agent 仍会先尝试一次性写入巨大 section，失败后才拆分。应默认采用“主体摘要 + 子章节逐段追加”的写入策略。
-- `document-edit-argument-preflight`：仍会出现字符串化 `operations`、未转义引号等可预防参数错误。虽然可恢复，但会增加 token、耗时和弱模型失败概率。
+- `document-write-segmented-policy`：主 agent 仍需要稳定采用“主体摘要 + 子章节逐段追加”的写入策略，避免重复补写和长链路清理。
+- `document-write-argument-preflight`：文档写入工具仍需要继续降低参数错误和重复调用概率。旧 `operations` 参数已移除，不再作为当前开放问题跟踪。
 - `compression-cost-reuse`：Markdown 压缩已稳定，但复杂 case 中重复压缩相同主上下文仍可能造成明显耗时和 token 成本。后续可考虑基于 context anchor 复用压缩结果。
 - `solution-quality-depth`：`010-rerun2` 得分 72，judge 指出缺少完整 Workspace proxy、MCP descriptor/wrapper、浏览器 callable 与内部 RPC 权限隔离、认证路由绑定和 revision 广播模型等关键机制。该问题属于技术方案质量提升，不是协议稳定性问题。
+
+## 2026-05-20 复杂 case 复测补充
+
+本轮重点复测 `007`、`005`、`010`，用于观察移除子 agent 最大步数、`document_edit` 单次写入限制和主 agent 小步写入策略后的实际效果。
+
+结论：
+
+1. 协议层问题明显缓解。
+   - `007` 已能完成并进入 judge，最终 `scored=82`。
+   - `010` subject 约 `248s` 完成，最终 `scored=82`，相比此前接近 `1200s` 才收尾有明显改善。
+   - 当前更主要的问题不是 `write_pipe + finish` 是否能传回结果，而是长任务如何及时结束。
+
+2. `005` 暴露出已有 artifact 后仍继续重型 review 的问题。
+   - `005` 已写出并提取 `evaluated_artifact.md`，但 subject 状态仍为 `round_failed`。
+   - 原因是主流程在已有技术方案后继续调用 `consistency_reviewer`，最终耗尽 `1200s` round timeout。
+   - 这说明主 agent 需要“先可提交，再有限增强”的完成策略，不能把完整 review 作为结束前置条件。
+
+3. 移除子 agent 最大步数后，不能再依赖机械截断保证收尾。
+   - 该改动解决了 `007` 一类复杂子 agent 被硬切断的问题。
+   - 但 reviewer / analyst 类子 agent 仍需要任务语义边界：只输出短结论、缺口列表或局部证据，不承担完整长链路闭环。
+
+4. 文档写入工具小步写入有效，旧复杂 `operations` 入口已移除。
+   - `010` 基本按多次追加子章节写入，说明单次写入限制和提示策略有效。
+   - 后续重点从“复杂 JSON 参数失败”转向“重复写入、完成时机和工具边界控制”。
+
+专项跟踪文档见：[Benchmark 长链路可控完成问题](./2026-05-20-benchmark-long-chain-control.md)。
+
+## 2026-05-20 `005` pipe 预算复跑补充
+
+在引入子 agent pipe 写入预算后，复跑 `005`：
+
+- run id：`20260520-113247-005`
+- subject 状态：`completed`
+- subject 用时：约 `969.6s`
+- judge 状态：`scored`
+- 分数：`75`
+
+已改善：
+
+- `material_analyst`、`solution_refiner`、`consistency_reviewer` 的超长 pipe 写入均被 `pipe_budget_exceeded` 拒绝。
+- 三个子 agent 均能根据剩余额度压缩输出，并最终主动 `finish`。
+- 这说明当前 pipe 预算机制能有效抑制子 agent 交付内容失控，旧的“长 pipe / 不 finish”风险已有明显缓解。
+
+新增或仍开放的问题：
+
+- 主 agent 已有 artifact 后仍调用 `consistency_reviewer`，完成策略仍未收束。
+- pipe 预算只限制交付内容，不限制 reviewer 在写 pipe 前大量读取章节。
+- 主 agent 仍可能重复提交同一批文档写入工具调用，生成重复子章节。
+- 当前文档写入工具不支持删除子章节，模型可能通过清空 blocks 留下空壳章节。
+- 主 agent 通过 `exec_command` 直接修改 `disclosure.json`，绕过文档写入工具边界。这是新的 P0 工具权限问题。

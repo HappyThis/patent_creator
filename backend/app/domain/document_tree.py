@@ -14,15 +14,6 @@ def get_required_section(disclosure: dict[str, Any], section_id: Any) -> dict[st
         return tool_failed("section_not_found", f"section_id 不存在：{section_id}")
     return section
 
-def replace_section_in_tree(sections: list[dict[str, Any]], section_id: str, replacement: dict[str, Any]) -> bool:
-    for index, section in enumerate(sections):
-        if section["id"] == section_id:
-            sections[index] = replacement
-            return True
-        if replace_section_in_tree(section["children"], section_id, replacement):
-            return True
-    return False
-
 def section_depth(sections: list[dict[str, Any]], section_id: str, depth: int = 1) -> int:
     for section in sections:
         if section["id"] == section_id:

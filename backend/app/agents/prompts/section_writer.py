@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..types import SubagentDeclaration
-from ..tools import render_tool_manual, subagent_tool_names
+from ...tools import render_tool_manual, subagent_tool_names
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
@@ -33,8 +33,8 @@ def build_section_writer_system_prompt(declaration: SubagentDeclaration) -> str:
 
 结构选择要求：
 {STRUCTURED_WRITING_RULES}
-- 本 agent 使用这些结构规则时只处理局部内容：可生成一个目标子章节、一个短 blocks 列表，或一个短小的 append_child_section。
-- 不要用 replace_section 生成包含多个 children 的完整标准章节；完整章节结构由主 agent 规划和落盘。
+- 本 agent 使用这些结构规则时只处理局部内容：可生成一个目标子章节候选、一个短 blocks 列表，或一个短段落/短列表候选。
+- 不要生成包含多个子章节的完整标准章节；完整章节结构由主 agent 规划和落盘。
 
 输出要求：
 - 所有要交给主 agent 的内容必须走系统提供的交付通道；不要直接输出 JSON、markdown 代码块或正文。

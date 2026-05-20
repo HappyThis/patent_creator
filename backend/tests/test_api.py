@@ -21,6 +21,7 @@ class StubLLMClient:
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
     ) -> str:
         context = json.loads(user_prompt[user_prompt.index("{") :])
         return (
@@ -40,8 +41,9 @@ class StubLLMClient:
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
         response_format_json: bool = False,
+        trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """模拟主 agent loop：execute_subagent -> document_edit -> respond。"""
+        """模拟主 agent loop：execute_subagent -> document write tools -> respond。"""
         if "子 agent：section_writer" in system_prompt:
             goal = str(messages[-1].get("content") or "")
             target_section_id = "sec_000010" if "技术效果" in goal else "sec_000007"
@@ -146,35 +148,36 @@ class StubLLMClient:
             subagent_result = json.loads(tool_results[0]["content"])
             content = subagent_result["output"]["content"]
             if "技术效果候选正文" in content:
-                operations = [
+                tool_calls = [
                     {
-                        "op": "replace_section_blocks",
-                        "section_id": "sec_000010",
-                        "blocks": [
-                            {
-                                "type": "paragraph",
-                                "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
-                            },
-                            {
-                                "type": "list",
-                                "ordered": False,
-                                "items": [
-                                    "缩短端到端检测时延，提升实时响应能力。",
-                                    "在有限算力预算下保持检测稳定性。",
-                                    "降低持续运行时的能耗和温升压力。",
-                                ],
-                            },
-                        ],
+                        "tool": "document_replace_section_blocks",
+                        "arguments": {
+                            "section_id": "sec_000010",
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
+                                },
+                                {
+                                    "type": "list",
+                                    "ordered": False,
+                                    "items": [
+                                        "缩短端到端检测时延，提升实时响应能力。",
+                                        "在有限算力预算下保持检测稳定性。",
+                                        "降低持续运行时的能耗和温升压力。",
+                                    ],
+                                },
+                            ],
+                        },
+                        "tool_call_id": "stub_call_2",
                     }
                 ]
             else:
-                operations = [
+                tool_calls = [
                     {
-                        "op": "replace_section",
-                        "section_id": "sec_000007",
-                        "section": {
-                            "type": "technical_solution",
-                            "title": "技术方案",
+                        "tool": "document_replace_section_blocks",
+                        "arguments": {
+                            "section_id": "sec_000007",
                             "blocks": [
                                 {
                                     "type": "paragraph",
@@ -185,59 +188,64 @@ class StubLLMClient:
                                     "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
                                 },
                             ],
-                            "children": [
+                        },
+                        "tool_call_id": "stub_call_2",
+                    },
+                    {
+                        "tool": "document_append_child_section",
+                        "arguments": {
+                            "parent_section_id": "sec_000007",
+                            "title": "整体架构",
+                            "blocks": [
                                 {
-                                    "type": "custom",
-                                    "title": "整体架构",
-                                    "blocks": [
-                                        {
-                                            "type": "table",
-                                            "columns": ["模块", "职责"],
-                                            "rows": [
-                                                ["预处理模块", "完成缩放、归一化和候选区域粗筛"],
-                                                ["推理模块", "仅对高价值候选区域执行完整检测"],
-                                            ],
-                                        }
+                                    "type": "table",
+                                    "columns": ["模块", "职责"],
+                                    "rows": [
+                                        ["预处理模块", "完成缩放、归一化和候选区域粗筛"],
+                                        ["推理模块", "仅对高价值候选区域执行完整检测"],
                                     ],
-                                    "children": [],
-                                },
-                                {
-                                    "type": "custom",
-                                    "title": "处理流程",
-                                    "blocks": [
-                                        {
-                                            "type": "list",
-                                            "ordered": True,
-                                            "items": [
-                                                "获取当前帧图像并复用上一帧稳定特征。",
-                                                "筛出满足阈值的候选区域。",
-                                                "对候选区域执行轻量化检测与结果校正。",
-                                            ],
-                                        }
-                                    ],
-                                    "children": [],
-                                },
+                                }
                             ],
                         },
-                    }
+                        "tool_call_id": "stub_call_3",
+                    },
+                    {
+                        "tool": "document_append_child_section",
+                        "arguments": {
+                            "parent_section_id": "sec_000007",
+                            "title": "处理流程",
+                            "blocks": [
+                                {
+                                    "type": "list",
+                                    "ordered": True,
+                                    "items": [
+                                        "获取当前帧图像并复用上一帧稳定特征。",
+                                        "筛出满足阈值的候选区域。",
+                                        "对候选区域执行轻量化检测与结果校正。",
+                                    ],
+                                }
+                            ],
+                        },
+                        "tool_call_id": "stub_call_4",
+                    },
                 ]
-            arguments = {"operations": operations}
             return {
                 "type": "tool_calls",
-                "tool_calls": [{"tool": "document_edit", "arguments": arguments, "tool_call_id": "stub_call_2"}],
+                "tool_calls": tool_calls,
                 "assistant_message": {
                     "role": "assistant",
                     "content": "",
                     "reasoning_content": "需要将子 agent proposal 写入文档。",
                     "tool_calls": [
                         {
-                            "id": "stub_call_2",
+                            "id": call["tool_call_id"],
                             "type": "function",
                             "function": {
-                                "name": "document_edit",
-                                "arguments": json.dumps(arguments, ensure_ascii=False),
+                                "name": call["tool"],
+                                "arguments": json.dumps(call["arguments"], ensure_ascii=False),
                             },
                         }
+                        for call in tool_calls
                     ],
                 },
             }

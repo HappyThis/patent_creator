@@ -9,11 +9,10 @@ from app.agents.prompts.main_agent import build_main_agent_system_prompt as buil
 from app.agents.prompts.material_analyst import build_material_analyst_system_prompt
 from app.agents.prompts.section_writer import build_section_writer_system_prompt as build_split_section_writer_system_prompt
 from app.agents.prompts.solution_refiner import build_solution_refiner_system_prompt
-from app.agents.tools import MAIN_AGENT_TOOL_NAMES, render_tool_manual
 from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
 from app.runtime.context.barrier import render_barrier_message
 from app.runtime.context.prompts import context_compressor_system_prompt
-from app.runtime.executor.engine import SUBAGENT_TOOLS
+from app.tools import DOCUMENT_WRITE_TOOL_NAMES, MAIN_AGENT_TOOL_NAMES, SUBAGENT_TOOLS, render_tool_manual
 
 
 def test_agent_prompts_are_split_by_agent_module() -> None:
@@ -81,7 +80,7 @@ def test_subagent_prompts_use_model_visible_context_and_document_rules() -> None
         assert "如果任务依赖当前交底书原文" in prompt
 
 
-def test_solution_refiner_document_edit_prompt_uses_final_text_and_structure_rules() -> None:
+def test_solution_refiner_prompt_uses_final_text_and_structure_rules() -> None:
     prompt = build_solution_refiner_system_prompt(get_subagent("solution_refiner"))
 
     assert "正文写作要求" in prompt
@@ -167,16 +166,38 @@ def test_section_writer_is_limited_to_lightweight_local_writing() -> None:
     assert "你可以正常调用自己可用的工具完成任务" in prompt
     assert "不交付要求主 agent 执行的落盘指令或内部编辑计划" in prompt
     assert "document_edit operations" not in prompt
-    assert "不要用 replace_section 生成包含多个 children 的完整标准章节" in prompt
+    assert "不要生成包含多个子章节的完整标准章节" in prompt
     assert "最终态文本" in prompt
 
 
 def test_append_child_section_protocol_is_single_shape() -> None:
-    document_edit = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "document_edit")
-    operations_description = document_edit["function"]["parameters"]["properties"]["operations"]["description"]
+    tool_names = [tool["function"]["name"] for tool in MAIN_AGENT_TOOLS]
+    assert "document_edit" not in tool_names
+    assert "document_append_child_section" in tool_names
 
-    assert "append_child_section 必须使用 parent_section_id 和 section" in operations_description
-    assert "不得超过 1500 字" in operations_description
+    append_child = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "document_append_child_section")
+    properties = append_child["function"]["parameters"]["properties"]
+
+    assert set(properties) == {"parent_section_id", "title", "blocks"}
+    assert append_child["function"]["parameters"]["required"] == ["parent_section_id", "title", "blocks"]
+    assert "section" not in properties
+    assert "operations" not in properties
+    assert "op" not in properties
+
+
+def test_tool_schemas_inline_local_definitions_for_provider_compatibility() -> None:
+    def walk(value: object) -> list[object]:
+        if isinstance(value, dict):
+            return [value, *(item for child in value.values() for item in walk(child))]
+        if isinstance(value, list):
+            return [item for child in value for item in walk(child)]
+        return []
+
+    for tool in MAIN_AGENT_TOOLS:
+        schema = tool["function"]["parameters"]
+        for node in walk(schema):
+            assert not (isinstance(node, dict) and "$defs" in node)
+            assert not (isinstance(node, dict) and "$ref" in node)
 
 
 def test_main_agent_prompt_requires_small_document_edits() -> None:
@@ -185,9 +206,14 @@ def test_main_agent_prompt_requires_small_document_edits() -> None:
 
     assert "自动生成工具声明" in prompt
     assert tool_manual in prompt
+    for tool_name in DOCUMENT_WRITE_TOOL_NAMES:
+        assert tool_name in tool_manual
+    assert "document_edit" not in MAIN_AGENT_TOOL_NAMES
+    assert "document_edit" not in tool_manual
+    assert "operations" not in tool_manual
     assert "单次正文写入总量不得超过 1500 字" in tool_manual
-    assert "先 replace_section_blocks 写根章节总述" in tool_manual
-    assert "再逐个 append_child_section 写子章节" in tool_manual
+    assert "一次只追加一个 block" in tool_manual
+    assert "只需要提供 parent_section_id、title 和 blocks" in tool_manual
 
 
 def test_execute_subagent_manual_renders_registered_subagents() -> None:
@@ -215,6 +241,7 @@ def test_agent_prompt_sources_do_not_hardcode_tool_call_examples() -> None:
         "write_pipe({",
         "append_child_section 必须",
         "document_edit 单次正文写入",
+        "replace_section 生成",
         "document_read(action=get_project_context)",
     ]
 
@@ -237,6 +264,10 @@ def test_subagent_prompts_use_pipe_protocol() -> None:
         assert "调用实例" in prompt
         assert "submit_result" not in prompt
         assert "proposal_type" not in prompt
+        assert "最多调用 write_pipe 10 次" in prompt
+        assert "累计最多写入 4000 字" in prompt
+        assert "不限制单次字符数" in prompt
+        assert "执行器会自动结束本次子任务" in prompt
 
 
 def test_execute_subagent_schema_only_uses_agent_id_and_goal() -> None:
@@ -262,6 +293,12 @@ def test_subagent_tool_schema_uses_pipe_protocol() -> None:
     assert "write_pipe" in tool_names
     assert "finish" in tool_names
     assert "submit_result" not in tool_names
+
+    write_pipe = next(tool for tool in SUBAGENT_TOOLS if tool["function"]["name"] == "write_pipe")
+    content_description = write_pipe["function"]["parameters"]["properties"]["content"]["description"]
+    assert "最多调用 write_pipe 10 次" in content_description
+    assert "累计最多写入 4000 字" in content_description
+    assert "不限制单次字符数" in content_description
 
 
 def test_barrier_renderer_outputs_user_messages() -> None:

@@ -12,13 +12,15 @@ from ...agents.prompts import (
     build_solution_refiner_system_prompt,
 )
 from ...agents.runtime.openai_compat import OpenAICompatibleClient
-from ...agents.tools import build_openai_tools, build_subagent_tools
 from ...agents.workers import (
     MainAgentToolCall,
 )
 from ...core import ApiError, Settings
-from ...domain.document_tools import tool_failed, tool_success
+from ...domain.document_tool_results import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
+from ...tools import SUBAGENT_TOOLS, build_subagent_tools, get_tool_declaration
+from ...tools.builtin.pipe import SubagentPipe, invalid_tool_arguments_json_result, subagent_tool_summary
+from ...tools.types import AgentScope
 from ..context import ContextManager
 from ..context.barrier import render_barrier_message
 from ..context.compression import (
@@ -30,17 +32,10 @@ from ..context.compression import (
 from ..context.messages import closed_message_prefix
 from ..context.prompts import context_compressor_system_prompt
 from ..context.usage import estimate_messages_tokens, usage_for_messages
-from .registry import can_use_tool
-from .subagent_pipe import SubagentPipe, invalid_tool_arguments_json_result, subagent_tool_summary
-from .tools.document import document_edit, document_read
-from .tools.shell import exec_command
-from .types import AgentScope
 
 ToolEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 logger = logging.getLogger("patent_creator.executor")
-
-SUBAGENT_TOOLS: list[dict[str, Any]] = build_openai_tools(("document_read", "exec_command", "write_pipe", "finish"))
 
 class ExecutorEngine:
     def __init__(
@@ -55,16 +50,49 @@ class ExecutorEngine:
         self.llm_client = llm_client
         self.settings = settings
 
-    def document_read(self, project_id: str, arguments: dict[str, Any], scope: AgentScope = "main_agent") -> dict[str, Any]:
-        return document_read(self.store, project_id, arguments, scope)
+    async def execute_tool(
+        self,
+        project_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        scope: AgentScope = "main_agent",
+        pipe: SubagentPipe | None = None,
+        session_id: str | None = None,
+        round_id: str | None = None,
+        message_id: str | None = None,
+        parent_call_id: str | None = None,
+        on_tool_event: ToolEventSink | None = None,
+        caller_messages: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            declaration = get_tool_declaration(tool_name)
+        except KeyError:
+            return tool_failed("unsupported_tool", f"不支持的工具：{tool_name}")
+        if not declaration.can_use(scope):
+            return tool_failed("permission_denied", f"{scope} 不允许调用 {tool_name}。")
+        if tool_name == "execute_subagent":
+            return await self._execute_subagent(
+                project_id,
+                arguments,
+                session_id=session_id,
+                round_id=round_id,
+                message_id=message_id,
+                parent_call_id=parent_call_id,
+                on_tool_event=on_tool_event,
+                caller_messages=caller_messages,
+            )
+        if tool_name == "write_pipe":
+            if pipe is None:
+                return tool_failed("missing_pipe", "write_pipe 只能在子 agent run 中调用。")
+            return pipe.write(arguments)
+        if tool_name == "finish":
+            if pipe is None:
+                return tool_failed("missing_pipe", "finish 只能在子 agent run 中调用。")
+            return pipe.finish(arguments)
+        return declaration.function(self.store, project_id, arguments)
 
-    def document_edit(self, project_id: str, arguments: dict[str, Any], scope: AgentScope = "main_agent") -> dict[str, Any]:
-        return document_edit(self.store, project_id, arguments, scope)
-
-    def exec_command(self, project_id: str, arguments: dict[str, Any], scope: AgentScope = "main_agent") -> dict[str, Any]:
-        return exec_command(self.store, project_id, arguments, scope)
-
-    async def execute_subagent(
+    async def _execute_subagent(
         self,
         project_id: str,
         arguments: dict[str, Any],
@@ -73,13 +101,9 @@ class ExecutorEngine:
         round_id: str | None = None,
         message_id: str | None = None,
         parent_call_id: str | None = None,
-        scope: AgentScope = "main_agent",
         on_tool_event: ToolEventSink | None = None,
         caller_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        if not can_use_tool(scope, "execute_subagent"):
-            return tool_failed("permission_denied", "子 agent 不允许调用 execute_subagent。")
-
         try:
             declaration = get_subagent(str(arguments.get("agent_id")))
         except ApiError as exc:
@@ -139,10 +163,11 @@ class ExecutorEngine:
         system_prompt = self._subagent_system_prompt(agent_id)
         tools = build_subagent_tools(declaration)
         messages: list[dict[str, Any]] = [dict(message) for message in initial_messages]
-        max_steps = max(1, self.settings.subagent_max_steps)
         pipe = SubagentPipe()
+        step_index = 0
 
-        for _step in range(max_steps):
+        while True:
+            step_index += 1
             messages = await self._prepare_subagent_run_messages(
                 project_id=project_id,
                 agent_id=agent_id,
@@ -158,6 +183,16 @@ class ExecutorEngine:
                 messages=messages,
                 tools=tools,
                 on_text_delta=None,
+                trace_context={
+                    "scope": "subagent",
+                    "agent_id": agent_id,
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "round_id": round_id,
+                    "message_id": message_id,
+                    "parent_call_id": parent_call_id,
+                    "step_index": step_index,
+                },
             )
             assistant_message = action.get("assistant_message")
             if not isinstance(assistant_message, dict):
@@ -204,10 +239,15 @@ class ExecutorEngine:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
+                if (
+                    tool_call.tool == "write_pipe"
+                    and result.get("status") == "success"
+                    and isinstance(result.get("output"), dict)
+                    and result["output"].get("auto_finished") is True
+                ):
+                    return {"content": pipe.content()}
                 if tool_call.tool == "finish" and result.get("status") == "success":
                     return {"content": pipe.content()}
-
-        raise ApiError(502, "subagent_max_steps_reached", f"{agent_id} 未在步数上限内完成。")
 
     async def _execute_subagent_tool(
         self,
@@ -252,16 +292,14 @@ class ExecutorEngine:
 
         if tool_call.arguments_error:
             result = invalid_tool_arguments_json_result(tool_call.arguments_error)
-        elif tool_call.tool == "document_read":
-            result = self.document_read(project_id, tool_call.arguments, scope="subagent")
-        elif tool_call.tool == "exec_command":
-            result = self.exec_command(project_id, tool_call.arguments, scope="subagent")
-        elif tool_call.tool == "write_pipe":
-            result = pipe.write(tool_call.arguments)
-        elif tool_call.tool == "finish":
-            result = pipe.finish(tool_call.arguments)
         else:
-            result = tool_failed("permission_denied", f"子 agent 不允许调用 {tool_call.tool}。")
+            result = await self.execute_tool(
+                project_id,
+                tool_call.tool,
+                tool_call.arguments,
+                scope="subagent",
+                pipe=pipe,
+            )
 
         if session_id:
             self.store.append_session_event(
@@ -342,6 +380,16 @@ class ExecutorEngine:
                 user_prompt=prompt,
                 temperature=0.1,
                 timeout=self.settings.context_compression_timeout,
+                trace_context={
+                    "scope": "context_compression",
+                    "agent_scope": "subagent",
+                    "agent_id": agent_id,
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "round_id": round_id,
+                    "message_id": message_id,
+                    "parent_call_id": parent_call_id,
+                },
             )
             compressed_markdown = validate_compressed_markdown(raw_markdown)
         except Exception as exc:

@@ -30,6 +30,7 @@ class SupportsContextCompression(Protocol):
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
     ) -> str:
         ...
 
@@ -354,6 +355,16 @@ class ContextManager:
                 user_prompt=prompt,
                 temperature=0.1,
                 timeout=self.settings.context_compression_timeout,
+                trace_context={
+                    "scope": "context_compression",
+                    "agent_scope": "main",
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "round_id": round_id,
+                    "message_id": current_message_id,
+                    "covered_seq_start": compressible[0].seq,
+                    "covered_seq_end": compressible[-1].seq,
+                },
             )
             compressed_markdown = validate_compressed_markdown(raw_markdown)
         except Exception as exc:

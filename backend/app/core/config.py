@@ -23,7 +23,6 @@ class Settings:
     cors_allow_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     round_step_delay: float = 0.15
     round_finish_delay: float = 0.1
-    subagent_max_steps: int = 30
     context_max_tokens: int = 128000
     context_compress_threshold_ratio: float = 0.8
     context_reserved_output_tokens: int = 8000
@@ -59,7 +58,6 @@ class Settings:
             ),
             round_step_delay=float(os.getenv("PATENT_CREATOR_ROUND_STEP_DELAY", "0.15")),
             round_finish_delay=float(os.getenv("PATENT_CREATOR_ROUND_FINISH_DELAY", "0.1")),
-            subagent_max_steps=int(os.getenv("PATENT_CREATOR_SUBAGENT_MAX_STEPS", "30")),
             context_max_tokens=int(os.getenv("PATENT_CREATOR_CONTEXT_MAX_TOKENS", "128000")),
             context_compress_threshold_ratio=float(
                 os.getenv("PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO", "0.8")

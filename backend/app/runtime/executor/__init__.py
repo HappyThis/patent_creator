@@ -1,4 +1,4 @@
 from .engine import ExecutorEngine
-from .types import AgentScope
+from ...tools import AgentScope
 
 __all__ = ["AgentScope", "ExecutorEngine"]

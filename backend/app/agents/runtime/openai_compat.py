@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import json
 import logging
+import os
 import time
 from typing import Any, Awaitable, Callable
+from uuid import uuid4
 
 import httpcore
 import httpx
@@ -65,6 +68,7 @@ class OpenAICompatibleClient:
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
     ) -> str:
         client = self._require_client()
         if self.settings.log_llm_payload:
@@ -87,6 +91,12 @@ class OpenAICompatibleClient:
             }
             profile = resolve_model_profile(self.settings)
             profile.apply_chat_parameters(request_payload)
+            self._write_llm_payload_trace(
+                kind="generate_text",
+                request_payload=request_payload,
+                trace_context=trace_context,
+                request_options={"timeout": timeout if timeout is not None else self.settings.llm_timeout},
+            )
             completion = await client.chat.completions.create(
                 **request_payload,
                 timeout=timeout,
@@ -109,7 +119,7 @@ class OpenAICompatibleClient:
         )
         content = self._extract_text(completion)
         if self.settings.log_llm_payload:
-            logger.debug("generate_text raw_content=%s", content)
+            logger.debug("generate_text raw_content_len=%d", len(content))
         return content
 
     async def generate_json(
@@ -119,6 +129,7 @@ class OpenAICompatibleClient:
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         client = self._require_client()
         if self.settings.log_llm_payload:
@@ -142,6 +153,12 @@ class OpenAICompatibleClient:
             }
             profile = resolve_model_profile(self.settings)
             profile.apply_chat_parameters(request_payload)
+            self._write_llm_payload_trace(
+                kind="generate_json",
+                request_payload=request_payload,
+                trace_context=trace_context,
+                request_options={"timeout": timeout if timeout is not None else self.settings.llm_timeout},
+            )
             completion = await client.chat.completions.create(
                 **request_payload,
                 timeout=timeout,
@@ -164,7 +181,7 @@ class OpenAICompatibleClient:
         )
         content = self._extract_text(completion)
         if self.settings.log_llm_payload:
-            logger.debug("generate_json raw_content=%s", content)
+            logger.debug("generate_json raw_content_len=%d", len(content))
         try:
             return json.loads(content)
         except json.JSONDecodeError as exc:
@@ -179,6 +196,7 @@ class OpenAICompatibleClient:
         tools: list[dict[str, Any]],
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
         response_format_json: bool = False,
+        trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         client = self._require_client()
         tool_names = [t.get("function", {}).get("name") for t in tools]
@@ -202,6 +220,11 @@ class OpenAICompatibleClient:
         profile.apply_chat_parameters(request_payload)
         if response_format_json:
             request_payload["response_format"] = {"type": "json_object"}
+        self._write_llm_payload_trace(
+            kind="generate_with_tools_stream",
+            request_payload=request_payload,
+            trace_context={**(trace_context or {}), "tool_names": tool_names},
+        )
 
         max_attempts = max(1, self.settings.llm_max_retries + 1)
         for attempt in range(1, max_attempts + 1):
@@ -428,6 +451,61 @@ class OpenAICompatibleClient:
             return "".join(text_parts)
         raise ApiError(502, "llm_invalid_response", "模型返回的 message.content 格式不支持。")
 
+    def _write_llm_payload_trace(
+        self,
+        *,
+        kind: str,
+        request_payload: dict[str, Any],
+        trace_context: dict[str, Any] | None = None,
+        request_options: dict[str, Any] | None = None,
+    ) -> None:
+        if not self.settings.log_llm_payload:
+            return
+
+        timestamp = datetime.now().astimezone().isoformat()
+        metadata = {
+            "timestamp": timestamp,
+            "kind": kind,
+            "model": self.settings.openai_model,
+            "provider": self.settings.openai_compat_provider,
+            "pid": os.getpid(),
+            **_jsonable(trace_context or {}),
+        }
+        payload = {
+            "metadata": metadata,
+            "request_payload": _jsonable(request_payload),
+            "request_options": _jsonable(request_options or {}),
+        }
+
+        trace_dir = self.settings.log_dir / "llm_payloads"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        trace_path = trace_dir / _trace_file_name(kind=kind, metadata=metadata)
+        trace_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        index_entry = {
+            "timestamp": timestamp,
+            "kind": kind,
+            "model": self.settings.openai_model,
+            "scope": metadata.get("scope"),
+            "agent_id": metadata.get("agent_id"),
+            "project_id": metadata.get("project_id"),
+            "session_id": metadata.get("session_id"),
+            "round_id": metadata.get("round_id"),
+            "step_index": metadata.get("step_index"),
+            "payload_file": str(trace_path),
+        }
+        with (trace_dir / "index.jsonl").open("a", encoding="utf-8") as file:
+            file.write(json.dumps(index_entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+        logger.info(
+            "llm payload trace written kind=%s scope=%s agent_id=%s step=%s path=%s",
+            kind,
+            metadata.get("scope"),
+            metadata.get("agent_id"),
+            metadata.get("step_index"),
+            trace_path,
+        )
+
     @staticmethod
     def _parse_tool_arguments(raw_arguments: Any, *, tool_call_id: str, tool_name: str) -> tuple[dict[str, Any], str | None]:
         if isinstance(raw_arguments, dict):
@@ -459,6 +537,42 @@ def _describe_api_error(exc: APIStatusError) -> str:
         body = ""
     body = (body or "").strip()
     return body or str(exc)
+
+
+def _trace_file_name(*, kind: str, metadata: dict[str, Any]) -> str:
+    now = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
+    parts = [now, _safe_file_part(str(metadata.get("scope") or "llm"))]
+    agent_id = metadata.get("agent_id")
+    if agent_id:
+        parts.append(_safe_file_part(str(agent_id)))
+    step_index = metadata.get("step_index")
+    if step_index is not None:
+        parts.append(f"step-{_safe_file_part(str(step_index))}")
+    parts.extend([_safe_file_part(kind), uuid4().hex[:8]])
+    return "-".join(parts) + ".json"
+
+
+def _safe_file_part(value: str) -> str:
+    chars: list[str] = []
+    for char in value.strip():
+        if char.isalnum() or char in {"-", "_"}:
+            chars.append(char)
+        else:
+            chars.append("_")
+    text = "".join(chars).strip("_")
+    return text[:80] or "unknown"
+
+
+def _jsonable(value: Any) -> Any:
+    try:
+        json.dumps(value, ensure_ascii=False)
+        return value
+    except TypeError:
+        if isinstance(value, dict):
+            return {str(key): _jsonable(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_jsonable(item) for item in value]
+        return str(value)
 
 
 def _describe_usage(usage: Any) -> str:

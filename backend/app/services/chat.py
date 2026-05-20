@@ -11,9 +11,10 @@ from ..agents.runtime.model_profiles import resolve_model_profile
 from ..agents.runtime.openai_compat import OpenAICompatibleClient
 from ..agents.workers import MainAgentAction, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
-from ..domain.document_tools import tool_failed
+from ..domain.document_tool_results import tool_failed
 from ..runtime.context import ContextManager
 from ..runtime.executor import ExecutorEngine
+from ..tools import DOCUMENT_WRITE_TOOL_NAMES, get_tool_declaration
 from ..schemas import ChatMessageRequest, ChatMessageResponse
 from ..storage.workspace_store import WorkspaceStore
 from .chat_events import ChatEventEmitter
@@ -202,6 +203,14 @@ class ChatService:
                     system_prompt=system_prompt,
                     messages=messages,
                     on_text_delta=on_text_delta,
+                    trace_context={
+                        "scope": "main",
+                        "project_id": project_id,
+                        "session_id": state.session_id,
+                        "round_id": state.round_id,
+                        "message_id": state.message_id,
+                        "step_index": step_index,
+                    },
                 )
 
                 if action.type == "respond":
@@ -242,7 +251,7 @@ class ChatService:
                 for tool_call in tool_calls:
                     result = await self._execute_tool_call(project_id, state, tool_call, caller_messages=messages)
 
-                    if tool_call.tool == "document_edit" and result.get("status") == "success":
+                    if tool_call.tool in DOCUMENT_WRITE_TOOL_NAMES and result.get("status") == "success":
                         output = result["output"]
                         changed_payload = {
                             "changed": True,
@@ -335,69 +344,6 @@ class ChatService:
                 },
             )
 
-    async def _dispatch_tool(
-        self,
-        project_id: str,
-        state: RoundState,
-        tool_name: str,
-        arguments: dict[str, Any],
-        call_id: str,
-        caller_messages: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        if tool_name == "document_read":
-            result = self.executor.document_read(project_id, arguments)
-            section_id = arguments.get("section_id") or arguments.get("block_id") or ""
-            await self.events.tool(
-                project_id,
-                state,
-                tool="document_read",
-                arguments=arguments,
-                summary_started=f"开始读取 {section_id}" if section_id else "开始读取章节",
-                summary_finished=f"{section_id} 已读取" if section_id else "章节已读取",
-                result=result,
-                call_id=call_id,
-            )
-            return result
-
-        if tool_name == "document_edit":
-            result = self.executor.document_edit(project_id, arguments)
-            await self.events.tool(
-                project_id,
-                state,
-                tool="document_edit",
-                arguments=arguments,
-                summary_started="开始写入 disclosure.json",
-                summary_finished="文档更新已完成",
-                result=result,
-                call_id=call_id,
-            )
-            return result
-
-        if tool_name == "execute_subagent":
-            return await self.events.execute_subagent(
-                project_id,
-                state,
-                arguments=arguments,
-                call_id=call_id,
-                caller_messages=caller_messages,
-            )
-
-        if tool_name == "exec_command":
-            result = self.executor.exec_command(project_id, arguments)
-            await self.events.tool(
-                project_id,
-                state,
-                tool="exec_command",
-                arguments=arguments,
-                summary_started="开始执行诊断命令",
-                summary_finished="诊断命令已完成",
-                result=result,
-                call_id=call_id,
-            )
-            return result
-
-        raise ApiError(400, "unsupported_main_tool", f"主 agent 不支持的工具：{tool_name}")
-
     async def _execute_tool_call(
         self,
         project_id: str,
@@ -428,13 +374,60 @@ class ChatService:
                 result.get("status"),
             )
             return result
-        result = await self._dispatch_tool(
+        try:
+            declaration = get_tool_declaration(tool_call.tool)
+        except KeyError:
+            result = tool_failed("unsupported_tool", f"主 agent 不支持的工具：{tool_call.tool}")
+            await self.events.failed_tool_result(
+                project_id,
+                state,
+                tool=tool_call.tool,
+                call_id=tool_call.tool_call_id,
+                result=result,
+            )
+            logger.info(
+                "round tool_call id=%s tool=%s status=%s",
+                tool_call.tool_call_id,
+                tool_call.tool,
+                result.get("status"),
+            )
+            return result
+
+        await self.events.tool_started(
             project_id,
             state,
+            tool=tool_call.tool,
+            arguments=tool_call.arguments,
+            summary=declaration.started_summary(tool_call.arguments),
+            call_id=tool_call.tool_call_id,
+        )
+        result = await self.executor.execute_tool(
+            project_id,
             tool_call.tool,
             tool_call.arguments,
-            tool_call.tool_call_id,
-            caller_messages,
+            scope="main_agent",
+            session_id=state.session_id,
+            round_id=state.round_id,
+            message_id=state.message_id,
+            parent_call_id=tool_call.tool_call_id,
+            caller_messages=caller_messages,
+            on_tool_event=lambda event_name, event_payload: self.bus.publish(
+                (project_id, state.session_id),
+                event_name,
+                {
+                    **event_payload,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            ),
+        )
+        await self.events.tool_finished(
+            project_id,
+            state,
+            tool=tool_call.tool,
+            result=result,
+            summary=declaration.finished_summary(tool_call.arguments, result),
+            call_id=tool_call.tool_call_id,
         )
         logger.info(
             "round tool_call id=%s tool=%s status=%s",

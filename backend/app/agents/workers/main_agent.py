@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from ..tools import MAIN_AGENT_TOOL_NAMES, build_openai_tools
+from ...tools import MAIN_AGENT_TOOL_NAMES, build_openai_tools
 from ...core import ApiError
 
 
@@ -16,6 +16,7 @@ class SupportsGenerateWithTools(Protocol):
         tools: list[dict[str, Any]],
         on_text_delta: Any,
         response_format_json: bool = False,
+        trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -49,6 +50,7 @@ async def decide_main_agent_step(
     system_prompt: str,
     messages: list[dict[str, Any]],
     on_text_delta: Any | None = None,
+    trace_context: dict[str, Any] | None = None,
 ) -> MainAgentAction:
     """请求主 agent 做一步决策，返回统一的 Action 结构。"""
     result = await llm_client.generate_with_tools_stream(
@@ -56,6 +58,7 @@ async def decide_main_agent_step(
         messages=messages,
         tools=MAIN_AGENT_TOOLS,
         on_text_delta=on_text_delta,
+        trace_context=trace_context,
     )
     action_type = result.get("type")
     if action_type == "respond":

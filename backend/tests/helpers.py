@@ -35,6 +35,7 @@ class ScriptedLLMClient:
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
         response_format_json: bool = False,
+        trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         tool_names = {str(tool.get("function", {}).get("name") or "") for tool in tools}
         is_subagent_turn = {"write_pipe", "finish"}.issubset(tool_names)
@@ -106,6 +107,7 @@ class ScriptedLLMClient:
         user_prompt: str,
         temperature: float = 0.2,
         timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
     ) -> str:
         if "上下文压缩 agent" in system_prompt:
             marker = "待压缩上下文："

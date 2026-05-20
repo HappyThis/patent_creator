@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -73,6 +74,7 @@ def make_settings(
 ) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
+        log_dir=tmp_path / "logs",
         git_user_name="Test User",
         git_user_email="test@example.com",
         openai_compat_api_key="test-key",
@@ -125,6 +127,55 @@ def test_generate_text_does_not_request_json_response_format(tmp_path: Path) -> 
     assert result == "plain memory"
     assert fake.completions.calls[0]["timeout"] == 180
     assert "response_format" not in fake.completions.calls[0]
+
+
+def test_generate_with_tools_stream_writes_payload_trace_when_enabled(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream("ok"))
+    settings = make_settings(tmp_path)
+    settings.log_llm_payload = True
+    client = OpenAICompatibleClient(settings, client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system prompt",
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "document_read",
+                        "description": "读取文档",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            trace_context={
+                "scope": "main",
+                "project_id": "proj_test",
+                "session_id": "sess_test",
+                "round_id": "round_test",
+                "step_index": 3,
+            },
+        )
+    )
+
+    assert result["type"] == "respond"
+    trace_dir = settings.log_dir / "llm_payloads"
+    payload_files = sorted(path for path in trace_dir.glob("*.json") if path.name != "index.jsonl")
+    assert len(payload_files) == 1
+    payload = json.loads(payload_files[0].read_text(encoding="utf-8"))
+    assert payload["metadata"]["scope"] == "main"
+    assert payload["metadata"]["project_id"] == "proj_test"
+    assert payload["metadata"]["step_index"] == 3
+    assert payload["request_payload"]["messages"][0] == {"role": "system", "content": "system prompt"}
+    assert payload["request_payload"]["tools"][0]["function"]["name"] == "document_read"
+    assert "api_key" not in json.dumps(payload, ensure_ascii=False).lower()
+
+    index_lines = (trace_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(index_lines) == 1
+    index = json.loads(index_lines[0])
+    assert index["scope"] == "main"
+    assert index["payload_file"] == str(payload_files[0])
 
 
 def test_generate_with_tools_stream_sends_deepseek_disabled_thinking(tmp_path: Path) -> None:

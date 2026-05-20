@@ -172,8 +172,9 @@ async def test_execute_subagent_compresses_run_local_messages(tmp_path: Path) ->
     project_id = await create_project(services)
     session_id = "sess_subagent_compress"
 
-    result = await services.executor.execute_subagent(
+    result = await services.executor.execute_tool(
         project_id,
+        "execute_subagent",
         {"agent_id": "material_analyst", "goal": "提炼压缩后的历史事实。"},
         session_id=session_id,
         round_id="round_subagent_compress",
@@ -421,3 +422,60 @@ async def test_subagent_write_pipe_invalid_arguments_json_can_retry(tmp_path: Pa
         if event.type == "tool_result" and event.scope == "subagent:section_writer" and event.payload.get("tool") == "write_pipe"
     ]
     assert [event.payload["status"] for event in sub_write_results] == ["failed", "success"]
+
+
+@pytest.mark.anyio
+async def test_subagent_auto_finishes_when_pipe_write_budget_is_exhausted(tmp_path: Path) -> None:
+    def step_call_subagent(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "execute_subagent",
+                    {
+                        "agent_id": "consistency_reviewer",
+                        "goal": "检查技术方案一致性，输出有限问题清单。",
+                    },
+                    "call_auto_finish_pipe",
+                )
+            ],
+        }
+
+    def step_subagent_write_until_budget(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call("write_pipe", {"content": f"问题 {index}"}, f"sub_write_budget_{index}")
+                for index in range(1, 11)
+            ],
+        }
+
+    def step_main_receives_auto_finished_pipe(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        assert last_tool["tool_call_id"] == "call_auto_finish_pipe"
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "success"
+        assert result["output"]["content"] == "\n".join(f"问题 {index}" for index in range(1, 11))
+        return {"type": "respond", "text": "子 agent 达到 pipe 写入次数预算后已自动结束。"}
+
+    llm = ScriptedLLMClient(
+        [step_call_subagent, step_subagent_write_until_budget, step_main_receives_auto_finished_pipe],
+        script_subagents=True,
+    )
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="检查一致性"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    sub_write_results = [
+        event
+        for event in events
+        if event.type == "tool_result"
+        and event.scope == "subagent:consistency_reviewer"
+        and event.payload.get("tool") == "write_pipe"
+    ]
+    assert len(sub_write_results) == 10
+    assert sub_write_results[-1].payload["output"]["auto_finished"] is True
+    assert sub_write_results[-1].payload["output"]["remaining_writes"] == 0

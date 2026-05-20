@@ -4,8 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ....agents import SUBAGENTS
-from ....agents.tool_metadata import agent_tool
+from ...agents import SUBAGENTS
+from ..metadata import agent_tool
 
 
 class ExecuteSubagentArguments(BaseModel):

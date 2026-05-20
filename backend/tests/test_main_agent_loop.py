@@ -13,7 +13,7 @@ from helpers import ScriptedLLMClient, create_project, make_settings, tool_call,
 
 @pytest.mark.anyio
 async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
-    """覆盖 read -> execute_subagent -> document_edit -> respond 的完整链路。"""
+    """覆盖 read -> execute_subagent -> document_replace_section_blocks -> respond 的完整链路。"""
 
     def step_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -46,16 +46,15 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
         last_tool = [m for m in messages if m.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
         assert result["output"]["content"].endswith("正文占位。")
-        operations = [
-            {
-                "op": "replace_section_blocks",
-                "section_id": "sec_000010",
-                "blocks": [{"type": "paragraph", "text": "正文占位。"}],
-            }
-        ]
         return {
             "type": "tool_calls",
-            "tool_calls": [tool_call("document_edit", {"operations": operations}, "call_3")],
+            "tool_calls": [
+                tool_call(
+                    "document_replace_section_blocks",
+                    {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "正文占位。"}]},
+                    "call_3",
+                )
+            ],
         }
 
     def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -81,7 +80,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     ]
     assert main_tool_calls.count("document_read") == 1
     assert main_tool_calls.count("execute_subagent") == 1
-    assert main_tool_calls.count("document_edit") == 1
+    assert main_tool_calls.count("document_replace_section_blocks") == 1
     # 子 agent 不再由调度器自动预读章节；需要正文时由子 agent 自行调用 document_read。
     sub_tool_calls = [
         event.payload.get("tool")
@@ -192,14 +191,14 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
 
 @pytest.mark.anyio
 async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Path) -> None:
-    error_message = "document_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+    error_message = "document_append_block 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
 
     def step_invalid_tool_arguments_json(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
             "tool_calls": [
                 {
-                    "tool": "document_edit",
+                    "tool": "document_append_block",
                     "arguments": {},
                     "tool_call_id": "bad_call",
                     "arguments_error": error_message,
@@ -237,7 +236,7 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
         if event.type == "tool_result" and event.call_id == "bad_call"
     )
     assert failed_tool_result.payload == {
-        "tool": "document_edit",
+        "tool": "document_append_block",
         "status": "failed",
         "output": {
             "code": "invalid_tool_arguments_json",
@@ -263,7 +262,7 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
 
 @pytest.mark.anyio
 async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_calls(tmp_path: Path) -> None:
-    error_message = "document_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+    error_message = "document_append_block 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
 
     def step_mixed_calls(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -271,7 +270,7 @@ async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_ca
             "tool_calls": [
                 tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "valid_call_1"),
                 {
-                    "tool": "document_edit",
+                    "tool": "document_append_block",
                     "arguments": {},
                     "tool_call_id": "bad_call",
                     "arguments_error": error_message,

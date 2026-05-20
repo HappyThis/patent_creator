@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..types import SubagentDeclaration
-from ..tools import render_tool_manual, subagent_tool_names
+from ...tools import render_tool_manual, subagent_tool_names
 from .shared import (
     DOCUMENT_ACCESS_RULES,
     FINAL_TEXT_RULES,
