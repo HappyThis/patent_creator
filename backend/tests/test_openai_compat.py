@@ -232,6 +232,27 @@ def test_generate_with_tools_stream_filters_reasoning_for_mimo_disabled(tmp_path
     assert request_messages[1] == {"role": "assistant", "content": "上一轮"}
 
 
+def test_generate_with_tools_stream_replays_reasoning_for_mimo_enabled(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream("ok"))
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="mimo", thinking="enabled"), client=fake)  # type: ignore[arg-type]
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[
+                {"role": "assistant", "content": "上一轮", "reasoning_content": "需要回放"},
+                {"role": "user", "content": "继续"},
+            ],
+            tools=[],
+        )
+    )
+
+    request_messages = fake.completions.calls[0]["messages"]
+    assert fake.completions.calls[0]["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in fake.completions.calls[0]
+    assert request_messages[1]["reasoning_content"] == "需要回放"
+
+
 def test_generate_with_tools_stream_replays_reasoning_for_deepseek_enabled(tmp_path: Path) -> None:
     fake = FakeOpenAIClient(FakeStream("ok"))
     client = OpenAICompatibleClient(make_settings(tmp_path, provider="deepseek", thinking="enabled"), client=fake)  # type: ignore[arg-type]

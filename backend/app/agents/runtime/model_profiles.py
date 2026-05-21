@@ -53,7 +53,7 @@ def resolve_model_profile(settings: Settings) -> ModelProfile:
             token_limit_param="max_completion_tokens",
             max_completion_tokens=settings.openai_compat_max_completion_tokens,
             reasoning_effort=settings.openai_compat_reasoning_effort,
-            replay_reasoning_content=False,
+            replay_reasoning_content=thinking == "enabled",
         )
 
     return ModelProfile(
