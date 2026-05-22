@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了本地生命周期清理与服务端 durable agent turn 取消语义需要解耦的核心问题。",
+    "覆盖了默认 durable 模式与可选 request-lifetime 模式，并明确用户 stop 应走显式服务端取消。",
+    "方案包含 turnId、messageSeq、toolCallId、重连恢复、工具 continuation、多标签观察和迟到消息处理等较具体机制。",
+    "技术效果与问题有较完整闭环，能说明避免刷新/断线误杀任务、减少重复计算并保留明确停止能力。"
+  ],
+  "weaknesses": [
+    "没有落到当前项目最关键的 WebSocketChatTransport/useAgentChat 接入点，也没有明确使用现有 CF_AGENT_CHAT_REQUEST_CANCEL WebSocket 取消帧协议。",
+    "显式取消后的 active request id 保留、done/chunk 迟到过滤和清理时机描述不够贴近当前 activeRequestIds 机制，仍可能不足以防止残余服务端消息污染 UI。",
+    "resume 机制被描述为 turnId+messageSeq/token 模式，但当前项目已有 CF_AGENT_STREAM_RESUME_REQUEST/ACK、replay chunk 和 fallback observer 路径；方案未明确兼容这些现有协议。",
+    "工具 continuation 和多标签处理有概念覆盖，但缺少当前项目中 expectToolContinuation、abortActiveToolContinuation、fallback observed stream 等具体边界。",
+    "部分恢复令牌、HTTP stop endpoint、BroadcastChannel/SharedWorker 等表述偏通用设计，源码依据不足。"
+  ],
+  "missing_key_mechanisms": [
+    "在 WebSocketChatTransport 中把 caller abort、ReadableStream.cancel 和 explicit stop 拆成不同处理路径的具体状态机。",
+    "显式取消帧应携带当前 request id，并说明 stop 如何调用 transport 的统一 server-turn cancellation 入口。",
+    "显式取消后保留 active request id 直到服务端 done/terminal 帧到达，并按 request id 过滤 late chunk/done。",
+    "对 fallback/observed turn 的注册与取消机制，即不是当前 sendMessages 创建的 stream 也能被 stop 定位取消。",
+    "request-lifetime opt-in 应更明确对应类似 cancelOnClientAbort 的配置行为矩阵，而不是依赖通用 HTTP Request.signal。"
+  ],
+  "unsupported_claims": [
+    "HTTP POST /api/chat/{turnId}/stop 作为取消接口缺少当前源码依据；当前项目协议是 WebSocket 消息 CF_AGENT_CHAT_REQUEST_CANCEL。",
+    "将 useAgentChat 清理描述为 abort fetch/SSE/EventSource 连接，与当前 WebSocket transport 主路径不完全一致。",
+    "客户端携带 turnId+messageSeq 恢复令牌恢复流不是当前项目已实现协议；源码/文档显示是 CF_AGENT_STREAM_RESUME_REQUEST/ACK 加 replay chunks。",
+    "BroadcastChannel API 或 SharedWorker 用于多标签取消广播在当前源码中未见依据。",
+    "Request-Lifetime 模式依赖服务端 Request.signal 检测断开不贴合当前 WebSocket transport 的主要取消链路。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的 75-85 档。它正确区分本地清理和显式服务端取消，也给出了 durable 默认、request-lifetime 可选、恢复、工具 continuation、多标签和迟到消息等机制，因此不能低分。但它没有充分锚定当前项目的 WebSocketChatTransport、CF_AGENT_CHAT_REQUEST_CANCEL、activeRequestIds、resume fallback 和 tool continuation 实现边界，并引入了一些无源码依据的 HTTP/SSE/token/BroadcastChannel 设计。由于缺少源码级取消帧接入和显式取消后的 active id 保留/late chunk 过滤细节，不适合超过 85 分。"
+}

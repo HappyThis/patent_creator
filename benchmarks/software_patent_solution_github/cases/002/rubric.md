@@ -67,7 +67,7 @@
 
 ## 档位锚点
 
-- 90-100 分强答案：必须同时具备统一 run 契约、task/session/agent/spawn/eval/cost 关联、结构化 provenance/lineage、spawn 创建/完成/失败/取消自动桥接、run 级多次 eval attach、事件流、MCP 工具层查询/附着、leaderboard 聚合、终态保护和源码级 schema/API/event 接入说明。
+- 90-100 分强答案：必须同时具备统一 run 契约、task/session/agent/spawn/eval/cost 关联、结构化 provenance/lineage、spawn 创建/完成/失败/取消自动桥接、run 级 eval attach/update、事件流、MCP 工具层查询/附着、leaderboard 聚合和源码级 schema/API/event 接入说明。多评估历史、评估版本链或终态保护属于增强项，不是本 case 的硬性前提。
 - 75-85 分可用但不完整：有统一 run 对象和主要关联，能复用现有任务/agent/session/spawn 信息，但 provenance、spawn 自动桥接、eval attach、MCP 工具或 leaderboard 中缺一到两个关键机制。
 - 60-74 分弱答案：主要是日志表或运行历史页面，只有部分关联或最终输出记录，不能支撑溯源、评估附着和外部工具复用。
 - 0-59 分不合格：只保存文本日志、要求人工补录、与 task/session/spawn/eval/cost 割裂，或编造当前源码已有完整 run 模型。
@@ -76,7 +76,7 @@
 
 - 如果方案没有结构化 provenance/lineage 字段和生成流程，总分通常不得高于 82 分。
 - 如果方案没有说明 spawn 创建、完成、失败、取消等路径如何自动桥接 run 生命周期，总分通常不得高于 82 分。
-- 如果方案只把 eval 写成单个分数字段，没有 run 级 eval attach 契约、多次评估、版本、评估者或维度明细，总分通常不得高于 85 分。
+- 如果方案只把 eval 写成单个分数字段，没有 run 级 eval attach/update 契约、pass/fail、说明、指标或 benchmark 元数据，总分通常不得高于 85 分。不强制要求多评估历史或固定 evaluator 字段命名。
 - 如果方案没有 MCP 工具层的 run 查询、溯源查询、评估附着或 leaderboard 聚合能力，总分通常不得高于 85 分。
 - 如果同时缺失 provenance/lineage、spawn 自动桥接、eval attach、MCP/leaderboard 中任意两个关键机制，总分不得高于 78 分；缺失三个或更多时，总分不得高于 72 分。
 - 如果核心论证依赖当前源码中不存在的表字段、事件、API 或调用路径，总分不得高于 75 分。

@@ -77,7 +77,7 @@
 - `status`：`starting/running/completed/error/aborted/interrupted`。
 - `inputSummary`、`outputSummary`、`error`。
 - `requestId/streamId`、`createdAt/updatedAt/completedAt`。
-- 清理相关字段：retention policy、deletedAt 或 tombstone。
+- 清理相关机制：保留策略、显式清理条件、运行中先取消再删除 retained run 与 child facet；若系统采用 `deletedAt` 或 tombstone 状态，可作为增强方案，但不是唯一实现方式。
 
 事件协议至少覆盖：
 
@@ -92,7 +92,7 @@
 - 一个父工具调用可以并行关联多个 child run，客户端按 displayOrder 稳定展示。
 - 父连接断开后，历史事件应能由父注册表和子 agent 持久流恢复；实时和 replay 事件要去重。
 - 父侧转发 loop 丢失且无法重新接上 child live tail 时，运行应标记 interrupted，而不是假装 completed。
-- 清理 retained run 时，如果 child 仍 running，应先取消 child，再删除注册表和 facet。
+- 清理 retained run 时，如果 child 仍 running，应先取消 child，再删除注册表和 facet；也可以用 tombstone 或 deleted 状态延迟清理，但不能把清理后的 run 当作可访问的有效运行。
 - drill-in 访问必须检查父注册表，未知 run id 不得唤醒或创建 child facet。
 
 ## 项目集成点

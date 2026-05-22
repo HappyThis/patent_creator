@@ -1,8 +1,8 @@
 # 建立技术方案生成能力评测基准
 
 > 状态：进行中
-> 最后更新：2026-05-20
-> 关闭条件：核心 benchmark 规范稳定，完成足够数量的正式 case，并能稳定跑通 subject 与 Codex-as-judge 内容评分链路。
+> 最后更新：2026-05-22
+> 关闭条件：正式 benchmark 规范稳定，完成足够数量的正式 case，并能稳定跑通 subject 与 Codex-as-judge 内容评分链路。
 
 ## 背景
 
@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：`20260520-full-10cases-5workers-after-reviewer-removal` 已经证明 10 个 case 的 subject 均可完成并抽取 artifact，其中 9 个进入 Codex-as-judge 并评分；但仍有 `008` 因 Codex judge 启动阶段插件同步 403 / Cloudflare challenge 而 `judge_failed`，还需要沉淀稳定回归流程、case 分层、judge 失败重试和结果报告规范。
+文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：`20260520-full-10cases-5workers-after-reviewer-removal` 已经证明 10 个 case 的 subject 均可完成并抽取 artifact，其中 9 个进入 Codex-as-judge 并评分；但仍有 `008` 因 Codex judge 启动阶段插件同步 403 / Cloudflare challenge 而 `judge_failed`，还需要沉淀稳定回归流程、judge 失败重试和结果报告规范。
 
 已关闭子问题：
 
@@ -21,7 +21,9 @@
 - 已移除可恢复工具异常统计，`subagent_plain_response`、字符串化 `operations`、中途 `document_edit` 失败等过程问题不再进入内容评估指标。
 - 已保留 `session_events.jsonl` 作为 debug 材料。
 - 已跑通 `001` 的 subject 与 Codex-as-judge 完整评分链路。
-- 已跑通 `001`、`002`、`003` 的 subject 与 Codex-as-judge 完整评分链路，满足“至少 3 个黄金 case”的最低闭环要求。
+- 已跑通 `001`、`002`、`003` 的 subject 与 Codex-as-judge 完整评分链路，满足“至少 3 个正式 case”的最低闭环验证要求。
+- 已废弃黄金 case 与 case 分层概念。正式纳入 benchmark 的 case 一视同仁；运行分数只评价 agent 在该 case 上的表现，运行器不再输出 case 分级、case 建议或 benchmark 自评结论。
+- 已移除批量报告中的 benchmark 自评逻辑：`run_all.py` 不再生成 recommendation，也不再输出 `case_selection_summary.json` / `case_selection_report.md`；当前输出为 `evaluation_summary.json` / `evaluation_report.md`。
 - `010` 在单独提高 `round-timeout` 到 `1200` 秒后可完成闭环，说明该 case 本身不是不可运行样本。
 - `010` 在 Markdown memory 压缩改造后复跑成功：`20260518-compression-md-010-rerun2` 完成 subject + artifact + Codex-as-judge，得分 `72`。
 - `005`、`007` 已完成单独排查与复跑：`007` 在 `20260520-094905-007` 中 `scored=82`，`005` 在 `20260520-113247-005` 中 `scored=75`，历史 `benchmark-failed-cases` 子问题关闭。
@@ -29,12 +31,10 @@
 
 仍开放子问题：
 
-- 继续复核和筛选正式 case 的质量门槛。
 - 将复杂 case 的低并发、timeout 和失败复跑策略沉淀为稳定回归流程。
 - 处理 Codex-as-judge 启动阶段的偶发基础设施失败，例如插件同步 403 / Cloudflare challenge 导致的 `judge_failed`。
-- 修正 `--skip-judge` subject-only smoke run 的报告分类，避免把 `artifact_extracted` 未评分结果显示为 0% / 淘汰。
+- 维护正式 case 的来源标准和题目编写规范；运行器不再自动输出 case 建议或 benchmark 自评结论。
 - 沉淀批量运行、汇总和横向比较流程。
-- 将 case 分层为核心质量 case、待校准 case、压力 / 回归 case，避免内容质量分与长链路稳定性混在一起。
 
 ## 开放问题优先级
 
@@ -43,14 +43,13 @@ P0：暂无 benchmark 建设层面的阻断项。`005`、`007` 未写出 result 
 P1：
 
 - 继续筛选正式 case 来源，优先覆盖 agent / AI 工具链、开发工具、同步系统、权限系统等机制型软件项目。
-- 统一 case 质量门槛，避免把 bug fix、小补丁、过细需求或已经暴露答案的需求放入核心 benchmark。
-- 明确 case 分层：`005`、`007` 这类会强烈测试长链路收尾、子 agent 调度和 timeout 的样本，短期更适合归入压力 / 回归 case；`010` 可作为高难质量 case，但需要检查 request 与 rubric 是否对齐。
+- 统一 case 质量门槛，避免把 bug fix、小补丁、过细需求或已经暴露答案的需求放入正式 benchmark。
 - Codex-as-judge 运行失败应与 subject agent 失败区分。`008` 本轮 subject 已完成并抽取 artifact，但 judge 因插件同步访问 `chatgpt.com/backend-api/plugins/featured` 返回 403 / Cloudflare challenge 而失败。
-- 修正 subject-only smoke run 的 `case_selection_report.md` 分类逻辑：`--skip-judge` 时应显示“未评分 / 仅验证 artifact”，而不是按 0% 通过率给出“淘汰或暂缓”。
+- 批量报告只展示运行次数、产物成功、评分次数、状态分布、分数和 judge 摘要，不生成 case 建议或 benchmark 自评结论。
 
 P2：
 
-- 从黄金 case 扩展到正式 20 个左右的回归集。
+- 从现有正式候选扩展到 20 个左右的回归集。
 - 建立长期批量运行、结果趋势对比和模型横向比较流程。
 
 ## 2026-05-20 全量 10 case / 5 worker 运行
@@ -83,7 +82,7 @@ P2：
 - benchmark 主链路可运行性比此前明显改善，复杂 case 基本能产出可评测 artifact。
 - 全量均分若只算 scored case 为 `79.22`，但 `008` 因 judge 基础设施失败缺分，因此这不是完整质量均分。
 - `008` 的失败应归入 `benchmark-judge-plugin-sync-failure`，不应归入 subject agent 能力失败。
-- case 分层仍需要推进：`006/007/008` 等样本对长链路、子 agent 和 judge 稳定性压力较大；核心质量均分应与压力 / 回归样本分开呈现。
+- 不再推进 case 分层：`006/007/008` 等样本对长链路、子 agent 和 judge 稳定性压力较大，但这些现象应作为 agent/runner 稳定性问题单独记录，不作为 case 分级依据。
 
 ## 当前决策
 
@@ -172,8 +171,8 @@ P2：
 
 测试项筛选和题目编写新增约束：
 
-- 核心测试项应优先选择较大的功能迭代、新功能支持、新特性机制、能力扩展或架构级改造。
-- 小修改、局部 bug 修复、依赖升级、参数调整、文案或样式修改不应作为核心 benchmark 测试项。
+- 正式测试项应优先选择较大的功能迭代、新功能支持、新特性机制、能力扩展或架构级改造。
+- 小修改、局部 bug 修复、依赖升级、参数调整、文案或样式修改不应作为正式 benchmark 测试项。
 - 缺陷修复材料只有在能抽象为系统新增或增强某种能力、特性或机制时，才可作为辅助样本或候选样本。
 - `request.md` 应模拟普通用户或产品侧提出的粗粒度场景需求，不应提前给出关键技术机制、方案骨架或参考 PR 的设计结论。
 - 如果题目输入已经直接点名关键技术手段，评测会退化为技术方案改写能力，不符合当前 benchmark 目标。
@@ -188,7 +187,7 @@ P2：
 6. 下一步将选中的具体 issue / PR / design discussion 转化为正式 `cases/<case_id>/`。
 7. 下一步为每个正式测试项固化解决方案合入前的项目快照。
 8. 下一步补齐 `reference_solution.md`、`rubric.md`、`metadata.json` 的真实内容。
-9. 先完成 3 个黄金测试项试运行，再扩展到正式 20 个测试项。
+9. 先完成 3 个正式测试项试运行，再扩展到正式 20 个测试项。
 
 ## 2026-05-13 试运行发现
 
@@ -210,7 +209,7 @@ P2：
 后续待办：
 
 - 重新运行 `001`，确认章节写入约束生效。
-- 将 `run_case.py --skip-judge` 跑通至少 3 个黄金 case，再接入 Codex-as-judge。
+- 将 `run_case.py --skip-judge` 跑通至少 3 个正式 case，再接入 Codex-as-judge。
 - 记录每个 case 的 `skipped_no_solution_artifact`、模型错误、超时和 judge 失败状态，供后续统计。
 - 评估是否需要为 benchmark 模式增加更短、更强约束的主 agent 任务上下文，避免完整交底书写作惯性影响技术方案评测。
 
@@ -281,9 +280,9 @@ P2：
 
 该调整后，benchmark runner 的目标收敛为：能提取有效技术方案则进入 Codex-as-judge 内容评分；无法提取有效技术方案则记为 `skipped_no_solution_artifact` 或相应硬失败状态。
 
-## 2026-05-18 黄金 case 与全量首轮补充
+## 2026-05-18 正式 case 与全量首轮补充
 
-2026-05-18 已完成至少 3 个黄金 case 的完整闭环验证：
+2026-05-18 已完成至少 3 个正式 case 的完整闭环验证：
 
 | Case | 状态 | 分数 |
 | --- | --- | ---: |
@@ -292,25 +291,25 @@ P2：
 | 003 | `scored` | 82 |
 | 010 | `scored` | 72 |
 
-因此，历史 issue `benchmark-golden-cases` 已满足最低关闭条件：不再是“只有 `001` 完整跑通”。后续 benchmark 重点从“能否跑通 3 个 case”转为“全量回归是否稳定、失败 case 是否能被准确排查、结果是否可横向比较”。
+因此，历史最低闭环验证目标已满足：不再是“只有 `001` 完整跑通”。后续 benchmark 重点从“能否跑通 3 个 case”转为“全量回归是否稳定、失败 case 是否能被准确排查、结果是否可横向比较”。`benchmark-golden-cases` 作为旧概念关闭，不再用于命名或管理正式 case。
 
-## 2026-05-20 复杂 case 复测与分层补充
+## 2026-05-20 复杂 case 复测补充
 
 本轮复测结果：
 
-| Case | Run | 状态 | 分数 | 建议 |
+| Case | Run | 状态 | 分数 | 运行观察 |
 | --- | --- | --- | ---: | --- |
-| 007 | `20260520-094905-007` | `scored` | 82 | 暂归压力 / 回归 case，用于观察子 agent 长链路、及时收尾和复杂调度。 |
-| 005 | `20260520-100337/r01-005` | `round_failed` | - | 暂缓作为核心质量 case；已产出 artifact 但因后续 review 超时，应作为长链路完成策略问题样本。 |
-| 010 | `20260520-100337/r01-010` | `scored` | 82 | 可保留为高难质量 case，但需检查 rubric 中 Workspace proxy、MCP descriptor、revision、RPC 边界、认证绑定等要求是否都被 request 明确召唤。 |
-| 005 | `20260520-113247-005` | `scored` | 75 | 引入 pipe 预算后能进入 judge，但 subject 仍耗时约 969.6 秒，且暴露主 agent 重复写入、绕过 `document_edit` 等 agent 执行控制问题。 |
+| 007 | `20260520-094905-007` | `scored` | 82 | 能完成评分；长链路、及时收尾和复杂调度问题另记为 agent/runner 稳定性信号。 |
+| 005 | `20260520-100337/r01-005` | `round_failed` | - | 该轮已产出 artifact 但后续 review 超时；后续复跑证明可评分，不能据此判定 case 无效。 |
+| 010 | `20260520-100337/r01-010` | `scored` | 82 | 能完成评分，需继续检查 request 与 rubric 是否都被源码证据支撑。 |
+| 005 | `20260520-113247-005` | `scored` | 75 | 引入 pipe 预算后能进入 judge，但 subject 仍耗时约 969.6 秒，暴露 agent 执行控制问题。 |
 
 本轮暴露的 benchmark 层问题：
 
 - `005` 证明 runner 只看最终状态是合理的：评测集不应该关心 agent 为什么失败，失败就是失败；但工程分析需要另行记录“已有 artifact 后继续 review 导致 timeout”。
-- `007` 和 `005` 不宜与普通质量 case 混在同一均分中，否则分数会混入超时、子 agent 调度和长链路稳定性噪声。
-- `010` 可以作为高难质量样本，但其 rubric 要求非常细，后续需要人工确认 request 是否足够明确，避免隐藏标准过多。
-- `005` 在 pipe 预算后可评分，说明它不是不可运行 case；但它仍更适合作为长链路压力 / 回归样本，而不是核心质量均分样本。
+- 运行耗时、timeout、子 agent 调度和长链路稳定性噪声不应作为 case 分级依据；这些问题应单独记录为 agent/runner 稳定性问题。
+- `010` 的 rubric 要求非常细，后续需要人工确认 request 是否足够明确，避免隐藏标准过多。
+- `005` 在 pipe 预算后可评分，说明单轮失败不应被运行器扩展解释为 benchmark 样本问题。
 
 专项跟踪文档见：[Benchmark 长链路可控完成问题](./2026-05-20-benchmark-long-chain-control.md)。
 
@@ -318,7 +317,7 @@ P2：
 
 - `001`、`002`、`003`、`004`、`006`、`008`、`009` 在全量批次中完成评分。
 - `010` 在全量并发批次中曾因 `900` 秒 round timeout 未写出 result；单独复跑并将 `round-timeout` 提高到 `1200` 秒后完成评分，说明该 case 可运行，但复杂 case 对并发和 timeout 更敏感。
-- `005`、`007` 后续已经单独排查和复跑：`007` 得分 `82`，`005` 在 pipe 预算后得分 `75`。因此 `benchmark-failed-cases` 关闭；剩余风险转入长链路控制和 case 分层。
+- `005`、`007` 后续已经单独排查和复跑：`007` 得分 `82`，`005` 在 pipe 预算后得分 `75`。因此 `benchmark-failed-cases` 关闭；剩余风险转入长链路控制和稳定回归流程。
 
 Markdown memory 压缩改造后，`010` 再次完成单 case 闭环：
 
@@ -335,13 +334,13 @@ Markdown memory 压缩改造后，`010` 再次完成单 case 闭环：
 - 范围：`001`、`005`、`010`
 - 模式：`--skip-judge`，只验证 subject agent 和 artifact 抽取，不进行内容评分。
 - 结果：三个 case 均为 `artifact_extracted`，`round_failed=false`。
-- 新暴露报告问题：`case_selection_report.md` 将 subject-only 未评分结果显示为 0% / 淘汰或暂缓，容易误解为 case 失败。后续需要把 `--skip-judge` 结果单独分类为“未评分 / 仅验证 artifact”。
+- 旧报告问题：`case_selection_report.md` 曾将 subject-only 未评分结果显示为 0% / case 建议，容易误解为 case 失败。当前批量报告已改为 `evaluation_report.md`，只展示运行状态、产物成功和评分结果。
 
 当前 benchmark 侧开放 issue：
 
 - `benchmark-stable-full-run`：沉淀全量低并发、复杂 case timeout、失败 case 单独复跑和结果汇总规范。
 - `benchmark-run-transient-failures`：记录 provider streaming `ReadError`、quota、timeout 等外部或长轮次不稳定因素，避免将偶发运行失败误判为 case 不可运行。
-- `skip-judge-report-classification`：修正 `--skip-judge` run 的报告分类，避免把未评分 artifact run 误标为失败或淘汰。
+- `skip-judge-report-classification`：已关闭。批量报告不再生成 case 建议，`--skip-judge` 结果只通过状态分布、产物成功和已评分次数呈现。
 
 ## 暂不处理
 

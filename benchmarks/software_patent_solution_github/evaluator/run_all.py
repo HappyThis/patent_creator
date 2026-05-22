@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import subprocess
 import sys
@@ -49,10 +48,10 @@ def main() -> None:
     summary_path = batch_dir / "run_summary.json"
     summary_path.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     aggregate = aggregate_results(results, case_ids=normalized_case_ids)
-    aggregate_path = batch_dir / "case_selection_summary.json"
+    aggregate_path = batch_dir / "evaluation_summary.json"
     aggregate_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report = render_report(batch_id=batch_id, aggregate=aggregate, repeats=args.repeats)
-    report_path = batch_dir / "case_selection_report.md"
+    report_path = batch_dir / "evaluation_report.md"
     report_path.write_text(report, encoding="utf-8")
     (BENCHMARK_DIR / "latest_run_report.md").write_text(report, encoding="utf-8")
     print(f"\nsummary: {summary_path}")
@@ -222,12 +221,13 @@ def aggregate_results(results: list[dict[str, Any]], *, case_ids: list[str]) -> 
         ]
         status_counts = count_statuses(parsed)
         failure_statuses = sorted({str(item.get("status")) for item in parsed if item.get("status") != "scored"})
+        artifact_success_rate = len(artifact_successes) / len(case_results) if case_results else 0
         row = {
             "case_id": case_id,
             "runs": len(case_results),
             "parsed_runs": len(parsed),
             "scored_runs": len(scored),
-            "success_rate": len(artifact_successes) / len(case_results) if case_results else 0,
+            "artifact_success_rate": artifact_success_rate,
             "artifact_success_runs": len(artifact_successes),
             "status_counts": status_counts,
             "scores": scores,
@@ -238,12 +238,7 @@ def aggregate_results(results: list[dict[str, Any]], *, case_ids: list[str]) -> 
             "failure_statuses": failure_statuses,
             "top_weaknesses": top_text_items(scored, "weaknesses"),
             "top_missing_key_mechanisms": top_text_items(scored, "missing_key_mechanisms"),
-            "recommendation": "",
-            "recommendation_reason": "",
         }
-        recommendation, reason = recommend_case(row)
-        row["recommendation"] = recommendation
-        row["recommendation_reason"] = reason
         rows.append(row)
     return rows
 
@@ -269,64 +264,43 @@ def top_text_items(scored: list[dict[str, Any]], key: str, *, limit: int = 5) ->
     return [text for text, _count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[:limit]]
 
 
-def recommend_case(row: dict[str, Any]) -> tuple[str, str]:
-    success_rate = float(row["success_rate"])
-    avg = row["average_score"]
-    stddev = row["score_stddev"]
-    status_counts = row.get("status_counts", {})
-    runs = int(row.get("runs") or 0)
-    artifact_success_runs = int(row.get("artifact_success_runs") or 0)
-    if avg is None and artifact_success_runs:
-        if status_counts.get("artifact_extracted") == runs:
-            return "未评分 / 仅验证 artifact", "subject 已产出可评测 artifact，但本批次跳过 judge，不生成质量去留建议。"
-        if status_counts.get("judge_failed"):
-            return "未评分 / judge 失败", "subject 已产出可评测 artifact，但 Codex-as-judge 失败，应单独复跑 judge，不能按 case 淘汰处理。"
-        return "未评分 / 待补 judge", "subject 已产出可评测 artifact，但没有有效评分结果。"
-    if success_rate < 0.67:
-        return "淘汰或暂缓", "成功率过低，不适合作为第一批黄金 case。"
-    if avg is None:
-        return "淘汰或暂缓", "没有有效评分结果。"
-    if stddev is not None and not math.isnan(float(stddev)) and float(stddev) >= 15:
-        return "保留但需复核", "分数波动较大，需要检查题目、参考答案或运行链路稳定性。"
-    if avg >= 85:
-        return "黄金 case 候选", "成功率高且平均分较高，可优先人工复核题目质量和参考答案。"
-    if avg >= 70:
-        return "保留但需修改", "能稳定评分，但平均分偏中等，需要人工判断是系统短板还是 case 设计问题。"
-    return "淘汰或暂缓", "平均分偏低，优先检查题目是否过难、过细或参考答案/评分标准是否不匹配。"
-
-
 def render_report(*, batch_id: str, aggregate: list[dict[str, Any]], repeats: int) -> str:
     lines = [
-        "# 软件专利技术方案 benchmark case 筛选报告",
+        "# 软件专利技术方案 benchmark 批量评估报告",
         "",
         f"- 批次：`{batch_id}`",
         f"- 重复次数：`{repeats}`",
         "",
         "## 汇总表",
         "",
-        "| Case | 成功率 | 平均分 | 最低分 | 最高分 | 标准差 | 建议 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Case | 运行次数 | 产物成功 | 已评分 | 平均分 | 最低分 | 最高分 | 标准差 | 状态分布 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in aggregate:
         lines.append(
-            "| {case_id} | {success_rate:.0%} | {avg} | {min_score} | {max_score} | {stddev} | {recommendation} |".format(
+            "| {case_id} | {runs} | {artifact_success_runs} ({artifact_success_rate:.0%}) | {scored_runs} | {avg} | {min_score} | {max_score} | {stddev} | {status_counts} |".format(
                 case_id=row["case_id"],
-                success_rate=float(row["success_rate"]),
+                runs=row["runs"],
+                artifact_success_runs=row["artifact_success_runs"],
+                artifact_success_rate=float(row["artifact_success_rate"]),
+                scored_runs=row["scored_runs"],
                 avg=format_optional_number(row["average_score"]),
                 min_score=format_optional_number(row["min_score"]),
                 max_score=format_optional_number(row["max_score"]),
                 stddev=format_optional_number(row["score_stddev"]),
-                recommendation=row["recommendation"],
+                status_counts=format_status_counts(row["status_counts"]),
             )
         )
-    lines.extend(["", "## 逐项判断", ""])
+    lines.extend(["", "## 逐项结果", ""])
     for row in aggregate:
         lines.extend(
             [
                 f"### Case {row['case_id']}",
                 "",
-                f"- 建议：{row['recommendation']}",
-                f"- 理由：{row['recommendation_reason']}",
+                f"- 运行次数：{row['runs']}",
+                f"- 产物成功：{row['artifact_success_runs']} ({float(row['artifact_success_rate']):.0%})",
+                f"- 已评分次数：{row['scored_runs']}",
+                f"- 状态分布：{format_status_counts(row['status_counts'])}",
                 f"- 分数：{', '.join(format_optional_number(score) for score in row['scores']) or '无'}",
             ]
         )
@@ -351,6 +325,12 @@ def format_optional_number(value: Any) -> str:
     if number.is_integer():
         return str(int(number))
     return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def format_status_counts(status_counts: dict[str, int]) -> str:
+    if not status_counts:
+        return "-"
+    return ", ".join(f"{status}:{count}" for status, count in sorted(status_counts.items()))
 
 
 def parse_args() -> argparse.Namespace:

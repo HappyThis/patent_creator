@@ -66,9 +66,9 @@ Mission Control 已经具备多个 agent runtime 的发现、会话展示和继�
 ## 核心数据结构与接口契约
 
 - `RuntimeKind` 或等价枚举应新增 `opencode`，并进入 runtime detection、settings、onboarding、session list 和 API schema。
-- OpenCode 本地会话适配器应输出统一 session 对象，至少包含 `id`、`runtimeKind`、`title`、`updatedAt`、`workspacePath` 或上下文标识、`canContinue`、`canAttachTerminal`、`sourcePath` 等字段。
+- OpenCode 本地会话适配器应输出统一 session 对象，至少包含 `id`、`runtimeKind` 或等价 kind、`title`、`updatedAt`、workspace / project 上下文、provider / model / token 等可展示元数据。`canContinue`、`canAttachTerminal`、`sourcePath` 等能力信息可以作为显式字段，也可以通过 kind 路由、attach probe 或前端能力 gating 表达，不要求固定字段名。
 - transcript 解析结果应转为统一消息结构，保留 role、时间、文本内容、工具片段或不可解析载荷占位。
-- continue API 应根据 `runtimeKind=opencode` 路由到 OpenCode 专属命令构造逻辑，并返回可诊断错误字段，例如 binary missing、provider missing、session missing、unsupported attach。
+- continue API 应根据 `runtimeKind=opencode` 路由到 OpenCode 专属命令构造逻辑，并返回可诊断失败信息，例如透传本地命令错误，或进一步结构化为 binary missing、provider missing、session missing 等错误类别；关键是不伪造成功。
 - OpenAPI 和测试夹具应反映 OpenCode runtime 的真实响应字段，避免接口契约与实现脱节。
 
 ## 项目集成点

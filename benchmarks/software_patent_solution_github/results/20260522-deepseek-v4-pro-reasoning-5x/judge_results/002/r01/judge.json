@@ -1,0 +1,45 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 14,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确把问题定位为缺少统一的 agent run/Run Record 抽象，而不是普通日志表。",
+    "能结合当前项目中的 tasks、spawn_history、token_usage、mcp_call_log、eval_runs、eval_traces、sessions、event-bus、webhooks 等分散信息设计统一查询契约。",
+    "Spine 索引层、关联键路由层、查询物化层的分层设计较具体，兼顾最小持久化和按需聚合。",
+    "覆盖了 task/session/spawn/cost/tool/eval/outcome 的主要关联关系，并说明了 run_id、task_id、session_id、workspace_id 等关键索引。",
+    "对当前项目部分缺口有识别，例如 mcp_call_log 缺少 session_id、/api/spawn 未走 spawn_history 持久化路径。"
+  ],
+  "weaknesses": [
+    "缺少结构化 provenance/lineage 字段和生成流程，没有明确记录 sourceType、triggeredBy、输入输出摘要、artifact refs、可校验 lineage 等溯源信息。",
+    "评估附着不是明确的 run 级 attach/update 契约，主要依赖查询时按 agent/task/workspace 动态拼接，难以保证一次运行与某次评测结果稳定绑定。",
+    "没有给出 MCP server 层的 run 查询、provenance 查询、eval attach 或 leaderboard 工具，只提供 REST/SSE/Webhook，未命中工具化访问的关键锚点。",
+    "leaderboard 只作为后续用途或外部系统消费场景出现，没有说明基于 run/eval/cost/success rate 的聚合模型或接口。",
+    "spawn 自动桥接描述不完整，对取消、超时、手动 spawn、pipeline step 等非普通 task-dispatch 路径的状态收敛和一致性处理不足。",
+    "mcp_call_log 的 per-run 精确关联被列为待确认风险，但方案没有给出最终稳定关联机制；这会影响工具调用统计能否真正按 run 查询。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 数据模型及自动生成流程。",
+    "run 级 eval attach/update API 或工具入口，包含 score、pass/fail、指标、说明、benchmark/evaluator 元数据。",
+    "MCP 工具层：run list、run detail、run provenance、attach eval、leaderboard 查询。",
+    "leaderboard/统计视图的聚合规则和数据边界。",
+    "覆盖 spawn 创建、完成、失败、取消、超时以及手动 spawn、cron、pipeline 的统一生命周期桥接。",
+    "mcp_call_log、token_usage、eval_runs 与单次 run 的精确关联字段或迁移策略。"
+  ],
+  "unsupported_claims": [
+    "方案称 task-dispatch 创建阶段会调用 recordSpawnStart 写入 spawn_history，但当前快照中 recordSpawnStart/recordSpawnFinish 只在 src/lib/spawn-history.ts 定义，未被 task-dispatch 或 /api/spawn 调用。",
+    "方案使用 agent_name + task_id + workspace_id 路由到 eval_runs，但当前 eval_runs 表没有 task_id 字段，只有 agent_name、eval_layer、score、passed、detail、golden_dataset_id、workspace_id、created_at。",
+    "方案称可按 task_id 从 eval_runs 取得最新四层评估结果，但当前 /api/agents/evals 是 agent 级评估接口，不是 run/task 级评估附着接口。",
+    "方案称 WebSocket 客户端可直接订阅 run.* 事件；当前项目确有 /api/events SSE 和 gateway WebSocket，但没有现成的 run.* event bus 类型或面向 run 的 WebSocket 订阅契约。",
+    "方案把 token_usage 的 cost_usd 作为成本聚合来源，但当前代码中成本字段存在 schema/实现不一致，主要 token API 会基于 tokens 和 pricing 计算成本，不能直接假设 cost_usd 已稳定填充。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的较强答案：它没有退化为普通日志表，能基于当前项目分散的 spawn、task、session、cost、MCP call、eval 和事件基础提出统一 Run Record 契约，并给出较具体的数据聚合和 API 设计。但按 rubric 的上限规则，方案缺少结构化 provenance/lineage，缺少 MCP/leaderboard 工具层，且 eval 附着不是稳定的 run 级 attach/update 机制；其中 eval_runs.task_id 等关键关联还与当前源码不符。因此即使整体方向正确、工程细节较多，总分不应超过“缺两个关键机制”的 78 分档位。"
+}

@@ -71,10 +71,10 @@ Mission Control 已经能够派发 agent 任务、记录部分 spawn history、�
 - 来源字段：`sourceType`、`triggeredBy`、`inputSummary`、`provenance`、`lineage`。
 - 生命周期字段：`status`，建议覆盖 `queued/running/completed/failed/cancelled` 或等价状态，配套 `startedAt/endedAt/durationMs`。
 - 结果字段：`outputSummary`、`artifactRefs`、`errorCode`、`errorMessage`、`cost`、`tokenUsage`。
-- 评估字段：`evals[]`、`score`、`pass/fail`、`rubricVersion`、`evaluator`、`attachedAt`。
+- 评估字段：`eval` 或等价评估附着对象，至少包含 `score`、`pass/fail`、评估说明、指标或 benchmark 标识等信息；若系统需要多轮评估历史，可扩展为 `evals[]`，但不是本 case 的硬性要求。
 - 扩展字段：metadata、tags、external ids。
 
-状态转移应明确：创建后进入 queued/running，完成后进入 terminal；eval 可以附着到 terminal run，也可以标记 pending review。迟到的 spawn 完成事件不得覆盖已经人工标记的取消或错误终态，除非有明确版本号或条件更新。
+状态转移应明确：创建后进入 pending / running 或等价进行中状态，完成后进入 completed、failed、cancelled、timeout 等终态；eval 可以附着或更新到已有 run。版本号、条件更新或终态保护可作为增强机制，但不应替代 run 生命周期和评估附着本身。
 
 ## 项目集成点
 

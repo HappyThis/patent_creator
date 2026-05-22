@@ -43,7 +43,7 @@ P0：
 
 P1：
 
-- `case-selection-quality-gate`：case 筛选标准需要继续落实。需要避免 bug fix、小补丁、过细需求或已经暴露技术手段的需求进入核心 benchmark。
+- `case-selection-quality-gate`：case 筛选标准需要继续落实。需要避免 bug fix、小补丁、过细需求或已经暴露技术手段的需求进入正式 benchmark。
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
 - `late-artifact-write`：主 agent 可能在长时间阅读和多次子 agent 调用后才写入 `technical_solution`，一旦 round 超时就没有可评测 artifact。
   - 跟踪文档：[提高技术方案生成能力](./2026-05-12-technical-solution-generation-capability.md)
@@ -59,15 +59,11 @@ P1：
   - 跟踪文档：[Benchmark 长链路可控完成问题](./2026-05-20-benchmark-long-chain-control.md)
 - `subagent-read-budget`：pipe 预算限制了子 agent 交付内容，但不限制其在交付前大量读取/分析，analyst/refiner 仍可能拖慢复杂 case。
   - 跟踪文档：[Benchmark 长链路可控完成问题](./2026-05-20-benchmark-long-chain-control.md)
-- `benchmark-case-layering`：评测集需要区分核心质量 case、待校准 case、压力/回归 case，避免内容质量分与长链路稳定性混在一起。
-  - 跟踪文档：[Benchmark 长链路可控完成问题](./2026-05-20-benchmark-long-chain-control.md)
 - `solution-quality-depth-high-difficulty`：`007`、`010` 等高难 case 已能到 82 分，但仍缺少完整工程边界、状态版本、认证绑定、异常语义等关键机制深度。
   - 跟踪文档：[Benchmark 长链路可控完成问题](./2026-05-20-benchmark-long-chain-control.md)
 - `benchmark-run-transient-failures`：provider streaming `ReadError`、quota、timeout 等偶发运行失败需要与 case 不可运行区分开。
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
 - `benchmark-judge-plugin-sync-failure`：Codex-as-judge 启动时可能因远程插件同步 403 / Cloudflare challenge 导致 `judge_failed`，需要与 subject agent 失败区分并考虑重试或禁用非必要插件同步。
-  - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
-- `skip-judge-report-classification`：`--skip-judge` 的 subject-only smoke run 目前会在 case report 中被当作 0% / 淘汰，需要区分未评分与失败。
   - 跟踪文档：[建立技术方案生成能力评测基准](./2026-05-12-technical-solution-generation-benchmark.md)
 
 P2：
@@ -89,11 +85,13 @@ P2：
 - `context-compression-invalid-json`：旧 JSON / preserved tool call 压缩协议已移除，当前使用 Markdown memory 压缩并通过弱校验与 fallback 保底。
 - `subagent-task-boundary`：`section_writer` 阻断级边界问题已关闭；复杂正文已转为主 agent 直接落盘或轻量局部写作。
 - `tool-failure-recovery`：工具失败后绕行内部文件的问题已关闭为阻断级问题；`010` 复跑中主 agent 能修正同一 `document_edit` 调用并继续。
-- `benchmark-golden-cases`：`001`、`002`、`003` 已跑通完整 subject + Codex-as-judge 链路，满足至少 3 个黄金 case 的最低闭环要求。
+- `benchmark-case-layering`：case 分层与黄金 case 概念已废弃。正式纳入 benchmark 的 case 一视同仁；运行分数只评价 agent 表现，运行器不再输出 case 分级、case 建议或 benchmark 自评结论。
+- `benchmark-golden-cases`：黄金 case 概念已废弃。`001`、`002`、`003` 已跑通完整 subject + Codex-as-judge 链路，历史最低闭环验证目标已满足。
+- `skip-judge-report-classification`：批量报告已从 `case_selection_report.md` 改为 `evaluation_report.md`，只展示运行状态、产物成功和评分结果，不再生成 case 建议。
 - `subagent-pipe-budget`：`write_pipe` 已增加 run 级预算（最多 10 次、累计 4000 字、不限制单次字符数），`005` 复跑验证超长 pipe 写入会被拒绝，子 agent 能压缩后主动 `finish`。
 - `subagent-finish-boundary`：旧风险是子 agent 不及时 `finish` 或无限写 pipe；当前 `write_pipe` 预算、预算 ack 和无参 `finish` 已能兜住该类协议收尾问题，残留读取过多、任务过大和重复委派已拆到独立 issue。
 - `benchmark-artifact-after-review-timeout`：`consistency_reviewer` 已移除，`010` 复跑验证不再因 reviewer timeout 失败；残留的已有主体后重复 analyst/refiner 调用已拆到 `subagent-duplicate-delegation` 和 `agent-completion-policy`。
 - `document-edit-low-burden-api`：旧 `document_edit + operations` 公开入口已移除，当前改为 `document_replace_section_blocks`、`document_append_block`、`document_replace_block`、`document_append_child_section`、`document_clear_section_blocks` 五个低负担写入工具。
 - `operations-stringified-json`：公开工具 schema 已不再暴露 `operations` 参数，内部 domain 写入层也已移除 op 分发器。
 - `tool-system-refactor`：工具声明、schema、prompt 手册和执行入口已统一迁移到 `backend/app/tools`，旧 `agents/tools` 和 `runtime/executor/tools` 目录已删除。
-- `benchmark-failed-cases`：`005`、`007` 已完成单独排查和复跑，均证明不是不可运行 case；剩余问题拆分到长链路控制、case 分层和稳定回归流程中继续跟踪。
+- `benchmark-failed-cases`：`005`、`007` 已完成单独排查和复跑，均证明不是不可运行 case；剩余问题拆分到长链路控制和稳定回归流程中继续跟踪。

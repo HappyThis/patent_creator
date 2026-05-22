@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 88,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 8,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 8,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别了核心矛盾：客户端本地生命周期清理与服务端 Durable Object 中 agent turn 的取消语义被错误耦合，需要把刷新、卸载、reader cancel、网络断开与用户显式停止区分开。",
+    "方案能落到当前项目的关键边界：useAgentChat、WebSocketChatTransport、CF_AGENT_CHAT_REQUEST_CANCEL、ResumableStream、AbortRegistry、ContinuationState、broadcast-state、SQLite chunk replay 等源码机制基本匹配。",
+    "提出默认 durable 模式和可选 request-lifetime 模式，并说明显式停止通过携带 request id 的取消帧到达服务端，整体满足需求主线。",
+    "覆盖了 stream resume、工具 continuation、多标签观察、迟到消息和持久化恢复，问题-手段-效果闭环较完整。"
+  ],
+  "weaknesses": [
+    "显式取消后的 active request id 保留、清理时机和 late chunk/done 过滤规则没有充分展开；只说携带请求 ID，未形成完整客户端状态机。",
+    "request-lifetime 行为矩阵不够严密：普通 AbortSignal、ReadableStream.cancel、WebSocket close、组件卸载和网络断开在该模式下是否都取消服务端 turn 没有逐项说明。",
+    "多标签场景下 request-lifetime 的取消作用域仍是待确认风险；单个标签页 onClose 后 abortAllRequests 可能中断其他仍连接或观察的标签页。",
+    "工具 continuation 部分方向正确，但对非当前 attached stream 创建的 observed/fallback turn 如何登记、如何被显式取消说明不足。",
+    "方案使用了若干新增类名和策略名，但对它们如何接入现有 useChat stop/cleanup 触发源、当前 onClose 清理逻辑和测试入口的说明还不够工程化。"
+  ],
+  "missing_key_mechanisms": [
+    "显式取消后 active request id 的保留、终态确认、late chunk/done 过滤和 UI 污染防护。",
+    "覆盖 durable 默认与 request-lifetime opt-in 的完整行为矩阵，尤其是 stream.cancel 与 caller AbortSignal 在两种模式下的差异。",
+    "fallback observer 或跨标签观察到的 turn 的统一注册与显式取消入口。",
+    "多标签 request-lifetime 下按 turn、主控标签页或剩余连接数判断是否取消的规则。",
+    "对当前 ContinuationState 在连接关闭时清理 pending/awaiting 状态的适配修改。"
+  ],
+  "unsupported_claims": [
+    "方案称 durable 模式下 ContinuationState.pending 会保留关闭连接的 connection id 和请求上下文等待同一客户端重连；当前代码的 onClose 包装会删除 awaitingConnections，并在 pending.connectionId 匹配时清空 pending。",
+    "方案称工具结果未送达时重连客户端可以重新发送，但没有给出客户端如何发现、恢复或重新执行该未送达 tool result 的机制。",
+    "方案中的 ConnectionIntentTracker、TurnLifetimePolicy、turnLifetime 和 request-lifetime onClose 分支是拟议新增能力，不是当前源码中已有的具体实现点。",
+    "方案提到 request-lifetime 下 onClose 可检查主动 CANCEL 标记避免重复取消，但当前源码未体现该取消标记状态，需要新增状态来源。"
+  ],
+  "score_rationale": "该方案明显高于可用档：它准确命中本地清理与服务端取消解耦、默认 durable、显式取消帧、request id、resume、continuation、多标签和持久化恢复等关键方向，并且大量项目事实与当前源码相符。未给 90 分以上，主要因为 90+ 档要求的 active request id 保留/late done 过滤、observed turn 取消、完整行为矩阵和多标签 request-lifetime 取消作用域没有完全闭合；此外 continuation 断线保留的描述与当前 onClose 清理逻辑存在冲突，需要作为实现风险扣分。由于主干机制完整且未把普通 abort 一律映射为服务端取消，也没有缺失显式服务端取消能力，因此不适用 80/82 以下上限。"
+}

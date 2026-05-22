@@ -1,0 +1,45 @@
+{
+  "status": "scored",
+  "total_score": 68,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 12,
+    "technical_mechanism": 12,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 6,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "识别了需求中的关键约束：不能假设 OpenCode 固定状态目录、消息格式或继续命令，需要可配置发现、适配器合约、fixture 验证和能力边界声明。",
+    "对当前项目已有 OpenClaw、Claude、Codex、Hermes runtime 检测、agent sync、本地 session 聚合、continue 限制、PTY gating、offline OpenClaw harness 等上下文有较多源码级观察。",
+    "提出了异构 runtime 适配、事件总线解耦、TTL 缓存、会话活跃状态推导、错误降级和离线验证等可专利化机制。",
+    "没有直接声称 OpenCode continue 或 PTY attach 已完整支持，并在风险部分指出继续命令和命名关系需确认。"
+  ],
+  "weaknesses": [
+    "方案核心基本是在复述当前 OpenClaw/Gateway 能力，并将 OpenCode 与 OpenClaw 混用，没有提出独立的 opencode runtime kind、OpenCode 专属本地状态适配器或进入现有 session API 的新增接入路径。",
+    "缺少 OpenCode transcript API/parser 接入和消息归一化机制，只描述 sessions.json 元数据读取，未覆盖历史消息、工具片段或不可解析载荷占位。",
+    "continue 能力没有形成可实施路由，只说当前 API 不支持、未来通过 gateway CLI 或 openclaw 命令实现，缺少命令替身、provider/model/session 缺失时的诊断性失败返回。",
+    "UI 集成不足，未具体说明 conversation list、chat workspace、session branding、settings/onboarding、terminal view 如何基于 OpenCode runtime kind 和能力字段展示或禁用入口。",
+    "缺少 OpenAPI/API index/schema 契约同步和前端能力字段传播，无法保证接口文档、测试和 UI 行为一致。",
+    "验证路径主要是 OpenClaw fixture 和 OpenClaw mock binary，没有覆盖 OpenCode session list、transcript、continue、PTY unsupported 的可复现测试。"
+  ],
+  "missing_key_mechanisms": [
+    "新增 RuntimeKind/opencode 并接入 runtime registry、settings、onboarding、session list 和 API schema。",
+    "OpenCode 专属本地状态发现与兼容式解析模块，输出 Mission Control 统一 session 对象并保留 runtimeKind=opencode。",
+    "OpenCode transcript 解析器，将历史消息归一化为统一 role、timestamp、text、tool_use、tool_result 或占位结构。",
+    "OpenCode continue API 路由与本地命令构造机制，以及 binary missing、provider/model missing、session missing、命令失败等诊断性错误返回。",
+    "conversation list、chat workspace、session branding 和 terminal/PTY attach capability gating 的端到端能力字段传播。",
+    "OpenAPI、API index、类型定义和测试夹具同步。",
+    "真实结构 OpenCode fixture、OpenCode binary stub，以及 session list/transcript/continue/PTY unsupported 的可复现 API/E2E 测试。"
+  ],
+  "unsupported_claims": [
+    "将 OpenCode/OpenClaw 并列为同一类本地 runtime 并用 OpenClaw 状态目录、openclaw.json、OpenClaw Gateway 来代表 OpenCode，当前源码中没有 OpenCode/opencode 实现依据。",
+    "声称 OpenCode 会话数据按 {OPENCLAW_STATE_DIR}/agents/{agentName}/sessions/sessions.json 存储，这只是当前 OpenClaw gateway session store 结构，不能作为 OpenCode 事实。",
+    "声称系统通过 OpenCode Gateway RPC 调用管理 OpenCode，会话方法实际是 OpenClaw gateway call 封装，当前项目没有 OpenCode Gateway。",
+    "detectOpenClaw 被描述为通过文件、--version 和端口探测组合判定 running，但源码中端口探测 Promise 未被等待，running 实际降级为 installed。",
+    "离线 fixture 被描述为验证 OpenCode 状态目录结构，但项目中 fixture 位于 tests/fixtures/openclaw，验证对象是 OpenClaw。"
+  ],
+  "score_rationale": "该方案属于方向部分正确但关键工程边界缺失的弱到可用边缘答案。它较好理解了“异构本地 runtime 需要可配置发现、适配器和能力边界”的问题，也大量引用了当前项目已有 OpenClaw/Mission Control 机制；但被评估目标是 OpenCode 原生 runtime，方案没有给出独立 opencode runtime 注册、OpenCode session/transcript/continue 接入和契约同步，反而把现有 OpenClaw/Gateway 路径当作 OpenCode 方案主体。根据 rubric，上限规则中同时缺失 transcript、continue 诊断路由、OpenAPI/API 契约同步、OpenCode fixture/binary stub 和完整 PTY gating 验证，通常不得高于 72 分；同时存在核心源码事实混用，因此不能进入 75-85 档。综合其问题识别和部分工程可实施细节，给 68 分。"
+}

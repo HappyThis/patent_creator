@@ -76,7 +76,7 @@
 
 ## 分数上限规则
 
-- 如果 workspace proxy 没有覆盖 Think built-in tools 与 codemode/shell state 所需的完整文件接口，包括字节读写、append/exists/lstat、cp/mv、symlink/readlink、search/diff 或等价能力，总分通常不得高于 82 分。
+- 如果 workspace proxy 没有覆盖 Think built-in tools 与 codemode/shell state 所需的完整文件接口，包括字节读写、append/exists/lstat、cp/mv、symlink/readlink、glob/文件发现或等价能力，总分通常不得高于 82 分。差异和编辑计划可以由 codemode state backend 基于这些文件接口组合实现，不应硬性要求原始 diff RPC。
 - 如果方案把包含 execute 函数闭包的 AI SDK ToolSet 直接跨 Durable Object RPC 传给子会话，而没有可序列化 tool descriptor + 子侧 wrapper + 父侧 callTool 的边界，总分通常不得高于 80 分。
 - 如果方案没有区分浏览器 callable 与父子内部 RPC，导致 raw MCP invocation 可能被前端绕过 agent 生命周期调用，总分通常不得高于 82 分。
 - 如果方案没有 workspace revision/onChange 或等价单调变更广播，无法说明文件浏览器和多标签页何时刷新，总分通常不得高于 84 分。

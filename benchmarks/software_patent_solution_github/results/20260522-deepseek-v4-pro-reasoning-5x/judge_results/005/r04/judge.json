@@ -1,0 +1,46 @@
+{
+  "status": "scored",
+  "total_score": 74,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 7,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了外部 webhook/RPC/Worker 需要快速 accepted、后续查询/取消、重试不重复执行的核心问题。",
+    "提出了持久任务表、幂等键、pending/running/completed/failed/cancelled 状态、条件领取、状态查询、取消和删除等较具体机制。",
+    "能结合当前 Think 的 Session、assistant_messages、TurnQueue、ResumableStream、AbortRegistry、streamText、sanitizeMessage/enforceRowSizeLimit 等现有边界，整体没有另建完整平行推理系统。",
+    "对写入前后崩溃、执行中断、推理完成但任务状态未更新等场景有分场景恢复意识，问题-手段-效果闭环较完整。"
+  ],
+  "weaknesses": [
+    "最关键缺陷是没有持久的消息应用边界。方案在 submitTask 接收阶段就把用户消息写入 Session/assistant_messages，缺少 messagesAppliedAt、applied checkpoint、requestId/turnId 等可恢复边界；取消 pending 任务时消息可能已经进入普通聊天历史。按 rubric，该类方案总分通常不能高于 75。",
+    "后台执行机制不够可靠。把任务“排入 TurnQueue”作为接收事务的一部分不成立，TurnQueue 是内存 Promise 队列，不是 durable ledger；方案没有明确 scheduled drain、alarm/keepAlive 唤醒或启动后持续 drain pending submission 的机制。",
+    "恢复策略存在矛盾：前文说消息写入和任务创建在同一 SQLite 事务内，后文又讨论“任务记录已创建但用户消息未写入”；并且把 orphan 任务标记 failed 后，同一 idempotency_key 重试会按幂等逻辑返回 failed，不能“安全重新提交”。",
+    "取消与恢复缺少 requestId/streamId/recoveryId 关联。任务表没有保存实际 Think turn 的 requestId、streamId 或 fiber/recovery 标识，cancelTask 很难精确调用 AbortRegistry，ResumableStream 恢复也难以把孤儿流可靠归属到 task。",
+    "终态更新虽提到 WHERE status='running'，但 reset/clear conversation 与任务 ledger 的同步不足，只用 generation 跳过执行，没有把 pending/running submission 明确置为 skipped/aborted/error，也没有防止 delete/cleanup 后迟到完成的完整规则。",
+    "管理能力不完整：有 get/cancel/delete，但缺少 list/inspect、cleanup/TTL、幂等键保留窗口和 lifecycle observability events。",
+    "deleteTask 删除关联用户消息和助手消息的设计风险较高，可能破坏 Session 的树状历史和普通聊天可见性；参考边界更倾向于删除 submission 记录而不是默认删除已应用会话消息。"
+  ],
+  "missing_key_mechanisms": [
+    "持久消息应用边界，例如 messagesAppliedAt、applied checkpoint、applied message id set 或等价字段，用于区分提交已接收但未写入 Session、已写入 Session、运行中断等状态。",
+    "持久后台 drain/唤醒机制，例如 alarm/schedule/keepAlive 驱动的 pending submission 领取，而不是只依赖内存 TurnQueue 条目。",
+    "submission 与实际 Think turn 的 requestId、streamId、fiber/recoveryId 的 durable 关联，用于取消、恢复、状态补全和结果追踪。",
+    "reset/clear conversation 时对 pending/running submission 的 skipped/aborted/error 同步处理，以及迟到完成事件不覆盖这些终态的完整条件更新。",
+    "list/inspect、cleanup/TTL、幂等键保留窗口和 submission lifecycle observability events。",
+    "pending 取消或删除时，如何处理尚未应用消息与已应用消息的不同策略。"
+  ],
+  "unsupported_claims": [
+    "当前 packages/think/src/think.ts 中没有 onChatMessage() 或 assembleContext() 作为执行路径；实际单一入口是 _runInferenceLoop()，由 Session、beforeTurn、convertToModelMessages 和 streamText 组成。",
+    "“submitTask RPC 方法遵循 chat() 和 configure() 的 @callable 接口模式”缺少源码依据；Think 基类的 chat()/saveMessages() 不是 @callable 装饰方法，@callable 主要是 Agent WebSocket RPC 装饰器。",
+    "“将任务排入 TurnQueue”不能作为 SQLite 事务的一部分；TurnQueue 是内存串行队列，不能随 SQLite 事务持久化。",
+    "“Session.appendMessage() 底层为 INSERT OR IGNORE”表述不准确；当前 AgentSessionProvider 先 SELECT 检查同 session message id，再 INSERT，实现幂等效果但不是直接 INSERT OR IGNORE。",
+    "使用 task_id 直接取消 running 推理缺少依据；当前 AbortRegistry 按 requestId 管理 AbortController，方案没有保存 taskId 到 requestId 的映射。",
+    "通过 assistant_messages 时间顺序匹配来补全 completed task 缺少可靠源码机制支撑，尤其在树状 Session、多分支或并发恢复场景下不可作为强一致恢复依据。"
+  ],
+  "score_rationale": "该方案方向正确且机制描述较丰富，明显优于普通“异步队列”方案；但它把用户消息在 accepted 阶段直接写入 Session，缺少持久消息应用边界，这是本测试项和 rubric 的核心扣分点。它还缺少可靠的 durable drain/唤醒、requestId/streamId/recoveryId 关联、reset/cleanup 同步、list/observability 等关键机制，并存在若干当前源码中无依据或不准确的接口/执行路径描述。因此不能进入 75-85 的高位区间；按“无持久消息应用边界通常不得高于 75”的上限规则，结合其较完整的问题识别和状态模型，给 74 分。"
+}

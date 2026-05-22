@@ -1,0 +1,45 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住 OpenCode 作为异构本地 runtime 接入的核心矛盾：本地状态来源未知、会话格式未知、继续能力未知，以及 UI/API 不能误导用户。",
+    "能落到当前项目的真实主干路径：agent-runtimes.ts、/api/agent-runtimes、/api/sessions、/api/sessions/continue、/api/sessions/transcript，以及 Claude/Codex/Hermes 现有扫描模式。",
+    "提出了较具体的增量 runtime 注册、可配置状态目录发现、OpenCode 专属 session adapter、兼容式解析、会话列表归一化和能力字段 gating。",
+    "明确不把未知 continue/transcript 能力伪装成已支持能力，501 结构化错误比静默成功更符合约束。",
+    "包含 fixture 驱动解析器验证思路，避免完全依赖开发者本机真实 OpenCode 安装。"
+  ],
+  "weaknesses": [
+    "方案没有真正设计 OpenCode transcript API/parser 和消息归一化，而是直接将 transcript 标记为不支持并返回 501；这不能满足高分锚点中的会话详情和历史消息展示链路。",
+    "continue 方案只有统一 501，不包含 OpenCode 命令发现、命令替身、条件满足时的继续路由，也缺少 binary missing、provider missing、session missing 等可诊断失败分类。",
+    "没有覆盖 terminal/PTY attach capability gating；当前项目已有 /api/pty/attach 和 pty-websocket 仅支持 claude-code/codex-cli，OpenCode 接入必须显式避免终端入口误开启。",
+    "没有说明 OpenAPI、/api/index、CLI/MCP API 客户端和 schema/type contract 如何同步，新增 kind/capabilities 字段可能造成接口契约漂移。",
+    "前端集成只笼统说 Runtime 卡片和会话详情能力矩阵，未覆盖 conversation list、chat workspace、session branding、runtime setup modal/onboarding 的具体类型和渲染改造。",
+    "测试方案只覆盖解析器 fixture，缺少 session list、transcript、continue、PTY unsupported、OpenAPI/API index parity 和 OpenCode binary stub 的可复现验证。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript 读取器：从适配器读取历史消息，归一化为 role、timestamp、text、tool_use、tool_result 和不可解析占位。",
+    "OpenCode continue 路由：可配置命令模板或 adapter capability probe，在可确认时执行本地命令，在不可确认或失败时返回诊断性错误。",
+    "PTY/terminal capability 字段或 kind 路由 gating：至少包含 canAttachTerminal=false，并接入 /api/pty/attach、terminal view、chat workspace 操作入口。",
+    "API 契约同步：openapi.json、/api/index、相关 CLI/MCP 客户端、前端 store sessionKind 类型和测试应同步包含 opencode。",
+    "可复现测试闭环：真实结构或版本化 fixture、OpenCode binary stub、session list/transcript/continue/PTY unsupported/API parity 测试。",
+    "onboarding/runtime setup、settings、conversation list、session branding、chat workspace 的端到端 UI 集成路径。"
+  ],
+  "unsupported_claims": [
+    "称 Mission Control 已支持 OpenClaw 的 continue 操作不够准确；当前 /api/sessions/continue 只接受 claude-code 和 codex-cli，gateway/OpenClaw 使用的是不同的 session control 或 chat forward 路径。",
+    "将 OpenCode 状态目录 fallback 固定为 OPENCODE_STATE_DIR、~/.opencode/state、$XDG_DATA_HOME/opencode 属于方案假设；当前项目没有这些 OpenCode 配置字段，只能作为可配置候选而非源码事实。",
+    "提出 local-agent-sync.ts 已可支持 OpenCode agent 定义风险较高；当前源码只扫描 ~/.agents、~/.codex/agents、~/.claude/agents、~/.hermes/skills，未体现 OpenCode agent 定义来源。",
+    "声称新增 Session capabilities 字段后所有 runtime 默认 true 没有当前源码依据；当前 store 和 session API 没有该字段，且 gateway/Hermes/PTY 能力并非简单全 true。",
+    "id='opencode:{sessionId}'、source='opencode' 是可行设计但不是当前项目既有约定；当前本地会话 source 主要是 local，gateway 是 gateway，需要同步类型和去重规则。"
+  ],
+  "score_rationale": "该方案属于“方向正确但不完整”的可用方案。它对当前项目的 runtime registry、session 聚合和 Claude/Codex/Hermes 扫描路径有一定源码依据，也遵守了不假设 OpenCode 固定状态格式和不误导用户的约束。但按 rubric 的上限规则，方案同时缺失 OpenCode transcript 解析、continue 条件路由与诊断性失败、PTY gating、API 契约同步和完整可复现测试，三个以上关键机制缺失时总分不得高于 72 分。因此即使 session list 和能力边界部分较具体，也不能进入 75 分以上档位。"
+}

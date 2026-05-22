@@ -276,7 +276,7 @@
 ### microsoft/retina
 
 - 仓库：<https://github.com/microsoft/retina>
-- 暂缓原因：eBPF / Kubernetes observability 很有技术价值，但项目上下文较重，第一批黄金测试项成本偏高。
+- 暂缓原因：eBPF / Kubernetes observability 很有技术价值，但项目上下文较重，第一批正式测试项成本偏高。
 
 ### amalshaji/portr
 
@@ -295,7 +295,7 @@
 
 ## 第一批建议
 
-建议准备以下 10 个首批项目，并从中筛出 3 个黄金测试项试运行。
+建议准备以下 10 个首批项目，并从中筛出 3 个正式测试项试运行。
 
 通用软件机制方向：
 
@@ -333,7 +333,7 @@ agent / AI 工具链方向：
 ## 下一步
 
 1. 对第一批 10 个项目逐个深挖 3-5 个候选 issue / PR。
-2. 按测试项质量筛出 3 个黄金测试项。
-3. 为每个黄金测试项固化解决方案合入前的项目快照。
+2. 按源码级证据人工复核测试项有效性，筛出首批正式测试项。
+3. 为每个正式测试项固化解决方案合入前的项目快照。
 4. 编写 `request.md`、`reference_solution.md`、`rubric.md`、`metadata.json`。
 5. 试跑现有 agent，记录基线表现。

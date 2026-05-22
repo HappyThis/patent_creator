@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住了共享 Markdown 语义内容与本机高频运行时信号混写造成 VC 噪声、协作冲突和排序信号保留之间的矛盾。",
+    "提出了 Markdown frontmatter 与本地 sidecar JSON 信号层分离的总体机制，并明确了路径映射、字段分层、读取融合、写入剥离、迁移兼容、失败隔离和清理一致性。",
+    "覆盖了 search/BM25 复合排序、manifest 预算、archive/prune、dream consolidate/synthesize 等主要消费路径，环境理解较充分。",
+    "技术效果闭环较完整，能说明为什么减少 diff 噪声、保持动态排序能力并降低合并冲突。"
+  ],
+  "weaknesses": [
+    "没有抽象出 sidecar store 的最小接口边界，例如 get/getMany/update/batchUpdate/delete/list，也没有说明批量读取如何避免检索路径逐文件读取信号造成性能问题。",
+    "并发更新机制不足。方案只提出临时文件加 rename，能避免半写文件，但不能避免多个查询或 curate 同时 read-modify-write accessCount/importance 时互相覆盖，缺少 CAS、文件锁、单写队列或 updater 语义。",
+    "字段分层中将 createdAt、updatedAt 以及 maturity 全部迁出为本地信号存在争议；当前项目和参考边界更倾向保留部分时间/质量共识字段为可审阅语义元数据，方案只在风险中提到但没有形成明确策略。",
+    "失败隔离写成写入失败静默丢弃且不重试，缺少参考方案要求的失败日志或可观测性，长期可能难以诊断排序信号失效。",
+    "清理一致性覆盖归档、剪枝、合并和远端删除，但缺少 list/扫描支撑的孤儿信号修复、重命名追踪或 schemaVersion 自愈机制。"
+  ],
+  "missing_key_mechanisms": [
+    "按知识相对路径键控的 RuntimeSignalStore/IRuntimeSignalStore 最小接口，包括 getMany、update/updater、batchUpdate、delete、list 或等价能力。",
+    "对 accessCount、importance、updateCount 等并发信号增量的原子 read-modify-write、CAS、锁或单写队列。",
+    "检索和 manifest 等高频路径的批量 sidecar 读取与缓存策略。",
+    "共享 maturity、createdAt、updatedAt 与本机 maturity/recency/accessCount 的边界策略。",
+    "sidecar 失败日志、孤儿记录扫描、重命名/删除后的 repair 流程和 schemaVersion 迁移机制。"
+  ],
+  "unsupported_claims": [
+    "方案称时间衰减计算会被重写回 Markdown；当前代码中 applyDecay 是纯函数，search 路径注释也表明 decay 在搜索时惰性计算且不写盘。",
+    "方案称每次查询命中都会重写 accessCount 和 importance 到 Markdown；当前 search-knowledge-service 是先累计 pendingAccessHits，再在索引重建前批量 flush 到 frontmatter，并非每次命中立即写。",
+    "方案暗示 createdAt、updatedAt 完全属于运行时信号；当前 markdown-writer 的 FrontmatterScoring 确实包含它们，但它们也可表达知识创建/内容更新时间，是否应迁出缺少项目依据。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的高档答案。它对问题本质、字段分层、旁路存储、读取融合、迁移兼容、失败隔离和生命周期清理都有较完整描述，并且能落到当前项目的 Markdown writer、search/scoring、manifest、archive/prune、dream 等消费路径。但 rubric 的 90+ 档要求具备最小 store 接口、批量读取、原子 RMW/CAS 或等价并发机制；本方案没有给出这些关键工程边界，且 atomic rename 不足以保证并发计数不丢失。因此适用分数上限规则，未给到 90 分以上。另有少量当前源码行为表述过度，如时间衰减写回 Markdown、每次查询立即写回等，按 unsupported claims 扣分。整体仍满足不删除动态信号、不迁走全部知识内容、保持 Markdown 可审阅和读取融合的核心约束，给 82 分。"
+}

@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "environment_understanding": 9,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 7,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 7,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了需要统一 Run Record，而不是新增普通日志表这一核心方向。",
+    "给出了较完整的数据契约，包括 run_id、session/message 关联、父子 run、状态、耗时、工具调用、评估历史和查询接口。",
+    "提出异步提取、幂等补建、执行树查询、评估附着和外部查询，问题-手段-效果链条比较清楚。",
+    "方案整体保持非侵入式，意图复用现有会话、事件和 agent 编排基础，没有要求推翻现有任务系统。"
+  ],
+  "weaknesses": [
+    "对当前项目环境的落点不够准确。快照中有 spawn_history、event-bus、agent-evals、token_usage、MCP server 等现成分散能力，但方案没有明确接入这些源码边界。",
+    "Run 生命周期主要依赖 agent_output 之后异步抽取，缺少在 spawn 创建、运行中、完成、失败、取消路径自动创建和更新 run 的桥接机制，因此 failed/timeout/cancelled 的状态来源不稳。",
+    "provenance/lineage 只体现为 parent_run_id、root_run_id、events_range，缺少 sourceType、triggeredBy、taskId、agentId、spawnId、input/output 摘要、artifact/error 等可审计来源字段。",
+    "没有提供 MCP 工具层的 run 查询、provenance 查询、eval 附着或 leaderboard 工具，只给 REST 查询接口；leaderboard 也只是消费场景，没有聚合模型。",
+    "成本机制偏弱，仅有 duration_ms、tool_call_count、subagent_count，并未清晰桥接当前 token_usage/task-costs 等成本来源。"
+  ],
+  "missing_key_mechanisms": [
+    "接入现有 src/lib/spawn-history.ts 的 recordSpawnStart/recordSpawnFinish 或等价创建/完成路径，并覆盖失败、取消、超时等终态。",
+    "结构化 provenance 生成流程：关联 task、agent、workspace、session、spawn、触发来源、输入摘要、输出摘要、错误和 artifact 引用。",
+    "run 生命周期事件进入现有 event-bus/SSE，例如 run.created、run.updated、run.completed、run.eval_attached。",
+    "MCP server 工具层暴露 run list/detail/provenance/eval attach/leaderboard，而不只是 REST API。",
+    "基于 run 级 eval、成功率、成本和 agent 维度的 leaderboard/统计聚合。",
+    "与 token_usage、mcp_call_log、task outcome/regression/evals API 的明确关联方式。"
+  ],
+  "unsupported_claims": [
+    "当前快照未发现 agent_output、agent_message、scope=main/subagent、parent_call_id、events_range/start_seq/end_seq 这组事件字段；现有 transcript 解析主要处理 JSONL type=message 与 tool_use/tool_result parts。",
+    "方案称 spawn tree 可完全依赖事件流中的 parent_call_id，不引入额外追踪标记；当前源码未显示该字段或对应父子 run 追踪能力。",
+    "方案假设 agent_output 事件写入后触发 Run Extractor；当前项目未发现对应事件类型、提取器或触发链。",
+    "方案中的 GET /runs/{run_id}、/sessions/{session_id}/runs、/runs/{run_id}/tree、/runs/{run_id}/events 等接口当前不存在；作为新增设计可以接受，但不能作为已有能力依据。",
+    "方案称外部工具可通过 events_range 直接定位 JSONL 行范围，无需全量扫描；当前 transcript/session 读取没有暴露稳定 sequence range 契约。"
+  ],
+  "score_rationale": "该方案属于方向正确但工程边界不完整的可用方案。它有统一 Run Record、评估附着、执行树和查询接口，技术闭环明显强于普通日志方案；但没有准确落到当前项目已有的 spawn_history、event-bus、agent-evals、token_usage 和 MCP server 边界，且核心边界识别依赖当前源码未发现的 agent_output、parent_call_id、scope、events_range 等事件契约。按 rubric，缺少完整 provenance、spawn 生命周期自动桥接、MCP/leaderboard，并且核心机制依赖无依据事件字段，因此总分不应超过 75 分。"
+}

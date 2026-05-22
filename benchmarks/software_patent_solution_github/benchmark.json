@@ -97,7 +97,7 @@
       "cases/<case_id>/rubric.md",
       "source issue or PR links and summaries",
       "final implementation diff",
-      "case difficulty, tags, scoring dimensions, or selection notes"
+      "case difficulty, tags, scoring dimensions, or maintenance notes"
     ]
   },
   "target_system": {

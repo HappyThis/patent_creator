@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住现有 task、session、spawn_history、token_usage、mcp_call_log、quality_reviews、eval_runs/eval_traces 分散记录导致缺少统一执行维度的问题。",
+    "提出以 run_id 贯穿 spawn、session、task、成本、工具调用、质量审查、评估和事件的统一运行记录契约，方向符合需求。",
+    "对无 task_id 的 token_usage 记录提出 run 级 unattributed 归因，能解决当前成本统计割裂问题。",
+    "包含统一查询接口、workspace 隔离、事件 payload 兼容和存量数据迁移等工程化考虑。"
+  ],
+  "weaknesses": [
+    "Run 主要被设计为跨表传播的标识符，缺少结构化 provenance/lineage 字段和生成流程，不能充分说明一次执行从哪个触发源、输入摘要、输出摘要、artifact 或外部调用演化而来。",
+    "评估附着只描述 eval_runs/eval_traces 增加 run_id，没有形成 run 级 eval attach/update 契约，也缺少 benchmark、指标、评估说明版本等可复用元数据边界。",
+    "MCP 外部访问只泛泛提到注册查询工具，缺少 run list/detail/provenance/eval attach/leaderboard 等具体工具面。",
+    "排行榜/长期质量聚合只是效果和消费场景，未说明基于 run 的聚合维度、接口或更新流程。",
+    "spawn 自动桥接描述不够贴合当前源码：当前 /api/spawn 路由没有调用 recordSpawnStart/recordSpawnFinish，方案没有明确补齐所有 spawn 入口的接入改造。",
+    "可实施性受若干假设影响，例如 Gateway sessions.json 写入 run_id、MCP 调用拦截层携带当前 task_id、eval_traces 被实际写入等，都需要额外设计。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 模型，包括 sourceType、triggeredBy、关联对象摘要、输入输出摘要、artifactRefs 和可校验 lineage 的生成与查询。",
+    "覆盖 queued/running/completed/failed/cancelled/timeout 等状态的明确 run 生命周期模型，以及所有 spawn 入口的自动创建、完成、失败、取消桥接。",
+    "run 级 eval attach/update API 与 MCP 写入契约，包括 pass/fail、score、指标、benchmark 或 evaluator 元数据。",
+    "基于 run eval、成功率、成本、agent 维度的 leaderboard 或统计聚合机制。",
+    "MCP 工具层的具体 run list、run detail、provenance 查询、eval 附着和 leaderboard 工具定义。"
+  ],
+  "unsupported_claims": [
+    "当前 /api/spawn 路由并未调用 recordSpawnStart 或 recordSpawnFinish；recordSpawnStart 在源码中仅定义，未被检索到使用。",
+    "当前 spawn_history 表没有 run_id 字段，也没有 session_id 外键约束；这些属于拟新增内容，不是当前源码事实。",
+    "当前 mcp_call_log 表没有 task_id 或 run_id 字段，logMcpCall 输入也不包含 taskId；没有看到实际 MCP 调用拦截层写入当前活跃 task_id。",
+    "当前 agents/evals API 只向 eval_runs 插入 agent 维度结果，未看到 eval_traces 的实际写入流程，也没有 run 级评估附着接口。",
+    "当前事件总线主要通过 /api/events SSE 分发；WebSocket 模块处理 gateway frames，并非 event-bus 订阅方，因此“SSE 和 WebSocket 订阅方”同时消费新增 run_id 事件缺少源码依据。",
+    "当前没有 /api/runs/:run_id、run provenance、run eval attach 或 run leaderboard 相关 API/MCP 工具。"
+  ],
+  "score_rationale": "该方案属于方向正确且较具体的可用方案：统一 run_id 契约、跨现有表关联、成本归因、事件和查询接口都覆盖了主要需求。但按 rubric，上限受到两类关键缺口限制：一是没有结构化 provenance/lineage 字段和生成流程；二是 MCP/leaderboard/eval attach 只部分提到，未形成具体可实现的工具和聚合契约。同时方案中若干接入点与当前源码不完全一致，尤其 /api/spawn 未桥接 recordSpawnStart、mcp_call_log 无 task_id、eval_traces 未实际写入。未压到 75 以下，是因为这些多数可解释为拟新增扩展，且方案确实建立了统一运行记录思路并能落到现有 task/session/spawn/cost/eval/event 边界。"
+}

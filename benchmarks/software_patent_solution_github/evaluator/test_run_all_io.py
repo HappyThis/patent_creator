@@ -73,8 +73,12 @@ def test_aggregate_marks_judge_failed_as_unscored_infrastructure_failure() -> No
         case_ids=["008"],
     )
 
-    assert aggregate[0]["success_rate"] == 1
-    assert aggregate[0]["recommendation"] == "未评分 / judge 失败"
+    assert aggregate[0]["artifact_success_rate"] == 1
+    assert aggregate[0]["artifact_success_runs"] == 1
+    assert aggregate[0]["scored_runs"] == 0
+    assert aggregate[0]["status_counts"] == {"judge_failed": 1}
+    assert "recommendation" not in aggregate[0]
+    assert "recommendation_reason" not in aggregate[0]
 
 
 def test_aggregate_marks_skip_judge_artifact_as_unscored_smoke_result() -> None:
@@ -93,5 +97,9 @@ def test_aggregate_marks_skip_judge_artifact_as_unscored_smoke_result() -> None:
         case_ids=["001"],
     )
 
-    assert aggregate[0]["success_rate"] == 1
-    assert aggregate[0]["recommendation"] == "未评分 / 仅验证 artifact"
+    assert aggregate[0]["artifact_success_rate"] == 1
+    assert aggregate[0]["artifact_success_runs"] == 1
+    assert aggregate[0]["scored_runs"] == 0
+    assert aggregate[0]["status_counts"] == {"artifact_extracted": 1}
+    assert "recommendation" not in aggregate[0]
+    assert "recommendation_reason" not in aggregate[0]

@@ -67,7 +67,7 @@ pipe 预算机制已验证有效：
 - 子 agent 仍会先写超出 pipe 总预算的内容，再依赖 `pipe_budget_exceeded` 反馈压缩重写。例如 `005` 中 `material_analyst` 尝试写入 `9161` 字，`solution_refiner` 尝试写入 `16708` 字。
 - 主 agent 仍会先超过单次 1500 字文档写入限制，再根据 `edit_too_large` 拆分。
 - `010` 写作阶段主 agent 每步仍携带约 `150k` token 级别上下文，说明写作阶段上下文没有有效瘦身。
-- subject-only smoke run 的 `case_selection_report.md` 将未评分结果显示为 0% / 淘汰或暂缓，属于报告分类问题，不应视为 case 失败。
+- subject-only smoke run 曾在 `case_selection_report.md` 中将未评分结果显示为 0% / case 建议。当前批量报告已改为 `evaluation_report.md`，只展示运行状态、产物成功和评分结果。
 
 ## 2026-05-20 10 case / 5 worker 全量运行补充
 
@@ -363,42 +363,38 @@ pipe 预算机制已验证有效：
 - analyst / refiner 子 agent 不再在已有 artifact 后进行大量额外读取。
 - pipe 预算之外的子 agent 工具调用次数在复杂 case 中保持可控。
 
-## ISSUE-2026-05-20-05：评测集需要分层，避免质量评测与压力测试混在一起
+## ISSUE-2026-05-20-05：废弃评测集分层与黄金 case 概念
 
 优先级：P1
 
-状态：开放
+状态：已关闭
 
-现象：
+结论：
 
-- `007` 原先更像压力测试：考验长链路、子 agent 调度和及时收尾能力。
-- `005` 本轮虽然已有 artifact，但因为长链路收尾失败没有进入 judge，也更像 agent 执行控制压力样本。
-- `010` 能稳定评分，但 rubric 对完整 Workspace proxy、MCP descriptor、RPC 边界、认证路由等机制要求很细，属于高难质量样本。
+- 2026-05-22 已明确废弃 case 分层、黄金 case 和“压力 / 回归 case”作为 benchmark 管理概念。
+- 正式纳入 benchmark 的 case 一视同仁；运行器不再输出 case 分级、case 建议或 benchmark 自评结论。
+- 运行耗时、timeout、子 agent 调度、provider 失败和 judge 基础设施失败只作为 agent/runner 稳定性问题记录，不用于给 case 分级。
 
 影响：
 
-- 如果把所有 case 都混在同一黄金集里，全量均分会混入执行时间、工具稳定性、case 难度和内容质量多个变量。
-- 难以判断一次改动到底提升了技术方案质量，还是只是改善了运行稳定性。
+- 运行报告只能解释 agent 在各个 case 上的本次表现，不能根据分数自动输出 case 结论或等级。
+- 长链路稳定性问题继续在本文件其他 issue 中跟踪，不再通过 case 分层承载。
 
 处理方向：
 
-- 将 case 分为三类：
-  - 核心质量 case：稳定进入 judge，用于比较技术方案质量。
-  - 待校准 case：题目、rubric 或隐藏标准需要人工复核。
-  - 压力 / 回归 case：用于检验长链路、子 agent、压缩、超时和 provider 稳定性。
-- `007`、`005` 暂时更适合进入压力 / 回归类。
-- `010` 可保留为高难核心 case，但需要检查 request 是否足够明确召唤 rubric 中的关键机制。
+- `run_all.py` 的报告移除推荐/判断函数，只保留运行次数、产物成功、评分次数、分数、状态分布和 judge 扣分摘要。
+- 当前 issue 与 benchmark 文档不再要求运行报告建立 case 层级，也不生成 benchmark 自评结论。
 
 关闭条件：
 
-- `case_selection_report.md` 或 benchmark 文档中明确 case 分层。
-- 全量报告能分别展示质量分、运行稳定性和压力样本结果。
+- 当前代码和活跃文档不再使用“黄金 case”作为正式管理概念。
+- 当前代码和活跃文档不再要求 case 分层。
 
 ## ISSUE-2026-05-20-06：复杂技术方案质量仍缺少关键机制深度
 
 优先级：P1
 
-状态：开放
+状态：已关闭
 
 现象：
 
@@ -441,23 +437,23 @@ pipe 预算机制已验证有效：
 
 - `20260520-tools-refactor-smoke` 是 subject-only smoke run，命令中使用了 `--skip-judge`。
 - 三个 case 的实际状态均为 `artifact_extracted`，且 `round_failed=false`。
-- 但 `case_selection_report.md` 将它们显示为 0% / 淘汰或暂缓，并在详情中把 `artifact_extracted` 放在“失败状态”位置。
+- 旧 `case_selection_report.md` 将它们显示为 0% / case 建议，并在详情中把 `artifact_extracted` 放在“失败状态”位置。
 
 影响：
 
-- 容易把“未评分”误读成“case 失败”或“case 应淘汰”。
+- 容易把“未评分”误读成“case 失败”或“case 无效”。
 - smoke run 的目标是验证 subject agent、工具链和 artifact 抽取，不应该进入质量通过率统计。
 
 处理方向：
 
-- `--skip-judge` 时报告应单独标记为“未评分 / 仅验证 artifact”。
-- subject-only run 可以展示 artifact 抽取成功率、round_failed 数量、工具失败摘要，但不应生成质量保留 / 淘汰建议。
-- case selection 报告中应区分 `artifact_extracted`、`scored`、`round_failed`、`judge_failed` 四类状态。
+- `run_all.py` 已移除 case recommendation / selection 逻辑。
+- 批量输出改为 `evaluation_summary.json` 和 `evaluation_report.md`。
+- subject-only run 只在状态分布、产物成功次数和已评分次数中体现，不生成 case 建议。
 
 关闭条件：
 
-- `--skip-judge` 的 run report 不再把 `artifact_extracted` 显示为 0% 或淘汰。
-- 报告能清楚区分“未评分”和“失败”。
+- `--skip-judge` 的 run report 不再生成 case 建议。
+- 报告能清楚呈现 `artifact_extracted`、`scored`、`round_failed`、`judge_failed` 等状态分布。
 
 ## ISSUE-2026-05-20-12：子 agent pipe 预算规划不足
 
@@ -670,4 +666,4 @@ pipe 预算机制已验证有效：
 1. 将子 agent 任务规模边界和重复委派检查从提示词约束升级为工具层约束。
 2. 让子 agent 在写 pipe 前按预算规划，而不是先超额再修正。
 3. 降低文档写入的 `edit_too_large`、字符串化参数、重复写入和清理链路。
-4. 修正 `--skip-judge` 报告分类和 judge 启动偶发失败，并推进 case 分层和高难 rubric 对齐。
+4. 修正 `--skip-judge` 报告分类和 judge 启动偶发失败，并继续做高难 case 的 request/rubric 源码级对齐。

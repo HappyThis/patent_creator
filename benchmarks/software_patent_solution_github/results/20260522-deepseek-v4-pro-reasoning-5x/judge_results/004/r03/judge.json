@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 89,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 9,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 9,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 语义内容与本机高频运行时信号混写的核心矛盾，能解释 Git dirty diff、合并冲突和检索排序信号保留之间的张力。",
+    "提出了明确的双层架构：稳定字段留在 Markdown，importance、recency、accessCount、updateCount、maturity 等迁入旁路运行时信号存储。",
+    "覆盖读时融合、写时分离、旧 frontmatter 兼容、懒迁移、默认值降级、原子写、并发冲突重试和 fail-open，整体机制可实施。",
+    "能把方案接到 search、curate、manifest、archive/prune、CoGit/snapshot 等现有消费路径，技术效果闭环较完整。",
+    "归档、删除、孤儿信号清理和本机信号独立性均有考虑，符合不能删除动态信号、不能迁走全部知识内容的约束。"
+  ],
+  "weaknesses": [
+    "RuntimeStore 的接口边界没有完整展开，缺少明确的 getMany、batchUpdate、delete、list/scan 等最小接口定义；检索场景的批量读取只被隐含在 ContextReader 中，没有专门说明。",
+    "部分源码接入点描述偏理想化，例如统一 ContextReader 并非当前项目已有抽象，方案没有具体说明如何改造现有 FileContextFileReader、SearchKnowledgeService、memory-symbol-tree、dream consolidate/synthesize 等实际读取路径。",
+    "把 createdAt、updatedAt 整体列为运行时信号略粗糙；createdAt 至少可能属于稳定 provenance 字段，updatedAt 也需要区分内容更新时间和评分更新时间。",
+    "并发 CAS 机制描述为 JSON 文件版本 compare-and-swap，但没有说明在普通文件系统 rename 下如何真正保证跨进程版本检查与写入的不可分割性，文件锁与 CAS 的关系还不够严密。",
+    "迁移时追加 _scoring_migrated 标记仍会改写 Markdown，虽然是一次性兼容成本，但没有说明如何避免迁移本身造成大规模协作 diff。"
+  ],
+  "missing_key_mechanisms": [
+    "面向检索和 manifest 构建的 sidecar 批量读取接口与缓存策略。",
+    "完整 RuntimeStore/IRuntimeSignalStore 接口，包括 get、getMany、set、update、batchUpdate、delete、list/scan 的边界。",
+    "对现有 memory-symbol-tree、dream consolidate、dream synthesize 等读取 frontmatter scoring 的实际代码路径的逐一改造说明。",
+    "更严谨的跨进程原子 read-modify-write 方案，例如单记录锁、独占临时文件、单写队列或底层 KV/SQLite 事务。",
+    "稳定内容时间戳与运行时评分时间戳的字段拆分策略。"
+  ],
+  "unsupported_claims": [
+    "方案称 applyDecay 等评分操作都会触发 Markdown 重写；当前源码中 applyDecay 在搜索排序和归档候选判断中主要是懒计算，真正写回的是 access hit flush、curate update 和 merge 等路径。",
+    "方案称现有 snapshot/CoGit sync 可通过 derived-artifact 的 isExcludedFromSync 排除信号文件；当前 isExcludedFromSync 只覆盖 _index.md、_manifest.json、_archived/*.full.md、.stub.md 等派生物，并没有 .brv/runtime 信号目录规则。",
+    "方案多次把 ContextReader 当作统一读取入口，但当前源码未见该类或接口；这是合理的新抽象设想，但不是现有项目事实。",
+    "方案称 archive 时信号 JSON 同步移至 _archived/.brv-runtime/ 子目录；当前归档实现只移动 Markdown 为 .stub.md/.full.md，没有 sidecar 目录或信号迁移能力。",
+    "方案称搜索命中每次调用 recordAccessHit；当前搜索服务实际使用 pendingAccessHits 并在 flushAccessHits 中批量调用 recordAccessHits 写回 frontmatter。"
+  ],
+  "score_rationale": "该方案属于接近强答案的可实施技术方案：字段分层、旁路存储、路径映射、读时融合、写入剥离、迁移兼容、失败隔离、并发更新和清理一致性基本齐备，并且能说明这些机制如何降低 VC 噪声同时保留检索排序能力。未给 90 分以上，主要因为 store 最小接口和批量读取没有完整定义，对部分现有源码接入点存在不准确或未落细的说法，且有少量把当前源码能力当成既有事实的表述。整体没有触发 70/80 分硬上限，因为核心机制完整，未删除动态信号，也未破坏 Markdown 共享资产。"
+}

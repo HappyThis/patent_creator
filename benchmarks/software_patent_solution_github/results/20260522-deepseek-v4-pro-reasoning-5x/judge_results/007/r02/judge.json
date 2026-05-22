@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 80,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 9,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 7,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住父 agent 同一会话内调度 retained 子运行的核心问题，而不是简单函数调用或只返回最终摘要。",
+    "覆盖了 runId、parentToolCallId 可选关联、父侧注册表、子侧流持久化、事件协议、replay 去重、并行 fan-out、后台无父运行、取消、清理和 drill-in 门禁等主要机制。",
+    "能说明子 agent 独立 Durable Object/Facet 执行上下文、独立 SQLite 存储和与父连接事件回流之间的关系。",
+    "最终 tool result、失败结构化返回、父端中断语义和保留结果清理策略都有较清楚描述，技术问题-手段-效果闭环完整。"
+  ],
+  "weaknesses": [
+    "没有处理 rubric 明确要求的 headless 子 agent 中浏览器 client tools 不可用、降级或父侧中介执行边界，因此不能进入 90 分档，且触发 82 分左右上限。",
+    "对 AIChatAgent 与 Think 的接入边界说明偏概括，只说 Think 天然满足、AIChatAgent 通过适配器满足，缺少 AIChatAgent 的 onChatMessage/saveMessages、恢复、取消和客户端工具差异的具体适配机制。",
+    "普通刷新或网络短断场景下，方案一处写到 running 回放后 V1 标记 interrupted、未来再做 tailAgentToolRun，这会削弱“断线后继续看到仍在运行子 agent”的需求；interrupted 更适合作为父端转发 loop 丢失或父 DO 重启后的降级状态。",
+    "客户端聚合层主要停留在协议和去重描述，没有明确落成框架级 React hook/API 形态，与现有示例中的 helper-event 聚合经验相比工程边界还不够具体。",
+    "方案大量使用拟新增框架 API 名称，若按当前快照直接实施，需要补充这些 API 的真实落点、包导出、测试迁移和兼容层。"
+  ],
+  "missing_key_mechanisms": [
+    "headless 子 agent 对浏览器 client tools 的不可用处理、降级策略或父侧代执行机制。",
+    "AIChatAgent 与 Think 分别在执行、恢复、取消、stream 存储和工具结果生成上的具体适配路径。",
+    "正在运行的子 run 在普通客户端重连后的 live tail/继续观察机制，需区分客户端断线、父端转发 loop 丢失和父 DO 重启。",
+    "框架级客户端聚合 hook 或状态 API 的明确设计，包括后台 unboundRuns 的展示、恢复和清理入口。"
+  ],
+  "unsupported_claims": [
+    "当前快照未提供框架级 agentTool()、runAgentTool()、startAgentToolRun()、cancelAgentToolRun()、clearAgentToolRuns()、cf_agent_tool_runs、cf_agent_tool_child_runs 或 agent-tool-event；现有依据主要是 examples/agents-as-tools 的 hand-rolled helper-event、cf_agent_helper_runs 和 _runHelperTurn 原型。作为拟新增设计可接受，但若表述为现有源码事实则无依据。",
+    "AgentToolChildAdapter 在当前源码中未找到；AIChatAgent 适配只是方案设想。",
+    "“重复应用同一 UIMessageChunk 不会产生重复内容”缺少源码依据，现有客户端注释反而说明 applyChunkToParts 会变更 parts，重复应用 chunk 可能导致重复文本，因此必须依赖去重集合。",
+    "maxConcurrentAgentTools、tailAgentToolRun、getAgentToolChunks 等命名能力当前快照未见实现，应视为建议 API 而非已有项目能力。"
+  ],
+  "score_rationale": "该方案属于强方向但未完全达到 90 分档。它基本命中 retained child run、独立子 DO、父侧 registry、事件回流、恢复去重、并行、后台运行、取消清理、drill-in 门禁和父模型结果契约等核心锚点，技术机制远非泛泛描述。主要扣分来自三个工程边界：未覆盖 headless 子 agent 的浏览器 client tools 边界；AIChatAgent/Think 适配仍偏概念化；并且对普通重连的 live tail 与父端中断降级存在混淆。此外，多个具体 API/表名在当前快照中尚不是框架事实，需作为新增设计处理。按 rubric，缺少 headless client tools 处理通常不得高于 82 分；结合 live-tail 与 AIChatAgent 细节不足，给 80 分。"
+}

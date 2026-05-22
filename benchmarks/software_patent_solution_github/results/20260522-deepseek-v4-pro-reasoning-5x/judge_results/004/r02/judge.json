@@ -1,0 +1,36 @@
+{
+  "status": "scored",
+  "total_score": 95,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 19,
+    "essential_features": 10,
+    "problem_mechanism_effect": 15,
+    "constraint_adherence": 9,
+    "feasibility": 9,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别当前项目中 Markdown frontmatter 混入 importance、recency、accessCount、updateCount、maturity 等动态评分字段，并指出搜索、curate、manifest、archive/prune 等路径会消费这些信号。",
+    "字段分层、sidecar 存储、相对路径键、批量读取、读取融合、写入剥离、迁移兼容、并发更新、失败隔离和清理一致性机制都比较完整。",
+    "说明了搜索排序、manifest 构建、归档剪枝等读取路径如何继续融合动态信号，避免把方案退化成删除运行时信息。",
+    "覆盖旧文件兼容、懒迁移、默认评分、sidecar 失败 fail-open、原子重命名、重试队列、孤儿回收等工程边界。",
+    "问题-手段-效果闭环清晰，能解释为何减少 VC 噪声、降低合并冲突，同时保留检索排序和长期维护能力。"
+  ],
+  "weaknesses": [
+    "将 createdAt、updatedAt 一并划入动态 sidecar 有争议；当前需求和参考方案更倾向把部分创建/更新时间作为稳定语义或审阅字段保留在 Markdown。",
+    "侧车存储接口显式列出 get/put/batchGet/batchPut，但 delete/list/scan 只在后续流程中隐含出现，接口边界可以更严整。",
+    "单个 scores.json 的版本号方案描述了冲突合并规则，但跨进程文件锁或真正原子 read-modify-write 的落地仍略欠具体。",
+    "对 dream consolidate/synthesize 等自动整理路径的接入主要以自动整理、归档剪枝概括表达，没有像 search、manifest、archive 那样逐路径展开。"
+  ],
+  "missing_key_mechanisms": [
+    "重命名知识文件时 sidecar 信号迁移或路径追踪机制没有充分展开，主要依赖孤儿回收兜底。",
+    "未把 sidecar list/scan 能力作为一等接口列入最小 store API，尽管孤儿回收和清理一致性需要它。"
+  ],
+  "unsupported_claims": [
+    "称 .brv/scores/ 目录已通过 isExcludedFromSync 排除在 snapshot 和版本控制同步之外，与当前源码不符；当前 isExcludedFromSync 只覆盖 _index.md、_manifest.json、abstract/overview、_archived full/stub 等派生文件。",
+    "SignalFusionReader 属于拟议组件名称，当前源码中未见该类；作为方案新增组件可接受，但不应表述为现有源码事实。"
+  ],
+  "score_rationale": "该方案满足 90 分以上强答案锚点：它基于当前 ByteRover context tree 的 Markdown frontmatter、search scoring、curate 写入、manifest、archive/prune、merge 等实际问题，提出了共享 Markdown 与本机运行时信号分层存储及读取融合机制，并覆盖迁移、并发、失败隔离和清理一致性。分数上限规则不适用，因为方案没有缺失 sidecar 最小接口、读取融合、并发更新、迁移兼容或清理一致性中的两个以上关键机制。扣分主要来自个别源码事实无依据、字段边界略有争议，以及 sidecar 接口和跨进程原子更新细节还可更严谨。"
+}

@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 7,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "能结合当前源码识别 RuntimeId、RUNTIME_META/DETECTORS、local-agent-sync、sessions.ts、/api/sessions/transcript、/api/sessions/continue、FrameworkAdapter 等主要接入点。",
+    "问题识别较准确，抓住了 OpenCode 本地状态未知、会话格式差异、continue 能力不确定、需兼容现有 Claude/Codex/Hermes/OpenClaw 的核心矛盾。",
+    "提出了可配置发现、适配器合约、兼容式 JSON/数组/NDJSON 解析、transcript 归一化、continue 命令模板、501 降级、fixture 和命令替身验证等较具体机制。",
+    "明确要求 UI/API 对未知能力做边界声明，避免把 OpenCode 未确认能力展示为完整支持。"
+  ],
+  "weaknesses": [
+    "会话归一化方案把 OpenCode 会话汇入 getAllGatewaySessions/GatewaySession，但该结构当前缺少 runtimeKind/source/capabilities 字段，容易把 OpenCode 与 gateway session 混淆，不能充分支撑前端按 runtime 精确路由。",
+    "没有明确接入 conversation list、chat workspace、session branding、settings runtime section、onboarding modal 等前端既有路径，只泛称 Agent/Session 详情和 RuntimeMeta capabilities。",
+    "缺少 terminal/PTY attach capability gating；当前源码中 PTY 只支持 claude-code 和 codex-cli，方案未说明 OpenCode 应如何在 split pane、TerminalView、/api/pty/attach 中禁用或返回 unsupported。",
+    "没有明确 OpenAPI、API index、schema/type 契约同步，虽然提到 API 返回 capabilities，但未覆盖文档和测试契约一致性。",
+    "continue 失败处理主要覆盖未配置命令时的 501，缺少 binary missing、provider/model/session missing 或本地命令非零退出等诊断性失败分类。",
+    "适配器层设计偏向 agent heartbeat/task assignment，和当前 session scanner/API runtime 接入路径关系不够清晰。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode session 对象应保留 runtimeKind=opencode、sourcePath、canContinue/canAttachTerminal 或等价能力字段，并进入 /api/sessions 返回结构。",
+    "前端 conversation list、chat workspace、session branding、settings/onboarding/runtime setup 对 opencode 的显式接入。",
+    "PTY/terminal unsupported gating，包括 /api/pty/attach、PTY WebSocket supported kinds、split pane/TerminalView 按能力禁用。",
+    "OpenAPI、/api/index、前端 TypeScript union/schema 与测试契约同步。",
+    "更完整的 continue 诊断性失败返回和命令失败不伪造成功的结构化处理。"
+  ],
+  "unsupported_claims": [
+    "将当前系统概括为 RuntimeId + FrameworkAdapter 双层架构略有夸大；源码中 FrameworkAdapter 主要用于自注册、心跳、任务上报和 assignment，不是现有 Claude/Codex/Hermes session runtime 的统一抽象。",
+    "默认扫描 ~/.opencode/ 和 ~/.opencode/agents/ 属于外部 OpenCode 目录假设，当前项目中没有依据；只能作为可配置候选而非确定默认事实。",
+    "OPENCODE_HEARTBEAT_CMD 默认 opencode status --json、OpenCode 本地 HTTP 端点等能力在当前项目和需求中没有依据。",
+    "技术效果中称无需修改 Mission Control 核心代码即可纳入新 runtime，与方案实际需要扩展 RuntimeId、RUNTIME_META、DETECTORS、sessions、continue、前端类型等代码相矛盾。"
+  ],
+  "score_rationale": "该方案属于方向正确、机制较完整但关键工程边界缺失的可用答案。它覆盖 runtime 注册、可配置发现、兼容式会话解析、transcript、continue、能力声明和 fixture 验证，源码阅读也比较充分；但没有保留清晰 runtime kind 的会话归一化契约，缺少 terminal/PTY gating 和 OpenAPI/API index/schema 同步，也未充分落到 conversation list、chat workspace、settings/onboarding 等现有 UI 路径。按 rubric，缺失 PTY gating 与 API 契约两个关键机制时总分不得高于 78，因此即使后端机制较具体，也不应进入 80 分以上档位。"
+}

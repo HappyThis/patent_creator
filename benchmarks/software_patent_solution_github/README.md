@@ -54,7 +54,7 @@ benchmark runner 根据 `snapshot.json` 拉取仓库并 checkout 到指定 commi
 - `reference_solution.md`。
 - `rubric.md`。
 - 来源 issue、PR 或最终实现 diff 的链接和摘要。
-- case 难度、标签、评分维度或人工筛选说明。
+- case 难度、标签、评分维度或维护说明。
 
 `request.md` 自身也不得包含精确源码路径、目标类名、目标函数名或已知实现方案；除非这些信息是普通用户需求中自然会出现的产品概念，而不是 benchmark 维护者提供的解题提示。
 
@@ -148,7 +148,19 @@ Codex-as-judge 使用本机 `codex exec`，在同一个项目快照目录中以�
 
 需要观察 subject agent 实际发给大模型的 system prompt、messages 和 tools schema 时，可临时开启 `PATENT_CREATOR_LOG_LLM_PAYLOAD=true`。开启后普通 `app.log` 只记录轻量索引和 payload 文件路径，完整请求按“一次模型调用一个 JSON 文件”写入 `logs/llm_payloads/`，并追加 `logs/llm_payloads/index.jsonl`。该目录可能包含用户输入、交底书正文和工具返回结果，只用于本地调试，不应提交到版本控制。
 
-每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，只记录 subject 状态、补充轮次、产物抽取、round 硬失败和 judge 状态。完整运行轨迹仍保留在 `subject/session_events.jsonl`，用于调试，不作为技术方案质量评分依据。批量运行会写入轻量 `runs/<run_id>/run_summary.json`，其中只保留解析结果、诊断和 `run_case_stdout.txt` / `run_case_stderr.txt` 路径，不再内嵌完整 stdout/stderr；多次重复运行会额外写入 `case_selection_summary.json` 和 `case_selection_report.md`，并在 benchmark 根目录更新 `latest_run_report.md`，用于观察成功率、平均分、分数波动和候选 case 去留。
+每个 case 会额外写入 `runs/<run_id>/cases/<case_id>/diagnostics.json`，只记录 subject 状态、补充轮次、产物抽取、round 硬失败和 judge 状态。完整运行轨迹仍保留在 `subject/session_events.jsonl`，用于调试，不作为技术方案质量评分依据。批量运行会写入轻量 `runs/<run_id>/run_summary.json`，其中只保留解析结果、诊断和 `run_case_stdout.txt` / `run_case_stderr.txt` 路径，不再内嵌完整 stdout/stderr；多次重复运行会额外写入 `evaluation_summary.json` 和 `evaluation_report.md`，并在 benchmark 根目录更新 `latest_run_report.md`，用于观察产物成功率、平均分、分数波动和失败类型。运行报告只呈现 agent 的运行与评分结果，不生成 case 建议、case 分级或 benchmark 自评结论。
+
+确认某次运行结果值得保留后，使用发布脚本整理出可提交的评估历史：
+
+```bash
+backend/.venv/bin/python benchmarks/software_patent_solution_github/evaluator/publish_result.py \
+  --run-id <run_id> \
+  --name <result_id> \
+  --subject-model <model> \
+  --judge-model codex
+```
+
+发布脚本会从 `runs/<run_id>/` 重新生成 `evaluation_summary.json`、`evaluation_report.md`，并提取每次运行的技术方案正文和 judge 结构化结果，写入 `results/<result_id>/` 并更新 `results/index.jsonl`。脚本不会执行 `git add` 或 `git commit`，也不会把 `prepared_repo/`、`session_events.jsonl`、Codex 原始事件、stdout/stderr、完整 `disclosure.json` 或本机绝对路径归档。
 
 ## 当前状态
 
@@ -161,11 +173,11 @@ projects/
 
 `cases/` 目录用于存放已经选定具体 issue、PR 或设计讨论，并补齐快照、参考方案和评分标准的正式测试项。
 
-正式测试项优先选择较大的功能迭代、新功能支持、新特性机制、能力扩展或架构级改造。局部 bug 修复、小参数调整、依赖升级、文案或样式修改原则上不进入核心 benchmark。
+正式测试项优先选择较大的功能迭代、新功能支持、新特性机制、能力扩展或架构级改造。局部 bug 修复、小参数调整、依赖升级、文案或样式修改原则上不进入正式 benchmark。
 
 `request.md` 应模拟普通用户或产品侧提出的粗粒度场景需求，只描述能力目标、场景问题和关键约束，不提前给出关键技术机制或方案骨架。
 
-当前已生成的正式核心测试项：
+当前已生成的正式测试项：
 
 - `001`：基于 `builderz-labs/mission-control` 的 OpenCode 原生 agent runtime 会话接入能力。
 - `002`：基于 `builderz-labs/mission-control` 的 agent 执行过程结构化记录与评估附着能力。

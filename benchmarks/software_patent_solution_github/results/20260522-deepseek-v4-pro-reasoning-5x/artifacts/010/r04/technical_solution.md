@@ -1,0 +1,74 @@
+## 技术方案
+
+本方案提出一种基于父子Agent组合架构的多会话智能助手系统。系统运行于Durable Object（DO）平台之上，每个用户分配一个用户级父Agent实例，该用户创建的每个聊天会话作为独立的会话级子Agent实例运行。父Agent统一持有和管理用户维度的共享资源——包括Workspace虚拟文件系统、MCP（Model Context Protocol）工具连接池、OAuth授权凭据和共享上下文记忆；子Agent各自持有会话维度的隔离状态——包括消息历史、对话分支、个性化配置、扩展工具和私有记忆。子Agent通过受控RPC代理机制访问父Agent管理的共享资源，不得绕过Agent生命周期直接执行原始MCP工具调用或文件操作。父Agent同时利用DO平台的Alarm调度机制承担全局定时任务，如跨会话摘要生成、过期会话清理和共享凭据刷新。
+
+### 技术问题说明
+
+在多会话智能助手场景中，需要同时满足两类矛盾性需求：一是会话级别的强隔离——每个聊天会话应当拥有独立的消息历史、对话分支、个性化配置和扩展工具，不同会话之间的推理过程互不干扰；二是用户级别的资源共享——同一用户的多个会话应当能够访问相同的项目文件、使用相同的MCP工具连接和OAuth授权结果，且文件变更应能实时通知所有打开的会话。现有方案通常采用单一DO实例内以session_id字段区分不同会话的方式，该方式存在三个核心缺陷：第一，所有会话的推理任务共享同一DO的单线程执行模型，导致并发受限；第二，会话之间缺乏存储级别的物理隔离，一个会话的清理或故障可能影响其他会话；第三，全局任务（如跨会话摘要、定时清理）缺少独立于会话生命周期的执行载体。
+
+### 总体架构
+
+系统采用两层DO架构。父Agent继承自Chats基类，是用户级别的唯一入口，负责会话生命周期管理、共享资源持有和全局调度。子Agent继承自Think基类，每个聊天会话对应一个独立的子DO实例，负责消息持久化、Agent推理循环、流式输出和客户端工具管理。父Agent与子Agent之间通过DO平台的Facet机制实现同机部署，利用typed RPC stub进行低延迟方法调用。外部客户端通过嵌套URL路径直接访问子Agent的WebSocket连接，父Agent仅在连接建立阶段通过onBeforeSubAgent中间件进行访问控制校验，此后数据帧直接路由到子Agent，父Agent不在热路径上。
+
+### 父实体与子实体的职责边界
+
+父Agent与子Agent的职责边界遵循以下原则：凡涉及用户级别、跨会话共享或需要集中管控的状态，由父Agent持有；凡涉及单次会话推理、对话历史和个性化配置的状态，由子Agent持有。具体划分如下：
+
+- 消息历史与会话存储：子Agent通过Session模块维护树状消息结构，支持对话分支、压缩覆盖（Compaction Overlay）和FTS5全文检索。父Agent不持有任何会话消息内容，仅通过遍历子Agent的RPC接口提供跨会话搜索的fanout入口。
+- 文件系统：父Agent持有Workspace实例，底层采用SQLite内联存储（小文件）+ R2对象存储溢出（大文件）的混合存储模型。子Agent不直接持有Workspace实例，通过RemoteContextProvider等受控代理接口读写文件。
+- MCP工具连接与OAuth：父Agent管理MCP客户端连接池、OAuth授权流程和凭据生命周期。子Agent通过RPC获取父Agent持有的可用MCP工具列表，由父Agent统一注入到子会话的推理工具集中。子会话不得绕过父Agent直接发起MCP连接或存储OAuth凭据。
+- 共享记忆：父Agent提供getSharedContext、setSharedContext、appendSharedContext等callable方法，子Agent通过RemoteContextProvider将共享记忆作为可写的上下文块注入系统提示词。
+- 会话管理：父Agent管理会话注册表（SQLite表），提供创建、列表、删除、重命名、搜索等接口。子Agent通过parentAgent(Cls)获取父Agent引用，用于回写会话元信息。
+- 访问控制：父Agent通过onBeforeSubAgent中间件拦截所有指向子Agent的外部请求，基于注册表校验会话ID的合法性。
+- 实时广播：父Agent监听Workspace的onChange事件，通过broadcast()向所有连接的子Agent客户端推送文件变更通知。
+- 定时任务调度：父Agent利用DO Alarm机制执行跨会话全局任务。子Agent作为Facet不支持独立Alarm，全局任务统一由父Agent发起。
+
+### 会话隔离机制
+
+每个聊天会话作为一个独立的子DO实例运行，拥有物理隔离的SQLite存储分片。会话隔离覆盖以下维度：一是消息历史隔离——每个子DO的Session模块维护独立的assistant_messages表（含树状parent_id结构、assistant_compactions压缩覆盖表和assistant_fts全文检索索引），不同会话的消息不可互相读取；二是配置隔离——每个子DO通过configure()/getConfig()管理自身配置（如模型选择、推理参数），配置存储在think_config表中，仅对当前DO可见；三是上下文隔离——每个子会话的configureSession()独立注册上下文块（Context Block）、压缩策略和提示词缓存，不同会话的上下文块互不干扰；四是扩展隔离——每个子DO的ExtensionManager独立管理已加载的Worker扩展，扩展的生命周期与子DO绑定。
+
+### 共享资源代理访问机制
+
+子会话对共享资源的访问必须通过父Agent的受控RPC代理，不得直接持有或操作共享资源实例。该机制的核心由三个组件协同实现。
+
+第一，RemoteContextProvider——一种实现WritableContextProvider接口的远程上下文提供者。子Agent通过parentAgent(Cls)获取父Agent的typed RPC stub后，将其封装为RemoteContextProvider实例，注册到Session的上下文块系统中。当子会话的LLM推理需要读取共享记忆时，assembleContext()调用RemoteContextProvider.get()，该方法通过RPC向父Agent发起getSharedContext调用；写入时通过set_context工具触发RemoteContextProvider.set()，最终由父Agent执行实际存储。RemoteContextProvider对父Agent不可达的情况做fail-soft处理——返回null而非抛出异常，确保共享资源短暂不可用时子会话仍可继续推理。
+
+第二，Workspace代理。父Agent持有唯一的Workspace实例，子Agent通过父Agent暴露的callable方法（如readFile、writeFile、listDirectory）间接操作文件系统。父Agent在此层可实施路径级访问控制——例如，检查子会话是否有权写入特定目录，或限制跨会话的文件操作范围。Workspace底层写入由父DO的单线程SQLite序列化，消除了并发写入的竞态条件。
+
+第三，MCP工具代理。父Agent管理MCP客户端连接池（McpClientConnection）和OAuth授权流程，子Agent通过RPC获取当前可用的MCP工具描述列表。父Agent在子会话执行onChatMessage推理前，将MCP工具集注入到streamText的tools参数中；工具调用执行时，子Agent将调用请求通过RPC转发给父Agent，由父Agent通过实际的MCP连接执行并返回结果。该设计确保浏览器或子会话无法绕过Agent生命周期直接执行原始MCP工具调用。
+
+### 访问控制机制
+
+系统通过三层机制防止未授权的会话访问和资源操作。第一层，会话注册表校验。父Agent在SQLite中维护cf_agents_sub_agents注册表（字段：class、name、created_at），在subAgent()创建子DO时自动写入，deleteSubAgent()删除时自动移除。父Agent的onBeforeSubAgent中间件拦截所有指向子Agent的外部请求（HTTP和WebSocket），通过hasSubAgent(className, name)查询注册表：未注册的会话ID直接返回404响应，客户端停止重试。该机制防止用户通过枚举或猜测会话ID访问其他用户的会话或未创建的会话。
+
+第二层，URL路径嵌套路由。外部访问子Agent的URL格式为/agents/{parent-class}/{parent-name}/sub/{child-class}/{child-name}，父Agent的DO名称（通常为用户ID）作为路径的组成部分，由DO平台在路由层面绑定到正确的父DO实例。不同用户的父DO具有不同的DO ID和存储分片，天然实现用户间隔离。
+
+第三层，客户端重试硬化。useAgent客户端钩子在收到HTTP 4xx响应或WebSocket关闭码1008（策略违规）/4000-4999（应用级永久拒绝）时，将连接标记为终端错误并停止重试，避免无效的反复连接尝试。
+
+### 实时同步机制
+
+文件变更的实时同步通过父Agent的广播通道实现，避免各子会话独立轮询Workspace状态。父Agent在初始化Workspace时注册onChange回调函数，该回调在每次文件创建、更新、删除操作完成时触发。回调函数调用父Agent的broadcast()方法，向所有连接到父DO的WebSocket客户端发送文件变更事件（含变更类型、文件路径和操作名）。各子Agent的客户端（浏览器标签页或IDE面板）收到事件后，根据变更类型更新本地UI状态——例如刷新文件浏览器、标记文件为已修改或触发依赖文件的重新加载。
+
+对于子Agent的WebSocket连接（通过嵌套路由直接连接到子DO），父Agent的广播不会自动到达。系统提供两种方案：方案一是子Agent通过订阅父Agent的state同步（利用DO的setState广播机制），父Agent在文件变更时更新state.chats或state.fileEvents字段，子Agent的客户端接收后触发UI更新；方案二是子Agent在onStart时通过RPC向父Agent注册回调，父Agent在文件变更时主动通过RPC通知所有已注册的子Agent，子Agent再通过自身的broadcast()转发给连接的客户端。推荐采用方案二，因其延迟更低且不占用state广播通道。
+
+### 定时任务调度机制
+
+全局定时任务全部由父Agent承担，因为子Agent作为DO Facet不支持独立Alarm（schedule/scheduleEvery/cancelSchedule均为不支持操作，keepAlive为软no-op）。父Agent在onStart生命周期钩子中通过this.scheduleEvery注册周期性任务，DO平台基于Alarm机制在指定时间间隔唤醒父Agent执行回调。
+
+典型全局定时任务包括：跨会话摘要生成——父Agent遍历注册表中所有活跃会话，通过getChat(id)获取各子Agent的typed stub，调用子Agent上暴露的callable方法（如generateSummary）收集摘要，汇总后写入共享上下文或推送给用户；过期会话清理——父Agent检查各会话的最后活跃时间戳，对超过阈值的会话调用deleteSubAgent回收存储资源；共享MCP凭据刷新——父Agent检测OAuth token的过期时间，在token即将过期前主动发起刷新流程，确保子会话推理时MCP工具始终可用；跨会话全文索引重建——父Agent在会话变更后异步更新父级的FTS索引。
+
+调度任务与子会话推理任务共享父DO的单线程执行模型。为避免调度任务阻塞用户请求，父Agent将耗时调度任务封装在runFiber()中执行，利用Agent基类提供的Durable Fiber机制实现检查点保存和断点续传，防止DO休眠期间任务丢失。
+
+### 技术效果
+
+本方案带来的技术效果包括：一是并行推理能力——每个聊天会话运行在独立DO实例上，不同会话的LLM推理可真正并行执行，消除了单体多会话架构中的串行化瓶颈。二是存储级别隔离——每个会话拥有独立的SQLite数据库，消息清理、压缩或存储故障不会波及其他会话。三是资源复用——MCP连接、OAuth凭据和Workspace文件在用户级别共享，避免每个会话重复建立连接和重复存储文件副本，降低整体资源消耗。四是安全代理——子会话不直接持有MCP连接或文件系统实例，所有共享资源访问经过父Agent的受控RPC通道，可在父Agent层统一实施访问控制和审计。五是实时同步无轮询——文件变更通过父Agent广播主动推送到所有连接的客户端，消除轮询延迟和带宽浪费。六是全局任务集中化——定时任务、跨会话摘要等由父Agent统一调度，避免任务分散在各子会话中难以协调的问题。七是渐进复用——方案直接复用已有的Agent基类、Think聊天生命周期、Session存储、Workspace文件系统、MCP连接管理、Sub-agent路由和调度系统，无需重新实现基础能力。
+
+### 风险与待确认问题
+
+- 并发写入一致性问题：Workspace当前无内置文件锁机制，对同一路径的并发写入为last-write-wins。在多会话同时编辑同一文件的场景下，可能出现更新丢失。建议在父Agent层引入乐观锁或基于文件版本号的冲突检测。
+- 父DO休眠期间MCP连接断开：DO休眠时所有内存状态（含MCP WebSocket连接）丢失，唤醒后需重建MCP连接并重新执行OAuth授权流程。OAuth token refresh可在Alarm回调中提前执行以减小影响。
+- 父DO单线程瓶颈：高并发场景下多个子会话同时通过RPC访问共享资源时，请求在父DO串行排队。对于频繁的Workspace读写操作，可考虑引入Read-Only副本或本地缓存。
+- 跨会话搜索扩展性：当前fanout模式（遍历所有子Agent的RPC调用）在活跃会话数超过约50时性能下降。可规划父级FTS索引，由子Agent在onChatResponse中异步上报消息内容。
+- 子Agent的keepAlive和Alarm限制：Facet不支持独立Alarm，keepAlive为软no-op；子Agent的存活依赖于活跃WebSocket连接或进行中的Promise链。长期空闲的会话可能被DO平台休眠回收。方案建议父Agent维护心跳检测机制。
+- Workspace路径级授权粒度：当前Workspace未定义按子会话ID的路径访问控制。需要在父Agent的RPC代理层实施路径权限映射（如限制子会话仅可写入/workspace/{sessionId}/目录）。
+- RemoteContextProvider的共享记忆一致性：由于Session的frozen system prompt在turn开始时快照，同一会话的其他子会话对共享记忆的写入在当前turn中不可见，需等到下一turn调用refreshSystemPrompt()后生效。

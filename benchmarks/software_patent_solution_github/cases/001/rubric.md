@@ -67,7 +67,7 @@
 
 ## 档位锚点
 
-- 90-100 分强答案：必须同时具备 runtime 注册、可配置本地状态发现、session list 归一化、transcript 解析与占位降级、continue 路由和失败分类、conversation list/chat workspace 集成、runtime setup/settings、PTY/terminal capability gating、OpenAPI/API 契约同步、fixture 与命令替身验证，并且不破坏 Claude/Codex/Hermes/OpenClaw 既有路径。
+- 90-100 分强答案：必须同时具备 runtime 注册、可配置本地状态发现、session list 归一化、transcript 解析与占位降级、continue 路由和诊断性失败返回、conversation list/chat workspace 集成、runtime setup/settings、PTY/terminal capability gating、OpenAPI/API 契约同步、fixture 与命令替身验证，并且不破坏 Claude/Codex/Hermes/OpenClaw 既有路径。
 - 75-85 分可用但不完整：能把 OpenCode 作为异构 runtime 接入现有 session 聚合，方向兼容现有架构，但 transcript、continue 失败分类、PTY gating、API 契约或可复现测试中缺一到两个关键工程边界。
 - 60-74 分弱答案：只做 session list 或 UI/runtime 选项，缺 transcript 或 continue 路由，能力声明容易误导用户，验证依赖真实开发机状态。
 - 0-59 分不合格：把 OpenCode 伪装成现有 runtime、要求重写 session 系统、假设所有能力都可用，或只给第三方命令调用说明。
@@ -75,7 +75,7 @@
 ## 分数上限规则
 
 - 如果方案没有 transcript API/parser 接入和消息归一化，总分通常不得高于 82 分。
-- 如果方案没有 continue 路由、能力检测和 binary/provider/model/session/resume unsupported 等失败分类，总分通常不得高于 82 分。
+- 如果方案没有 continue 路由、能力检测和诊断性失败返回，或在 OpenCode 本地命令失败时仍伪造成功，总分通常不得高于 82 分。不强制要求固定的 binary/provider/model/session/resume 错误码命名。
 - 如果方案没有 terminal/PTY attach capability gating，可能把 OpenCode 误展示为可终端附着，总分通常不得高于 84 分。
 - 如果方案没有 OpenAPI/API index/schema 契约同步和前端能力字段传播，总分通常不得高于 84 分。
 - 如果方案没有 OpenCode fixture、binary stub、session list/transcript/continue/PTY unsupported 的可复现测试，总分通常不得高于 80 分。

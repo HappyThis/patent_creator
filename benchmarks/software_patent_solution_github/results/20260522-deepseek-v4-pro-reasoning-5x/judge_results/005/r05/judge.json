@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 68,
+  "dimension_scores": {
+    "environment_understanding": 12.5,
+    "technical_problem": 14,
+    "technical_mechanism": 11,
+    "essential_features": 5.5,
+    "problem_mechanism_effect": 9,
+    "constraint_adherence": 7,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住外部 webhook/RPC 调用方需要快速 received/accepted、后台执行、后续查询和取消的核心问题。",
+    "提出了持久 task_runs/submission ledger、idempotency_key 唯一约束、任务状态、request_id/epoch、payload/result/error 等较具体的数据结构。",
+    "整体方向倾向复用 Think 现有 Session、TurnQueue、saveMessages/appendMessage、AbortRegistry、ResumableStream/chatRecovery 语义，而不是重建完整聊天系统。",
+    "覆盖了状态查询、取消、清理、重复提交返回已有任务等生命周期管理，并能说明相应技术效果。"
+  ],
+  "weaknesses": [
+    "最关键缺口是没有可靠的持久消息应用边界。方案没有 messagesAppliedAt、applied message ids、apply checkpoint 或等价字段来区分消息写入 Session 前崩溃、写入后但推理未开始崩溃、推理中崩溃。仅说 Session.appendMessage/INSERT OR IGNORE 不足以保证恢复不重复追加，尤其 payload 示例只是文本而不是稳定 UIMessage id。",
+    "缺少真正的 durable drain/claim 机制。submitTask 写入 accepted 后再把任务放入内存 TurnQueue；若确认后、enqueue 前或 queued 状态下 DO 休眠/崩溃，onStart 只扫描 running，accepted/queued 任务可能永久滞留。也没有 pending -> running 的条件领取事务来防止并发领取。",
+    "缺少终态条件更新规则。方案没有规定 completed/failed 回写必须带 status 条件，可能让迟到完成覆盖 cancel/reset/expired 后的终态。",
+    "恢复逻辑过度依赖 runFiber/ResumableStream，但没有把 task_run 与实际 chat recovery 证据建立充分关系；对无 stream chunk 的 running 任务直接重新触发完整 turn 有重复执行风险。",
+    "管理接口不完整：只有 getTaskStatus/cancelTask/cleanupTask，缺少 list/inspect/delete 或等价可观察管理能力，也没有提交生命周期 observability events。",
+    "reset/clear 与 submission ledger 的同步处理偏弱，只提到 generation mismatch 标记 expired，但未说明对 accepted/queued/running 状态的条件更新、active turn 清理和迟到结果处理。"
+  ],
+  "missing_key_mechanisms": [
+    "持久化的消息应用边界字段或等价 checkpoint，例如 messagesAppliedAt、appliedMessageIds、applyVersion，用于恢复时判断是否可重放消息追加。",
+    "后台 drain/唤醒器扫描 accepted/pending/queued 提交，并用条件更新原子领取最早提交。",
+    "对 accepted/queued/running 全部未终结状态的启动恢复规则，而不是只扫描 running。",
+    "终态条件更新，防止 cancelled/skipped/error/deleted 后被迟到 completed/failed 覆盖。",
+    "list/delete/inspect API 或等价可观察接口，以及 submission lifecycle observability events。",
+    "明确保存外部提交对应的稳定消息 id 或消息集合，确保重试和恢复不会生成新用户消息。"
+  ],
+  "unsupported_claims": [
+    "方案称 Session.appendMessage 复用“INSERT OR IGNORE”语义；当前 AgentSessionProvider 实际是先 SELECT 是否存在再 INSERT，语义上按 id 去重，但不是 SQL INSERT OR IGNORE。",
+    "方案称 runFiber 内部会先检查 ResumableStream SQLite chunk 表并通过 continueLastTurn 从断点继续；当前 runFiber 只维护 cf_agents_runs 和恢复 hook，Think 的恢复逻辑在 _handleInternalFiberRecovery/onChatRecovery 中处理，并非 runFiber 内建该流程。",
+    "方案称 clearMessages() 会递增 TurnQueue generation；当前 public clearMessages() 只调用 session.clearMessages()，WebSocket clear 路径 _handleClear 才调用 resetTurnState() 递增 generation。",
+    "TaskExecutionBridge、submitTask/getTaskStatus/cancelTask/cleanupTask、task_runs 均为方案新增概念，当前源码中不存在；作为设计可以接受，但不能当作已存在项目事实。",
+    "方案暗示 accepted/queued 状态可通过 TurnQueue/DO 持久恢复，但 TurnQueue 是内存队列，当前方案没有给出 accepted/queued 的 durable drain 恢复依据。"
+  ],
+  "score_rationale": "该方案方向正确且工程细节不少，属于“可用但关键机制不完整”偏下。它很好地识别了快速确认、幂等重试、后台执行、查询取消和复用 Think 现有路径的需求，但缺少 rubric 中高分必须命中的三个关键机制：持久消息应用边界、durable drain/条件领取、终态条件更新。尤其是确认接收与模型最终完成之间的持久状态边界没有真正闭合，accepted/queued 崩溃恢复和写入 Session 前后恢复都不安全。按 rubric 分数上限，缺失这些关键机制时不能给 75 分以上；考虑到方案仍有较完整的数据结构、状态机和兼容性设计，给 68 分。"
+}

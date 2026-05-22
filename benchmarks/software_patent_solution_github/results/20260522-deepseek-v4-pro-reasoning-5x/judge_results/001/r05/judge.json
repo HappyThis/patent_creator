@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 13,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "正确把问题定位为新增异构本地 agent runtime，而不是简单增加 UI 选项或外部工具入口。",
+    "提出了 RuntimeId 注册、detect/install 扩展、可配置本地状态发现、OpenCode 专属 session scanner、统一 session list 映射、能力边界声明和 fixture/命令替身验证等主要方向。",
+    "注意到不能假设 OpenCode 本地目录、文件格式和 continue 命令已经存在，提出适配器合约和兼容式解析，基本符合补充约束。",
+    "能落到多个当前项目路径，如 agent-runtimes、codex-sessions、sessions route、local-agent-sync、agent-runtimes route，说明有一定源码环境理解。"
+  ],
+  "weaknesses": [
+    "缺少 OpenCode transcript API/parser 和消息归一化机制，只覆盖 session stats/list，无法满足会话详情读取真实历史消息的核心要求。",
+    "continue 方案基本是延后开放，未说明经过验证后如何路由到 OpenCode 专属命令、如何做能力检测、如何返回 binary/provider/model/session 等诊断性失败。",
+    "未覆盖 terminal/PTY attach capability gating；当前项目 chat workspace 对终端入口有 kind 级控制，方案没有说明 OpenCode 如何避免被误展示为可终端附着。",
+    "未说明前端 conversation-list、session branding、chat workspace、settings/onboarding 的类型和能力字段传播，只说会出现在统一列表，工程边界不完整。",
+    "没有 OpenAPI、/api/index、MCP/CLI contract 等契约同步方案，容易造成接口行为与文档/工具描述不一致。",
+    "测试只覆盖 runtime、session list、agent sync，未覆盖 transcript、continue 失败、PTY unsupported、API contract；不满足高分可复现验证要求。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript parser：从本地状态读取消息，归一化 role、timestamp、text、tool_use、tool_result 和不可解析占位。",
+    "OpenCode continue 路由：基于 runtime kind 构造本地命令，执行前做能力检测，执行失败返回可诊断错误而不是伪造成功。",
+    "显式 canContinue/canAttachTerminal 或等价能力字段，并在 API、conversation list、chat workspace、terminal view 中传播。",
+    "OpenCode 品牌和前端 SessionKind 类型扩展，包括 session-kind-brand、conversation-list、chat workspace 的非 gateway 映射。",
+    "OpenAPI、/api/index、MCP/CLI schema 对 opencode kind 和真实能力边界的同步更新。",
+    "覆盖 session list、transcript、continue、PTY unsupported、binary stub 的 fixture/E2E/API 测试闭环。"
+  ],
+  "unsupported_claims": [
+    "方案称在 src/lib/agent-runtimes.ts 中扩展 VALID_RUNTIMES，但当前 VALID_RUNTIMES 实际位于 src/app/api/agent-runtimes/route.ts。",
+    "用 Playwright route 拦截验证 OPENCODE_CONTINUE_COMMAND 的说法缺乏当前命令执行路径依据；continue route 通过 runCommand 执行本地命令，更合理的是 fake binary/PATH 或 runCommand 替身。",
+    "“已安装（会话可浏览）”“推定活跃/确认活跃图标”等展示依赖当前 RuntimeStatus/session 字段中不存在的状态表达，方案没有补充必要 API 字段。",
+    "将 OpenCode 默认状态目录写成 ~/.opencode、默认 *.jsonl 和默认 continue 命令虽然声明可配置，但当前项目没有 OpenCode 实现依据，应更明确为候选探测策略而非已知默认事实。"
+  ],
+  "score_rationale": "方案方向正确，能提出适配器合约、可配置发现、session list 归一化和能力边界声明，属于可用但不完整的答案。但按 rubric，上限受多个关键缺口限制：没有 transcript API/parser 与消息归一化；没有可执行的 continue 路由、能力检测和诊断性失败返回；没有 terminal/PTY attach gating；没有 OpenAPI/API index/schema 契约同步；测试也未覆盖 transcript、continue 和 PTY unsupported。上述关键机制缺失超过三个，因此总分按上限规则不应高于 72。本次给到 72，是因为其 runtime 注册、会话发现、兼容式解析和约束意识较强，但仍未达到 75+ 档所需的工程闭环。"
+}

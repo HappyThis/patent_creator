@@ -1,0 +1,38 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 15,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确把握了当前项目的 Durable Object sub-agent/facet 基础、独立 SQLite 存储、父 WebSocket 会话与 Think/AIChatAgent 流式聊天能力之间的关系。",
+    "提出了 retained run registry、runId、parentToolCallId、streamId/requestId 映射、状态机、sequence 去重等关键机制，能支撑刷新重放和并行 fan-out。",
+    "同时覆盖了模型工具调用 agentTool、命令式 runAgentTool、无父工具调用后台运行三类入口，并说明了 unbound run 的展示与后续操作方式。",
+    "对取消、清理、drill-in 访问门禁、父侧中断恢复、实时观察与执行分离等异常场景有较完整说明。"
+  ],
+  "weaknesses": [
+    "对 AIChatAgent 与 Think 的差异化适配说明不足；方案大量依赖 Think 的 saveMessages、ResumableStream 和 getChatChunksForReplay 形态，但只是笼统声称兼容 AIChatAgent。",
+    "未处理 headless 子 agent 中浏览器 client tools 不可直接执行的问题，也未说明降级、父侧中介或禁止策略，触发 rubric 的 82 分上限。",
+    "客户端侧只描述了事件聚合思路，缺少稳定 raw-message subscription、useAgentToolEvents 或等价 hook 的工程边界与清空状态协同。",
+    "若按当前快照源码衡量，多个框架级 API 还只是 RFC/示例形态，方案没有明确区分现有已发布能力与拟新增框架能力。"
+  ],
+  "missing_key_mechanisms": [
+    "headless 子 agent 中 browser/client tools 的不可用边界、降级策略或父侧中介执行机制。",
+    "AIChatAgent 子运行的具体启动、流捕获、stream replay、取消和恢复适配契约。",
+    "框架级 React 聚合 hook 或 raw WebSocket 消息订阅 API，以及清理 retained runs 后客户端本地状态重置的一致性策略。",
+    "已清理 run 或未知 runId 的 drill-in/replay 响应模型可以更明确，例如 404、tombstone 或 deleted 状态的一致处理。"
+  ],
+  "unsupported_claims": [
+    "当前 packages 源码未导出框架级 agentTool、runAgentTool、clearAgentToolRuns、useAgentToolEvents、inspectAgentToolRun 或 tailAgentToolRun；这些在当前快照中主要是 accepted RFC 或 examples/agents-as-tools 原型概念。",
+    "方案称完整兼容 AIChatAgent，但项目材料显示 agents-as-tools 原型与首期 RFC 是 Think-first，AIChatAgent parity 属于后续阶段。",
+    "getChatChunksForReplay、runTurnAndStream 等名称来自示例/设计原型，并非当前核心 SDK 的通用公开接口。"
+  ],
+  "score_rationale": "这是一份强方向方案，核心 retained sub-agent run、父侧事件转发、replay 去重、并行分流、取消清理和 drill-in 门禁都比较完整，且与当前项目的 subAgent/facet、Think、ResumableStream、onBeforeSubAgent 基础相符。主要扣分来自两个关键工程边界：没有说明 headless 子 agent 中 client tools 的处理，且 AIChatAgent 适配基本停留在兼容性声明而非机制。按 rubric，缺少 headless client tools 边界时总分通常不得高于 82 分，因此即使其他机制较完整，也不应进入 90 分档。"
+}
