@@ -1,7 +1,7 @@
 # 提高技术方案生成能力
 
 > 状态：进行中
-> 最后更新：2026-05-20
+> 最后更新：2026-05-22
 > 关闭条件：系统能够稳定把粗粒度软件需求转化为合理、可实施、具备保护价值的技术方案，并且主 agent / 子 agent / 文档写入链路不再因协议问题阻断技术方案落地。
 
 ## 背景
@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：系统已经能在多个 case 中产出并评分技术方案，子 agent 的旧 `submit_result` 协议问题、复杂 JSON 压缩协议问题、旧 `document_edit + operations` 心智负担、工具失败后绕路恢复、reviewer timeout 和子 agent 不 finish 风险已经明显收敛；但复杂 case 中仍存在 provider 流式中断、重复委派、任务规模边界、写入策略成本、工具参数预防、写作阶段上下文成本和技术方案质量不足等链路稳定性与能力质量问题。
+文件级状态仍为 `进行中`。原因是核心能力目标尚未完全达成：`20260522-deepseek-v4-pro-reasoning-5x` 已完成 10 个有效 case、每个 case 5 次重复运行，50/50 subject 完成，50/50 artifact 抽取，50/50 Codex-as-judge 评分，说明主链路已经具备稳定产出技术方案并进入评估的能力；但评分结果同时暴露出工程边界深度、源码依据、重复性波动和低分 case 能力短板。后续重点从“能否跑通”转向“能否稳定生成高质量、可实施、具备保护价值的技术方案”。
 
 已关闭子问题：
 
@@ -28,32 +28,34 @@
 - `benchmark-failed-cases` 已关闭：`005`、`007` 均已完成单独排查和复跑，证明不是不可运行 case。
 - `benchmark-artifact-after-review-timeout` 已关闭：`consistency_reviewer` 已移除，`20260520-after-reviewer-removal-010` 验证不再因 reviewer timeout 失败。
 - `subagent-finish-boundary` 已关闭：`write_pipe` 预算、预算 ack 和无参 `finish` 已能兜住子 agent 无限写 pipe / 不 finish 的旧协议收尾风险。
+- `solution-quality-validation` 旧问题已关闭：当前不再停留在“样本不足，无法判断质量”的阶段；50 次评分基线已经建立，质量改进拆分为工程边界、源码依据、重复性和低分 case 改进清单。
 
 仍开放子问题：
 
 - provider 流式响应仍可能在长轮次中断；`010` 首次复验在 `1056s` 处因 `httpx.ReadError` 结束为 `round_failed`。
 - 主 agent 虽然能自恢复，但仍会先尝试超过 1500 字的文档写入，导致可预防的 `edit_too_large` 失败。
 - 主 agent 仍可能在较晚阶段才写入 `technical_solution`；成功复跑中约 `585s` 才开始落盘，若 provider 在此之前中断仍可能无 artifact。
-- 主 agent 已有 artifact 后仍可能重复委派同类 analyst / refiner 子 agent，导致压缩、读取和 pipe 预算重复消耗。
 - 子 agent 单次任务规模仍可能过大；pipe 预算限制了交付内容，但不能限制子 agent 在写 pipe 前的读取、分析和压缩成本。
 - 主 agent 缺少“够了就停”的完成策略，复杂任务中可能持续补查、补写、补审查，直到 round timeout。
 - 复杂 case 中上下文压缩已稳定，但重复压缩和长上下文读取仍会带来明显耗时与 token 成本。
 - 子 agent pipe 预算已经生效，但子 agent 仍常先超预算写入再压缩，预算规划不足。
 - 写作阶段上下文仍可能过重，复杂 case 中小步写入仍携带大量材料历史，带来明显 token 成本。
-- 技术方案质量本身仍需要通过更多正式 case 验证和提升。
+- 技术方案质量本身仍需要提升：工程边界、源码依据、重复性和低分 case 已拆分到 2026-05-22 新 issue。
 
 ## 开放问题优先级
 
 P0：
 
-- 技术方案质量验证不足。当前已通过至少 3 个 case 证明完整链路能跑通，但样本规模和失败 case 排查还不足以证明系统能稳定生成合理、可实施、具备保护价值的技术方案。
-- provider 流式中断会直接破坏长轮次产物落地。需要设计对 `httpx.ReadError` / `llm_stream_error` 的恢复策略，尤其是已经有部分输出或工具调用历史时如何安全继续。
+- 技术方案工程边界与机制深度不足。当前答案常能覆盖方向，但对接口、状态、认证、异常、运行时约束等可实施闭环仍不稳定。
+- 技术方案源码依据与无支撑断言问题。agent 需要更稳定地区分“源码已存在的事实”和“方案建议新增的设计”，减少没有证据路径的断言。
+- 低分 case 能力改进。`005`、`001`、`002` 在 5 次重复评测中平均分偏低，应作为下一轮能力改进的优先样本。
 - 子 agent 任务规模边界仍需升级为工具层约束，避免主 agent 把全项目、多主题、跨模块分析交给轻量子 agent。
-- 主 agent 重复委派同类子 agent 的问题会显著拉长复杂 case，需要在 `execute_subagent` 层做近似 goal 去重或要求明确新增缺口。
 - 主 agent 需要明确“够了就停”的完成策略，避免复杂 case 持续补全到 timeout。
 
 P1：
 
+- provider 流式中断会破坏长轮次产物落地。需要设计对 `httpx.ReadError` / `llm_stream_error` 的恢复策略，尤其是已经有部分输出或工具调用历史时如何安全继续。
+- 技术方案质量重复性仍需改进。同一 case 多次运行存在分数波动，应沉淀为实验基线，用于判断 agent 改动是否真的提升。
 - 主 agent 过晚写入 artifact。复杂 case 中应优先形成可落盘的 `technical_solution` 草稿，再进行局部补强，避免超时或流式中断导致完全无产物。
 - 默认分段写入策略不足。复杂技术方案应默认采用 `replace_section` 写摘要、再逐个 `append_child_section` 追加子章节，而不是先尝试一次性写完整大 section。
 - 工具参数预防不足。旧 `operations` 问题已关闭，但模型仍可能超过单次 1500 字正文写入限制，需要从工具 schema、prompt 和可选预检查层降低可恢复失败出现概率。
@@ -118,6 +120,25 @@ P2：
 - 技术效果
 - 当前不合理或缺失的信息
 - 后续可展开为交底书的保护点
+
+## 2026-05-22 DeepSeek 5x 基线
+
+本次已导入正式结果：
+
+- result id：`20260522-deepseek-v4-pro-reasoning-5x`
+- 范围：10 个有效 case，每个 case 5 次重复运行。
+- subject：50/50 完成。
+- artifact：50/50 成功抽取 `disclosure.technical_solution`。
+- judge：50/50 Codex-as-judge 完成评分。
+- 平均分：`80.2`。
+- 低分重点：`005` 平均 `70.6`，`001` 平均 `72.4`，`002` 平均 `75.6`。
+
+该基线说明：当前系统已经基本具备“按 benchmark 要求产出可评估技术方案”的能力，但还不能视为“高质量技术方案生成能力已经完成”。下一阶段不再用旧的“样本不足”问题描述能力缺口，而是拆成以下更可执行的问题：
+
+- [技术方案工程边界与机制深度不足](./2026-05-22-solution-engineering-boundary-depth.md)
+- [技术方案源码依据与无支撑断言问题](./2026-05-22-solution-source-grounding-unsupported-claims.md)
+- [技术方案质量重复性与波动问题](./2026-05-22-solution-quality-repeatability.md)
+- [低分 case 能力改进清单](./2026-05-22-low-score-case-capability-backlog.md)
 
 ## 2026-05-13 E2E 试运行暴露的问题
 
@@ -329,4 +350,4 @@ P2：
 
 - 主 agent 在已有主体技术方案并自检后，又重复调用 `material_analyst`，且 goal 与第一次高度相似。
 - 第二次 `material_analyst` 触发 context compression，`used_tokens=118436`，说明重复委派会放大读取、压缩和 pipe 成本。
-- 该问题已转入专项 issue：`subagent-duplicate-delegation`、`subagent-large-task-boundary` 和 `agent-completion-policy`。
+- 当时该问题拆为 `subagent-duplicate-delegation`、`subagent-large-task-boundary` 和 `agent-completion-policy`；其中重复委派专项已由 2026-05-22 的 50 次运行关闭，剩余重点是单次子 agent 任务过大和主 agent 完成策略。

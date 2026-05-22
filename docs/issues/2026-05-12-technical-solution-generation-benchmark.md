@@ -1,6 +1,6 @@
 # 建立技术方案生成能力评测基准
 
-> 状态：进行中
+> 状态：已关闭
 > 最后更新：2026-05-22
 > 关闭条件：正式 benchmark 规范稳定，完成足够数量的正式 case，并能稳定跑通 subject 与 Codex-as-judge 内容评分链路。
 
@@ -12,7 +12,7 @@
 
 ## 状态总览
 
-文件级状态仍为 `进行中`。原因是 benchmark 建设本身尚未完全闭环：`20260520-full-10cases-5workers-after-reviewer-removal` 已经证明 10 个 case 的 subject 均可完成并抽取 artifact，其中 9 个进入 Codex-as-judge 并评分；但仍有 `008` 因 Codex judge 启动阶段插件同步 403 / Cloudflare challenge 而 `judge_failed`，还需要沉淀稳定回归流程、judge 失败重试和结果报告规范。
+文件级状态更新为 `已关闭`。本 issue 追踪的是 benchmark v1 建设闭环，关闭条件已经由 `20260522-deepseek-v4-pro-reasoning-5x` 满足：正式 10 个 case 每个重复 5 次，总计 50 次运行，subject 全部完成、技术方案产物全部提取、Codex-as-judge 全部评分，并已通过发布脚本导入 `results/` 作为评估历史。
 
 已关闭子问题：
 
@@ -28,29 +28,22 @@
 - `010` 在 Markdown memory 压缩改造后复跑成功：`20260518-compression-md-010-rerun2` 完成 subject + artifact + Codex-as-judge，得分 `72`。
 - `005`、`007` 已完成单独排查与复跑：`007` 在 `20260520-094905-007` 中 `scored=82`，`005` 在 `20260520-113247-005` 中 `scored=75`，历史 `benchmark-failed-cases` 子问题关闭。
 - `20260520-full-10cases-5workers-after-reviewer-removal` 全量运行中，10 个 case 的 subject 全部完成，9 个 scored；历史“复杂 case 无法产出 artifact”已不再是当前主阻断。
+- `20260522-deepseek-v4-pro-reasoning-5x` 完成 50/50 scored，并导入 `benchmarks/software_patent_solution_github/results/20260522-deepseek-v4-pro-reasoning-5x/`。
 
-仍开放子问题：
+已转出子问题：
 
-- 将复杂 case 的低并发、timeout 和失败复跑策略沉淀为稳定回归流程。
-- 处理 Codex-as-judge 启动阶段的偶发基础设施失败，例如插件同步 403 / Cloudflare challenge 导致的 `judge_failed`。
-- 维护正式 case 的来源标准和题目编写规范；运行器不再自动输出 case 建议或 benchmark 自评结论。
-- 沉淀批量运行、汇总和横向比较流程。
+- 长期趋势、模型横评和回归规模扩展不再阻塞 benchmark v1 关闭，后续作为结果管理与回归运营问题单独跟踪。
+- Codex-as-judge 插件同步 403 / Cloudflare challenge 本轮未复现；本次暴露的 judge timeout 与成本问题转入 [Benchmark judge 超时与成本控制](./2026-05-22-benchmark-judge-timeout-cost-control.md)。
+- 发布结果的实验配置元信息不足转入 [Benchmark 结果 manifest 元信息不足](./2026-05-22-benchmark-result-manifest-metadata.md)。
+- case 来源标准和题目编写规范已沉淀到 benchmark 文档，后续按常规维护处理。
 
 ## 开放问题优先级
 
-P0：暂无 benchmark 建设层面的阻断项。`005`、`007` 未写出 result 的历史问题已经完成复跑确认，后续转为稳定回归流程和长链路控制问题。
+P0：无。benchmark v1 建设已关闭。
 
-P1：
+P1：无。剩余问题已转入独立 issue。
 
-- 继续筛选正式 case 来源，优先覆盖 agent / AI 工具链、开发工具、同步系统、权限系统等机制型软件项目。
-- 统一 case 质量门槛，避免把 bug fix、小补丁、过细需求或已经暴露答案的需求放入正式 benchmark。
-- Codex-as-judge 运行失败应与 subject agent 失败区分。`008` 本轮 subject 已完成并抽取 artifact，但 judge 因插件同步访问 `chatgpt.com/backend-api/plugins/featured` 返回 403 / Cloudflare challenge 而失败。
-- 批量报告只展示运行次数、产物成功、评分次数、状态分布、分数和 judge 摘要，不生成 case 建议或 benchmark 自评结论。
-
-P2：
-
-- 从现有正式候选扩展到 20 个左右的回归集。
-- 建立长期批量运行、结果趋势对比和模型横向比较流程。
+P2：无。
 
 ## 2026-05-20 全量 10 case / 5 worker 运行
 
@@ -81,7 +74,7 @@ P2：
 
 - benchmark 主链路可运行性比此前明显改善，复杂 case 基本能产出可评测 artifact。
 - 全量均分若只算 scored case 为 `79.22`，但 `008` 因 judge 基础设施失败缺分，因此这不是完整质量均分。
-- `008` 的失败应归入 `benchmark-judge-plugin-sync-failure`，不应归入 subject agent 能力失败。
+- `008` 的失败在当时应归入 judge 基础设施问题，不应归入 subject agent 能力失败；后续 `20260522-deepseek-v4-pro-reasoning-5x` 已完成 50/50 scored，旧插件同步失败不再作为开放问题跟踪。
 - 不再推进 case 分层：`006/007/008` 等样本对长链路、子 agent 和 judge 稳定性压力较大，但这些现象应作为 agent/runner 稳定性问题单独记录，不作为 case 分级依据。
 
 ## 当前决策
@@ -336,10 +329,10 @@ Markdown memory 压缩改造后，`010` 再次完成单 case 闭环：
 - 结果：三个 case 均为 `artifact_extracted`，`round_failed=false`。
 - 旧报告问题：`case_selection_report.md` 曾将 subject-only 未评分结果显示为 0% / case 建议，容易误解为 case 失败。当前批量报告已改为 `evaluation_report.md`，只展示运行状态、产物成功和评分结果。
 
-当前 benchmark 侧开放 issue：
+当前 benchmark 侧状态：
 
-- `benchmark-stable-full-run`：沉淀全量低并发、复杂 case timeout、失败 case 单独复跑和结果汇总规范。
-- `benchmark-run-transient-failures`：记录 provider streaming `ReadError`、quota、timeout 等外部或长轮次不稳定因素，避免将偶发运行失败误判为 case 不可运行。
+- `benchmark-stable-full-run`：已由 `20260522-deepseek-v4-pro-reasoning-5x` 关闭，当前 v1 已完成 50/50 scored。
+- `benchmark-run-transient-failures`：宽泛分类已关闭并拆分；provider 流式中断归入能力 issue，judge timeout / 成本归入独立 judge issue，额度耗尽不作为 agent 或 benchmark 问题。
 - `skip-judge-report-classification`：已关闭。批量报告不再生成 case 建议，`--skip-judge` 结果只通过状态分布、产物成功和已评分次数呈现。
 
 ## 暂不处理

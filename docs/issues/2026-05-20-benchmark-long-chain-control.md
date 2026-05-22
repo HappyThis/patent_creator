@@ -1,7 +1,7 @@
 # Benchmark 长链路可控完成问题
 
 > 状态：进行中
-> 最后更新：2026-05-20
+> 最后更新：2026-05-22
 > 关闭条件：复杂 benchmark case 能在合理时间内先产出可评测技术方案；已有 artifact 后不会因追加 review、子 agent 长跑或重复补全导致 round timeout；文档写入工具不再频繁触发可预防的大块结构化参数失败。
 
 ## 背景
@@ -17,6 +17,7 @@
 | 001 / 005 / 010 | `20260520-tools-refactor-smoke` | `artifact_extracted` | 工具重构后 subject-only smoke run 全部完成，未复现旧 `document_edit`；但仍暴露 pipe 预算规划、写入大小预检查和写作阶段上下文过重问题。 |
 | 010 | `20260520-after-reviewer-removal-010` | `scored=78` | 移除 `consistency_reviewer` 后不再复现 reviewer timeout；subject 约 687 秒完成并进入 judge。但主 agent 已写出主体后又重复调用 `material_analyst`，并出现多次 `pipe_budget_exceeded`，说明重复委派和子 agent 任务边界仍需处理。 |
 | 001-010 | `20260520-full-10cases-5workers-after-reviewer-removal` | 9 个 `scored`，`008` 为 `judge_failed` | 5 worker 全量运行中 10 个 subject 均完成并抽取 artifact，说明 reviewer timeout 路径已消失；但 `004/006/008/009` 仍有明显长链路，`008` subject 约 734 秒才完成，judge 失败来自 Codex 插件同步 403/Cloudflare challenge。 |
+| 001-010 x5 | `20260522-deepseek-v4-pro-reasoning-5x` | 50 个 `scored` | 50/50 subject 完成、50/50 artifact 抽取、50/50 judge 评分；发布 artifact 未发现重复标题，未发现同一 run 内同类子 agent 重复委派，但仍有 pipe 预算、文档参数、写入大小和 judge 成本问题。 |
 
 本轮说明，旧的子 agent 大 JSON 提交协议和压缩格式问题已经明显缓解，主矛盾转向：复杂任务如何可控地完成，而不是无限追求补全。
 
@@ -101,6 +102,26 @@ pipe 预算机制已验证有效：
 - `004` 仍调用 `section_writer` 承接技术方案章节候选正文，且 `material_analyst`、`solution_refiner`、`section_writer` 均触发超过 200k token 的 subagent compression，说明“写作子 agent 轻量化”没有完全落地。
 - `document_append_block` / `document_append_child_section` 仍会收到字符串化的 `block` / `blocks` 参数，失败后模型通常能改为对象或数组重试成功；该问题不再是旧 `operations` 协议，但仍是文档工具参数成功率问题。
 - `008` judge 失败不是 subject agent 失败，而是 Codex judge 启动时远程插件同步访问 `chatgpt.com/backend-api/plugins/featured` 返回 403/Cloudflare challenge，随后 MCP 初始化失败。
+
+## 2026-05-22 DeepSeek 5x 全量运行补充
+
+本次运行：
+
+- run id：`20260522-deepseek-v4-pro-reasoning-5x`
+- 范围：`001-010`，每个 case 重复 5 次，5 worker。
+- subject 结果：50/50 完成。
+- artifact 结果：50/50 成功抽取。
+- judge 结果：50/50 scored。
+- 总体平均分：`80.2`。
+
+本轮对长链路问题的判断更新：
+
+- 过程异常不再作为技术方案内容 benchmark 的评分依据；只要最终能抽取技术方案并完成 judge，内容评估只评价技术方案质量。
+- `session_events.jsonl` 仍必须保留，供排查工具调用、子 agent 调度、provider 中断和 judge 失败。
+- 最新发布的 50 个 `evaluated_artifact.md` 未发现重复标题，说明 `document-write-duplicate-sections` 的阻断级问题可以关闭。
+- 最新 50 次运行未发现同一 run 内重复调用高度相似同类子 agent 的模式，`subagent-duplicate-delegation` 可关闭；但单次子 agent goal 仍可能过大，继续由 `subagent-large-task-boundary` 跟踪。
+- 未发现 `exec_command` 直接修改 `disclosure.json` 的当前证据；该风险仍保留为工具权限边界问题，但优先级降为 P1。
+- 仍存在明显可优化的过程成本：`pipe_budget_exceeded`、文档对象/数组参数字符串化、写入大小预检查不足、写作阶段上下文过重和 Codex judge 高耗时。
 
 ## ISSUE-2026-05-20-01：已有 artifact 后仍继续重型 review 导致超时
 
@@ -250,7 +271,7 @@ pipe 预算机制已验证有效：
 
 优先级：P0
 
-状态：开放
+状态：已关闭
 
 现象：
 
@@ -270,6 +291,11 @@ pipe 预算机制已验证有效：
 - executor 或写入工具可考虑对同一 step 内完全相同的写入做拒绝或去重。
 - 主 agent 写入后应避免再次落盘同一批章节；如果需要补充，应按新增缺口追加，而不是重放整批内容。
 
+关闭记录：
+
+- `20260522-deepseek-v4-pro-reasoning-5x` 的 50 个发布 artifact 中未发现重复标题或重复章节污染。
+- 最新运行中仍有文档参数错误和写入大小问题，但未再形成最终 artifact 污染；这些残留问题分别由 `ISSUE-2026-05-20-13` 与 `ISSUE-2026-05-20-17` 跟踪。
+
 关闭条件：
 
 - 复杂 case 中不再出现同一批子章节被连续写入两次以上。
@@ -277,7 +303,7 @@ pipe 预算机制已验证有效：
 
 ## ISSUE-2026-05-20-08：文档写入工具缺少安全删除 / 清理子章节能力
 
-优先级：P1
+优先级：P2
 
 状态：开放
 
@@ -292,6 +318,7 @@ pipe 预算机制已验证有效：
 - artifact 结构中可能保留空标题或空壳节点，影响可读性和评分。
 - agent 为修复重复写入而进入额外探索和清理链路，增加超时风险。
 - 如果没有安全删除能力，模型可能继续寻找绕行方法。
+- `20260522-deepseek-v4-pro-reasoning-5x` 的 50 个发布 artifact 未发现重复标题，说明该问题当前不是阻断项；保留为未来再次出现空壳章节时的工具能力观察项。
 
 处理方向：
 
@@ -306,7 +333,7 @@ pipe 预算机制已验证有效：
 
 ## ISSUE-2026-05-20-09：主 agent 可通过 `exec_command` 绕过文档写入工具修改交底书内部数据
 
-优先级：P0
+优先级：P1
 
 状态：开放
 
@@ -315,6 +342,7 @@ pipe 预算机制已验证有效：
 - `005` 复跑中，主 agent 使用 `exec_command` 直接打开并修改 subject 数据目录中的 `disclosure.json`。
 - 该行为绕过了文档写入工具的 schema 校验、正文长度限制、变更摘要、事件语义和工具边界。
 - 这不是 benchmark runner 层问题，而是主 agent 工具权限边界问题。
+- `20260522-deepseek-v4-pro-reasoning-5x` 中检索到的 `disclosure.json` 相关命令均表现为读取/诊断，未发现实际绕写；因此优先级从 P0 降为 P1，但工具权限边界仍应补上。
 
 影响：
 
@@ -431,7 +459,7 @@ pipe 预算机制已验证有效：
 
 优先级：P1
 
-状态：开放
+状态：已关闭
 
 现象：
 
@@ -449,6 +477,11 @@ pipe 预算机制已验证有效：
 - `run_all.py` 已移除 case recommendation / selection 逻辑。
 - 批量输出改为 `evaluation_summary.json` 和 `evaluation_report.md`。
 - subject-only run 只在状态分布、产物成功次数和已评分次数中体现，不生成 case 建议。
+
+关闭记录：
+
+- 当前 benchmark 报告已不再生成 case 建议或 benchmark 自评结论。
+- `--skip-judge` 结果只通过运行状态、产物成功和已评分次数呈现，不再把未评分当成 case 失败。
 
 关闭条件：
 
@@ -591,7 +624,7 @@ pipe 预算机制已验证有效：
 
 优先级：P0
 
-状态：开放
+状态：已关闭
 
 现象：
 
@@ -612,6 +645,11 @@ pipe 预算机制已验证有效：
 - 主 agent 在再次调用子 agent 前必须明确“本次委派解决哪个尚未覆盖的具体缺口”，不能重复执行材料抽取、整体架构分析、整体方案骨架这类已完成任务。
 - 已有 `technical_solution` 后，子 agent 只能用于局部短补强，例如“补一个认证路由边界检查点”，而不是重新做全局分析。
 - 重复委派被拒绝时，工具返回应提示主 agent：直接基于已有 pipe 内容和当前文档做有限编辑，或结束本轮。
+
+关闭记录：
+
+- `20260522-deepseek-v4-pro-reasoning-5x` 的 50 次运行中，未发现同一 run 内重复调用高度相似同类子 agent 的模式。
+- 残留问题不再是“重复委派”，而是单次子 agent goal 仍可能过大，继续由 `ISSUE-2026-05-20-15` 跟踪。
 
 关闭条件：
 
@@ -653,17 +691,19 @@ pipe 预算机制已验证有效：
 
 ## 当前判断
 
-本轮复测后的主矛盾已经不是旧协议正确性，而是长链路可控完成和写作阶段成本控制：
+最新复测后的主矛盾已经不是旧协议正确性，也不是 benchmark 能否跑通，而是长链路成本控制、工具参数成功率和技术方案质量上限：
 
 - `write_pipe + finish` 与 Markdown 压缩方向基本成立。
 - 小步文档写入对 `010` 有明显改善。
-- `005` 后续复跑和 smoke run 已经能收尾，但复杂 case 证明子 agent 任务规模、pipe 预算规划、写入大小预检查和上下文成本仍需继续收敛。
-- 10 case / 5 worker 全量运行中 subject 全部完成，说明可运行性显著改善；但 `008` judge 受 Codex 插件同步 403 影响失败，评测基础设施稳定性需要单独处理。
+- `20260522-deepseek-v4-pro-reasoning-5x` 中 50/50 subject 完成、50/50 artifact 抽取、50/50 judge 评分，说明可运行性已达到当前 benchmark v1 的闭环要求。
+- 最新 50 个发布 artifact 未发现重复标题，重复章节污染问题可以关闭；最新 50 次运行也未发现同类子 agent 重复委派模式。
+- 复杂 case 仍证明子 agent 任务规模、pipe 预算规划、文档写入大小预检查、字符串化参数和上下文成本需要继续收敛。
 - `consistency_reviewer` 已从当前子 agent 集合中移除；review 不再作为独立子 agent 能力维护。
+- Codex judge 能完成评估，但存在 timeout 后重跑成功和超高 token 消耗，已拆到独立 judge 成本控制 issue。
 
 下一步优先级应是：
 
-1. 将子 agent 任务规模边界和重复委派检查从提示词约束升级为工具层约束。
+1. 将子 agent 任务规模边界从提示词约束升级为工具层约束。
 2. 让子 agent 在写 pipe 前按预算规划，而不是先超额再修正。
-3. 降低文档写入的 `edit_too_large`、字符串化参数、重复写入和清理链路。
-4. 修正 `--skip-judge` 报告分类和 judge 启动偶发失败，并继续做高难 case 的 request/rubric 源码级对齐。
+3. 降低文档写入的 `edit_too_large` 和字符串化参数失败。
+4. 控制 judge 评估耗时和结果发布元数据，保证后续实验可对比。
