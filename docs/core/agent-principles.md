@@ -136,9 +136,9 @@
 
 1. 接收主 agent 分配的具体任务
 2. 基于提供的最小上下文完成任务
-3. 返回统一输出协议
-4. 必要时返回结构化 proposal
-5. 生成候选正文或候选 `document_edit.operations`
+3. 通过 pipe 返回统一输出
+4. 必要时返回事实、方案骨架、风险或待确认问题
+5. 生成局部候选正文
 
 补充说明：
 
@@ -159,7 +159,7 @@
 
 - 子 agent 可以调用工具
 - 子 agent 可以调用 `document_read`
-- 子 agent 不允许调用 `document_edit`
+- 子 agent 不允许调用文档写入工具
 - 子 agent 不具备调用其他 agent 的权限
 - 因此，子 agent 允许多轮 tool use，但不允许继续派生新的子 agent 调用
 
@@ -266,13 +266,17 @@
 文档读取与写入统一通过专用工具完成：
 
 - `document_read`
-- `document_edit`
+- `document_replace_section_blocks`
+- `document_append_block`
+- `document_replace_block`
+- `document_append_child_section`
+- `document_clear_section_blocks`
 
 其中：
 
 - `document_read` 是只读入口
-- `document_edit` 是 `disclosure.json` 的唯一写入入口
-- `document_edit` 只能由主 agent 调用
+- 文档写入工具是 `disclosure.json` 的唯一写入入口
+- 文档写入工具只能由主 agent 调用
 - 子 agent 可以提出修改建议，但不直接写入文档
 
 ### 子 agent 的触发方式

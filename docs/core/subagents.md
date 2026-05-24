@@ -4,7 +4,7 @@
 
 本文档定义本项目的业务子 agent 清单、职责范围、权限边界和声明字段。
 
-子 agent 的结果传输与结束方式以 [子 Agent 管道协议](subagent-pipe-protocol.md) 为准。子 agent 不通过复杂 envelope 或 `document_edit.operations` 向主 agent 交付最终结果，而是将需要展示给主 agent 的内容写入 pipe，并通过 `finish({})` 结束。
+子 agent 的结果传输与结束方式以 [子 Agent 管道协议](subagent-pipe-protocol.md) 为准。子 agent 不通过复杂 envelope 或文档写入参数向主 agent 交付最终结果，而是将需要展示给主 agent 的内容写入 pipe，并通过 `finish({})` 结束。
 
 依赖文档：
 
@@ -35,7 +35,7 @@
 3. 主 agent 负责决定何时调用哪个子 agent。
 4. 子 agent 只提供分析、骨架或候选正文。
 5. 主 agent 负责解释子 agent 内容，并决定是否采纳。
-6. `document_edit` 只能由主 agent 调用。
+6. 文档写入工具只能由主 agent 调用。
 7. 子 agent 不直接修改 `disclosure.json`。
 8. 子 agent 支持多轮 tool use，但不允许继续调用其他子 agent。
 9. 子 agent 的结果交付遵守管道协议：内容写入 `write_pipe(content)`，结束调用 `finish({})`。
@@ -53,7 +53,7 @@
 
 子 agent 不可以：
 
-- 调用 `document_edit`
+- 调用文档写入工具
 - 调用 `execute_subagent`
 - 直接修改 `disclosure.json`
 - 决定是否采纳自己的候选内容
@@ -148,7 +148,7 @@
 - 决定整篇方案方向
 - 决定全局文档结构
 - 一次生成完整技术方案、完整实施例或多子章节整章内容
-- 生成最终 `document_edit.operations`
+- 生成最终文档写入参数
 - 修改文档
 
 适合场景：
@@ -233,7 +233,7 @@
 
 1. 子 agent 清单为 `material_analyst`、`solution_refiner`、`section_writer`。
 2. 子 agent 只提供分析、骨架或候选正文，不直接修改文档。
-3. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
+3. 子 agent 不生成最终文档写入参数作为默认责任。
 4. 子 agent 的结果内容通过 `write_pipe(content)` 进入 pipe。
 5. 子 agent 通过 `finish({})` 显式结束本次 run。
-6. 主 agent 读取 pipe content 后，决定是否采纳、如何结构化和是否调用 `document_edit`。
+6. 主 agent 读取 pipe content 后，决定是否采纳、如何结构化和是否调用文档写入工具。

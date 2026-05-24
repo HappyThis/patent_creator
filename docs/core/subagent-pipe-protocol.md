@@ -38,7 +38,7 @@
 | 内容传输 | `write_pipe(content)` 少量多次写入字符串 |
 | 结束信号 | `finish({})` 是唯一显式结束信号 |
 | 大内容承载 | 作为普通字符串进入 pipe |
-| 子 agent 是否生成 operations | 默认不生成，主 agent 解释和落盘 |
+| 子 agent 是否生成文档写入参数 | 默认不生成，主 agent 解释和落盘 |
 | 模型需要记忆的协议 | 只需记住“写内容用 write_pipe，结束用 finish” |
 | provider 依赖 | 依赖标准 tool call / tool result |
 | 主 agent 接收内容 | 合并后的字符串内容 |
@@ -184,8 +184,8 @@ ack 约束：
 
 1. 阅读 `content`。
 2. 判断是否采纳。
-3. 自行决定是否继续追问、继续拆分任务或调用 `document_edit`。
-4. 不假定子 agent 已经生成可直接落盘的 `document_edit.operations`。
+3. 自行决定是否继续追问、继续拆分任务或调用文档写入工具。
+4. 不假定子 agent 已经生成可直接落盘的文档写入参数。
 
 ## 八、上下文协议
 
@@ -230,7 +230,7 @@ tool result: {"status":"done","parts":2,"total_chars":...}
 
 1. 子 agent 输出内容只通过 `write_pipe(content)`。
 2. 子 agent prompt 不要求模型填写复杂结构化结果。
-3. 子 agent 不承担生成 `document_edit.operations` 的默认责任。
+3. 子 agent 不承担生成文档写入参数的默认责任。
 4. 主 agent prompt 强调阅读子 agent `content` 后自行决策。
 5. benchmark 评分仍只看最终 `disclosure.json` 中的技术方案章节，不评价 pipe 内部过程。
 

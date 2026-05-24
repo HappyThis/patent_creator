@@ -78,7 +78,7 @@ user_input
          -> subagent final result
       -> log(tool_result)
       -> sse(tool_call_finished)
-      -> if document_edit succeeded:
+      -> if document write succeeded:
          -> collect changed_section_ids / changed_block_ids
          -> sse(document_changed)
       -> context update
@@ -184,7 +184,7 @@ user_input
 但子 agent 的权限边界是：
 
 - 可以多轮调用允许范围内的 tools
-- 不允许调用 `document_edit`
+- 不允许调用文档写入工具
 - 不允许调用 `execute_subagent`
 
 因此，子 agent 内部时序如下：
@@ -212,22 +212,21 @@ user_input
 1. 执行器把子 agent 最终结果包装成 `execute_subagent` 的 tool result。
 2. 记录 `tool_result`，`scope=main`。
 3. SSE 推送主流程视角的 `tool_call_finished`。
-4. 主 agent 拿到这个结果，决定是否采纳、追问、继续拆分任务或调用 `document_edit`。
+4. 主 agent 拿到这个结果，决定是否采纳、追问、继续拆分任务或调用文档写入工具。
 
 ## 九、文档修改时序
 
-文档修改只通过 `document_edit` 发生。
+文档修改只通过专用文档写入工具发生。
 
 当主 agent 决定采纳候选修改时：
 
-1. 主 agent 发出 `tool_call(name=document_edit)`。
+1. 主 agent 发出文档写入工具调用。
 2. 执行器检查权限。
-3. 执行器调用 `document_edit`。
-4. `document_edit` 原子执行 operations。
-5. `document_edit` 返回：
+3. 执行器调用对应写入工具。
+4. 写入工具完成参数校验、正文长度检查、文档 schema 校验和落盘。
+5. 写入工具返回：
    - `changed_section_ids`
    - `changed_block_ids`
-   - `operations_applied`
    - `primary_section_id`
    - `primary_block_id`
    - `change_scope`
@@ -356,8 +355,8 @@ user_input
 1. 主 agent 支持 loop。
 2. 子 agent 也支持 loop。
 3. 子 agent 只允许多轮 tool use，不允许继续调 agent。
-4. 子 agent 不允许调用 `document_edit`。
-5. 文档修改只能通过 `document_edit` 发生。
+4. 子 agent 不允许调用文档写入工具。
+5. 文档修改只能通过专用文档写入工具发生。
 6. 文档一旦修改，立即刷新渲染区。
 7. git commit 只在本轮结束时执行一次。
 8. session 日志追求完整，SSE 追求可感知。

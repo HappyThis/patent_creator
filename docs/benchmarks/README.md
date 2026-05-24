@@ -14,8 +14,7 @@
 
 ## 相关文档
 
-- [提高技术方案生成能力 issue](../issues/2026-05-12-technical-solution-generation-capability.md)
-- [建立技术方案生成能力评测基准 issue](../issues/2026-05-12-technical-solution-generation-benchmark.md)
+- [GitHub Issues](https://github.com/HappyThis/patent_creator/issues)
 - [GitHub 中型项目软件专利技术方案评测基准](software-patent-solution-github.md)
 - [GitHub 中型项目候选清单](github-project-candidates.md)
 - [GitHub 评测运行目录](../../benchmarks/software_patent_solution_github/README.md)

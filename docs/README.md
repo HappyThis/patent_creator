@@ -8,7 +8,6 @@
 - `specs/`：产品、协议、上下文、前端和工作区等专题规范。
 - `status/`：阶段性实现状态。
 - `benchmarks/`：评测基准分类和具体评测规范。
-- `issues/`：待处理问题和产品/技术讨论记录。
 - `assets/`：文档图片资源。
 
 ## 核心文档
@@ -72,7 +71,6 @@
 - `specs/` 收纳具体专题规范和技术方案文档。
 - `status/` 收纳阶段性实现状态。
 - `benchmarks/` 收纳评测基准分类和评测规范。
-- `issues/` 收纳仍在讨论或待处理的问题。
 
 这些核心文档保持独立。
 
@@ -155,7 +153,7 @@
 
 1. 交底书文档定位使用 `section_id` 和 `block_id`
 2. 文档读取统一通过 `document_read`
-3. 文档写入统一通过 `document_edit`
+3. 文档写入统一通过专用文档写入工具
 4. 子 agent 通过 pipe content 向主 agent 传递结果，由主 agent 解释、结构化和落盘
 5. 子 agent 通过 `execute_subagent` 调度工具启动
 6. 文档变更事件使用 `changed_section_ids` 和 `changed_block_ids`

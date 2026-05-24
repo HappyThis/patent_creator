@@ -138,7 +138,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 应展示一条过程节点，例如：
 
 - `调用 document_read`
-- `调用 document_edit`
+- `调用 document_append_block`
 - `调用 exec_command`
 - `调用 execute_subagent`
 
@@ -159,7 +159,7 @@ Agent Chat 区需要把执行过程展示为一系列“过程节点”。
 例如：
 
 - `document_read 已返回`
-- `document_edit 已完成`
+- `document_append_block 已完成`
 - `section_writer 已完成`
 
 ### 5. 结果详情的折叠与展开

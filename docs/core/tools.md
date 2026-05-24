@@ -37,9 +37,13 @@
 系统保留以下核心工具：
 
 1. `document_read`
-2. `document_edit`
-3. `execute_subagent`
-4. `exec_command`
+2. `document_replace_section_blocks`
+3. `document_append_block`
+4. `document_replace_block`
+5. `document_append_child_section`
+6. `document_clear_section_blocks`
+7. `execute_subagent`
+8. `exec_command`
 
 ### 1. document_read
 
@@ -56,20 +60,53 @@
 
 `document_read` 不产生副作用。
 
-### 2. document_edit
+### 2. document_replace_section_blocks
 
-`document_edit` 是交底书文档的唯一写入入口。
+`document_replace_section_blocks` 用于替换指定章节的正文 blocks，不改变章节标题和子章节。
 
-它负责：
+适合：
 
-- 校验写入操作
-- 自动生成新增 block id
-- 原子写入 `disclosure.json`
-- 返回变更的 section id 和 block id
+- 写入根章节总述
+- 重写某个章节的短正文 blocks
+- 清晰覆盖当前章节正文
 
-`document_edit` 只能由主 agent 调用。
+### 3. document_append_block
 
-### 3. execute_subagent
+`document_append_block` 用于向指定章节末尾追加一个 block。
+
+适合：
+
+- 小步追加段落
+- 小步追加列表、图片或表格
+- 将较长正文拆成多次写入
+
+### 4. document_replace_block
+
+`document_replace_block` 用于替换指定 block 的内容，并保留原 `block_id`。
+
+适合：
+
+- 小范围改写已有段落
+- 修正已有列表、图片或表格
+- 保持文档定位稳定
+
+### 5. document_append_child_section
+
+`document_append_child_section` 用于在指定父章节下追加一个 `custom` 子章节。
+
+适合：
+
+- 在“技术方案”下追加短子章节
+- 写入“整体架构”“处理流程”“关键模块”等局部结构
+- 先建立短标题和正文，再通过 `document_append_block` 继续补充
+
+### 6. document_clear_section_blocks
+
+`document_clear_section_blocks` 用于清空指定章节的正文 blocks。
+
+它只清空 blocks，不删除章节节点，也不删除子章节。
+
+### 7. execute_subagent
 
 `execute_subagent` 是子 agent 调度工具。
 
@@ -81,7 +118,7 @@
 
 `execute_subagent` 只能由主 agent 调用。
 
-### 4. exec_command
+### 8. exec_command
 
 `exec_command` 用于执行通用命令行操作。
 
@@ -95,7 +132,7 @@
 不适合：
 
 - 直接修改 `disclosure.json`
-- 绕过 `document_edit` 执行文档写入
+- 绕过文档写入工具执行交底书正文写入
 
 运行口径：
 
@@ -112,7 +149,11 @@
 ```text
 main_agent:
   - document_read
-  - document_edit
+  - document_replace_section_blocks
+  - document_append_block
+  - document_replace_block
+  - document_append_child_section
+  - document_clear_section_blocks
   - execute_subagent
   - exec_command
 
@@ -123,7 +164,7 @@ subagents:
 
 约束：
 
-1. 子 agent 不允许调用 `document_edit`。
+1. 子 agent 不允许调用文档写入工具。
 2. 子 agent 不允许调用 `execute_subagent`。
 3. 执行器必须在工具层检查权限。
 4. 权限失败返回 `permission_denied`。
@@ -146,7 +187,7 @@ sec_000003
 
 规则：
 
-1. 新增 section 时由 `document_edit` 自动生成。
+1. 新增 section 时由文档写入工具自动生成。
 2. 替换 section 时保留原 `section_id`。
 3. agent 不为新增 section 手写 id。
 4. `section.id` 不承载章节语义。
@@ -194,7 +235,7 @@ blk_000003
 
 规则：
 
-1. 新增 block 时由 `document_edit` 自动生成。
+1. 新增 block 时由文档写入工具自动生成。
 2. 替换 block 时保留原 `block_id`。
 3. agent 不为新增 block 手写 id。
 4. `list` item 与 `table` cell 不单独建立 id。
@@ -448,17 +489,9 @@ search_blocks
 }
 ```
 
-## 七、document_edit 协议
+## 七、文档写入工具协议
 
-`document_edit` 接收一组 `operations`，按顺序原子执行。
-
-通用输入：
-
-```json
-{
-  "operations": []
-}
-```
+文档写入工具是交底书文档的唯一写入入口。所有写入工具都由主 agent 调用，执行器负责权限检查、参数校验、正文长度检查、文档 schema 校验和落盘。
 
 通用成功输出：
 
@@ -468,7 +501,6 @@ search_blocks
   "output": {
     "changed_section_ids": ["sec_000007"],
     "changed_block_ids": ["blk_000014"],
-    "operations_applied": 1,
     "primary_section_id": "sec_000007",
     "primary_block_id": "blk_000014",
     "change_scope": "block_appended"
@@ -490,31 +522,29 @@ search_blocks
 
 ### 原子写入规则
 
-`document_edit` 的执行流程为：
+文档写入工具的执行流程为：
 
 ```text
 读取 disclosure.json
 -> 构建 id 索引
--> 校验全部 operations
--> 在内存副本上应用全部 operations
+-> 校验工具参数
+-> 在内存副本上应用写入
 -> 校验修改后的整份文档
--> 写入临时文件
--> rename 覆盖 disclosure.json
+-> 保存 disclosure.json
 -> 返回 changed ids 与主定位字段
 ```
 
 约束：
 
-1. 全部 operation 校验通过后才能写入。
-2. 任一 operation 失败时不修改文件。
-3. 同一 project 同时只能有一个 `document_edit` 写入。
+1. 参数和文档 schema 校验通过后才能写入。
+2. 任一校验失败时不修改文件。
+3. 单次正文写入总量不得超过 1500 字。
 4. 写入工具不直接执行 SSE 推送或 git commit。
 
 返回字段说明：
 
 - `changed_section_ids`：本次变更影响到的 section id 集合
 - `changed_block_ids`：本次新增或替换的 block id 集合
-- `operations_applied`：实际成功应用的 operation 数量
 - `primary_section_id`：本次变更的主要 section
 - `primary_block_id`：本次变更的主要 block，没有则为 `null`
 - `change_scope`：本次变更的主要语义范围
@@ -522,80 +552,23 @@ search_blocks
 `change_scope` 支持：
 
 ```text
-meta_updated
 block_appended
 block_replaced
 section_blocks_replaced
 child_section_appended
-section_replaced
 ```
 
-### 支持的 edit op
-
-支持：
-
-```text
-update_meta
-replace_section_blocks
-append_block
-replace_block
-append_child_section
-replace_section
-```
-
-不支持：
-
-```text
-delete_block
-move_block
-delete_section
-move_section
-insert_block_at
-json_patch
-merge_json_path
-```
-
-### 1. update_meta
+### 1. document_replace_section_blocks
 
 输入：
 
 ```json
 {
-  "operations": [
+  "section_id": "sec_000007",
+  "blocks": [
     {
-      "op": "update_meta",
-      "fields": {
-        "title": "一种图像检测方法"
-      }
-    }
-  ]
-}
-```
-
-说明：
-
-- 只能更新允许的 meta 字段。
-- `id_counters` 由系统维护，不由 agent 直接修改。
-- `primary_section_id` 为 `null`。
-- `primary_block_id` 为 `null`。
-- `change_scope` 为 `meta_updated`。
-
-### 2. replace_section_blocks
-
-输入：
-
-```json
-{
-  "operations": [
-    {
-      "op": "replace_section_blocks",
-      "section_id": "sec_000007",
-      "blocks": [
-        {
-          "type": "paragraph",
-          "text": "本发明提供一种图像检测方法。"
-        }
-      ]
+      "type": "paragraph",
+      "text": "本发明提供一种图像检测方法。"
     }
   ]
 }
@@ -611,22 +584,17 @@ merge_json_path
 - `primary_block_id` 等于第一个新生成的 block id，没有 block 时为 `null`。
 - `change_scope` 为 `section_blocks_replaced`。
 
-### 3. append_block
+### 2. document_append_block
 
 输入：
 
 ```json
 {
-  "operations": [
-    {
-      "op": "append_block",
-      "section_id": "sec_000007",
-      "block": {
-        "type": "paragraph",
-        "text": "本发明的处理流程包括图像获取、特征提取和结果输出。"
-      }
-    }
-  ]
+  "section_id": "sec_000007",
+  "block": {
+    "type": "paragraph",
+    "text": "本发明的处理流程包括图像获取、特征提取和结果输出。"
+  }
 }
 ```
 
@@ -638,22 +606,17 @@ merge_json_path
 - `primary_block_id` 等于新生成的 `block_id`。
 - `change_scope` 为 `block_appended`。
 
-### 4. replace_block
+### 3. document_replace_block
 
 输入：
 
 ```json
 {
-  "operations": [
-    {
-      "op": "replace_block",
-      "block_id": "blk_000001",
-      "block": {
-        "type": "paragraph",
-        "text": "本发明提供一种适用于低算力设备的图像检测方法。"
-      }
-    }
-  ]
+  "block_id": "blk_000001",
+  "block": {
+    "type": "paragraph",
+    "text": "本发明提供一种适用于低算力设备的图像检测方法。"
+  }
 }
 ```
 
@@ -665,22 +628,18 @@ merge_json_path
 - `primary_block_id` 等于原 `block_id`。
 - `change_scope` 为 `block_replaced`。
 
-### 5. append_child_section
+### 4. document_append_child_section
 
 输入：
 
 ```json
 {
-  "operations": [
+  "parent_section_id": "sec_000007",
+  "title": "处理流程",
+  "blocks": [
     {
-      "op": "append_child_section",
-      "parent_section_id": "sec_000007",
-      "section": {
-        "type": "custom",
-        "title": "处理流程",
-        "blocks": [],
-        "children": []
-      }
+      "type": "paragraph",
+      "text": "本发明的处理流程包括图像获取、特征提取和结果输出。"
     }
   ]
 }
@@ -688,47 +647,34 @@ merge_json_path
 
 说明：
 
-- 新 section 不携带 `id`。
-- 工具为新 section 生成 `section_id`。
+- 新 section 的 `type` 固定为 `custom`。
+- 工具为新 section 生成 `section_id`，agent 不提供 id 或 children。
 - 只支持两级章节。
 - `changed_section_ids` 包含父 section 和新 section。
 - `primary_section_id` 等于新 section id。
 - `primary_block_id` 等于新 section 内第一个新生成的 block id，没有 block 时为 `null`。
 - `change_scope` 为 `child_section_appended`。
 
-### 6. replace_section
+### 5. document_clear_section_blocks
 
 输入：
 
 ```json
 {
-  "operations": [
-    {
-      "op": "replace_section",
-      "section_id": "sec_000007",
-      "section": {
-        "type": "technical_solution",
-        "title": "技术方案",
-        "blocks": [],
-        "children": []
-      }
-    }
-  ]
+  "section_id": "sec_000007"
 }
 ```
 
 说明：
 
-- 替换后的 section 不携带 `id`，工具保留原 `section_id`。
-- 标准章节的 `type` 应保持原语义角色。
-- section 内新增 block 由工具补齐 id。
+- 只清空目标 section 的 blocks，不删除 section 节点或 children。
 - `changed_section_ids` 包含目标 `section_id`。
-- `changed_block_ids` 包含替换后 section 树中的全部 block id。
+- `changed_block_ids` 为空。
 - `primary_section_id` 等于目标 `section_id`。
-- `primary_block_id` 等于替换后第一个 block id，没有 block 时为 `null`。
-- `change_scope` 为 `section_replaced`。
+- `primary_block_id` 为 `null`。
+- `change_scope` 为 `section_blocks_replaced`。
 
-## 八、document_edit 校验规则
+## 八、文档写入校验规则
 
 写入前至少校验：
 
@@ -744,20 +690,19 @@ merge_json_path
 10. `table` 必须包含 `columns` 和 `rows`。
 11. 不允许超过两级章节。
 
-## 九、document_edit 错误码
+## 九、文档写入错误码
 
 固定错误码：
 
 ```text
-invalid_action
-invalid_operation
 section_not_found
 block_not_found
 duplicate_section_id
 duplicate_block_id
 schema_validation_failed
+edit_too_large
+invalid_tool_arguments
 permission_denied
-write_conflict
 io_error
 ```
 
@@ -803,7 +748,7 @@ io_error
 - 外层 `status=success` 表示调度工具成功启动并拿到子 agent pipe 内容。
 - `output.content` 是子 agent 通过 `write_pipe(content)` 少量多次写入后合并得到的字符串。
 - 如果子 agent 判断信息不足，也应把缺口或待确认问题写入 `content` 后调用 `finish({})`。
-- 主 agent 读取 `content` 后自行决定是否采纳、追问、继续拆分任务或调用 `document_edit`。
+- 主 agent 读取 `content` 后自行决定是否采纳、追问、继续拆分任务或调用文档写入工具。
 
 ### 失败输出：调度工具失败
 
@@ -843,7 +788,7 @@ finish({})
 2. `content` 是字符串，可以是 Markdown 或纯文本。
 3. 子 agent 可以多次写入，执行器按顺序用 `\n` 拼接。
 4. `finish({})` 不接收任何业务参数，只表示本次子 agent run 结束。
-5. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
+5. 子 agent 不生成最终文档写入参数作为默认责任。
 
 ## 十二、exec_command 协议
 
@@ -889,7 +834,7 @@ finish({})
 {
   "status": "failed",
   "output": {
-    "code": "invalid_operation",
+    "code": "invalid_tool_arguments",
     "message": "command 字段缺失。"
   }
 }
@@ -972,9 +917,9 @@ Truncated: only top 10 changed block ids are shown, 4 more block ids omitted.
 1. 文档定位基于 `section_id` 和 `block_id`。
 2. 文档读取统一走 `document_read`。
 3. 当前项目标题和完整目录树通过 `document_read(action=get_project_context)` 获取。
-4. 文档写入统一走 `document_edit`。
-5. `document_edit` 是 `disclosure.json` 的唯一写入入口。
+4. 文档写入统一走五个专用写入工具：`document_replace_section_blocks`、`document_append_block`、`document_replace_block`、`document_append_child_section`、`document_clear_section_blocks`。
+5. 文档写入工具是 `disclosure.json` 的唯一写入入口。
 6. 子 agent 通过 `execute_subagent` 启动。
-7. 子 agent 返回 proposal，主 agent 决定是否采纳。
+7. 子 agent 通过 pipe 返回分析、骨架或局部候选正文，主 agent 决定是否采纳。
 8. 通用命令统一走 `exec_command`，但不直接修改交底书真相源。
 9. 自动提交基于 changed section ids 和 changed block ids 生成 commit message。

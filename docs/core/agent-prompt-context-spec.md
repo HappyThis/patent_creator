@@ -447,7 +447,7 @@
 2. 内容可以是 Markdown 或纯文本。
 3. 鼓励少量多次写入。
 4. 子 agent 不通过普通 assistant 文本向主 agent 交付结果。
-5. 子 agent 不生成最终 `document_edit.operations` 作为默认责任。
+5. 子 agent 不生成最终文档写入参数作为默认责任。
 
 ### 2. finish
 
@@ -462,7 +462,7 @@
 - `finish` 不接收任何业务内容。
 - 子 agent 需要先把结果、风险或待确认问题写入 pipe，再调用 `finish({})`。
 - 执行器收到 `finish({})` 后，将 pipe 内容用 `\n` 拼接为 `execute_subagent.output.content`。
-- 主 agent 负责阅读 content，决定是否采纳、追问、继续拆分任务或调用 `document_edit`。
+- 主 agent 负责阅读 content，决定是否采纳、追问、继续拆分任务或调用文档写入工具。
 ## 十一、主 Agent 的推荐 prompt 结构
 
 主 agent 的 prompt 可按以下结构组织：
@@ -611,7 +611,7 @@
 5. 子 agent 统一通过 `execute_subagent` 工具触发
 6. `execute_subagent` 的最小参数为 `agent_id + goal`
 7. 子 agent 的任务边界由 `agent_task` barrier 渲染为自然语言 user message
-8. 子 agent 的统一输出协议为 `status + summary + proposal + questions + warnings`
+8. 子 agent 的统一输出协议为 `write_pipe(content)` + `finish({})`
 9. prompt 同时按角色和稳定性两个维度拆分
 10. 稳定规则尽量前置，以利用 prefix cache
 11. 高频变化内容尽量后置

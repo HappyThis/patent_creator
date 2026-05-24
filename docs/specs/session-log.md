@@ -355,15 +355,15 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 - `status`
 - `output`
 
-## 八、document_edit 结果记录
+## 八、文档写入结果记录
 
-当工具为 `document_edit` 时，`tool_result.payload.output` 必须包含文档变更 ids。
+当工具为文档写入工具时，`tool_result.payload.output` 必须包含文档变更 ids。
 
 示例：
 
 ```json
 {
-  "tool": "document_edit",
+  "tool": "document_append_block",
   "status": "success",
   "output": {
     "changed_section_ids": [
@@ -372,7 +372,9 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
     "changed_block_ids": [
       "blk_000014"
     ],
-    "operations_applied": 1
+    "primary_section_id": "technical_solution",
+    "primary_block_id": "blk_000014",
+    "change_scope": "block_appended"
   }
 }
 ```
@@ -381,6 +383,7 @@ session 日志必须保留子 agent 的执行过程，便于问题排查。
 
 - `changed_section_ids` 记录本次变更影响的章节。
 - `changed_block_ids` 记录本次新增或替换的 block。
+- `primary_section_id`、`primary_block_id` 和 `change_scope` 记录本次变更的主定位。
 - 这些 id 用于 SSE、前端高亮、commit message 和调试回放。
 
 ## 九、子 agent 过程的记录方式
