@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 88,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 8,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 9,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确把握了共享 Markdown 语义内容与本机高频运行时信号混写的核心矛盾，并说明了 VC 噪声、合并冲突和动态排序需求之间的关系。",
+    "字段分层、路径键 sidecar、读取融合、写入剥离、迁移兼容、失败隔离、归档/剪枝清理等关键方向基本完整。",
+    "能结合当前项目中的 MarkdownWriter、memory-scoring、search-knowledge、curate、dream、archive、snapshot diff 等消费路径展开，而不是只停留在通用元数据拆分。",
+    "技术效果闭环较清楚：Markdown diff 变干净，同时保留 compoundScore、decay、maturity 等检索和整理能力。"
+  ],
+  "weaknesses": [
+    "sidecar store 的接口边界不够完整，没有明确 getMany、update/updater、batchUpdate、delete、list/scan 等最小能力，更多是描述单个 JSON 文件结构。",
+    "并发机制存在工程缺口：方案声称多个本地进程并行检索时使用已有 async-mutex 文件级锁，但项目中的 AsyncMutex 是进程内互斥，不能天然保护跨进程 read-modify-write，可能丢失 accessCount 更新。",
+    "迁移策略采用首次启动即批量移除旧 Markdown scoring 字段，会造成一次性大规模 Markdown 改写和工作区变脏；更稳妥的是旧字段解析兼容、新写入剥离、懒迁移或自愈。",
+    "对 manifest、memory symbol tree 等读取路径的融合接入不够明确，虽然覆盖了 search/scoring/curate/dream/archive/prune，但全链路边界仍有遗漏。",
+    "createdAt/updatedAt 被完全归为动态信号层有争议；这些字段在知识生命周期中也可能属于可审阅的语义/内容变更元数据。"
+  ],
+  "missing_key_mechanisms": [
+    "明确的 RuntimeSignalStore/IRuntimeSignalStore 最小接口及批量读取、列表扫描、单路径原子 updater 语义。",
+    "跨进程安全的原子 read-modify-write 机制，例如文件锁、CAS/version、append log 或单写队列，而不只是进程内 async-mutex。",
+    "manifest、memory symbol tree、archive candidate selection 等所有现有 frontmatter scoring 消费路径的具体融合改造点。",
+    "更低扰动的迁移模型：旧 frontmatter 动态字段可读、sidecar 缺省初始化、新写入剥离，避免首次启动强制清理所有 Markdown。"
+  ],
+  "unsupported_claims": [
+    "“使用已有的 async-mutex 机制”来保护多个本地进程同时写 .signals.json：当前项目有 AsyncMutex，但它是进程内机制，不能证明能作为跨进程文件锁。",
+    "“diffStates 函数检测到文件被重命名时迁移信号条目”：当前 snapshot-diff 只返回 added/modified/deleted changed paths，没有重命名检测语义。",
+    "“清理操作在 snapshot sync 的事务边界内执行”：当前可见的 snapshot diff/执行器上下文没有体现该事务边界。"
+  ],
+  "score_rationale": "该方案属于强答案边缘：核心方向正确且覆盖了多数评分锚点，能落到当前 ByteRover context tree 的多条真实消费路径，并形成问题-手段-效果闭环。但未给出完整 sidecar store 接口，跨进程并发更新机制不成立，迁移策略会一次性改写共享 Markdown，且 manifest/memory symbol tree 等全链路读取融合仍不够明确。因此不进入 90 分以上档位；这些缺口影响工程可实施性和强答案所要求的边界完整性。"
+}

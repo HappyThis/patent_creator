@@ -122,7 +122,6 @@
     "excluded_from_scoring": [
       "final chat reply",
       "tool call trace",
-      "subagent proposal",
       "session events",
       "document diff"
     ],

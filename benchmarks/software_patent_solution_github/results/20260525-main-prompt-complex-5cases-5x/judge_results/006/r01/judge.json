@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 85,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 9,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了客户端本地生命周期清理与服务端 durable turn 取消语义需要解耦这一核心问题。",
+    "覆盖了默认 durable 模式、可选 request-lifetime 模式、显式 stop/cancel 信令、turn 标识、恢复、工具 continuation、多标签观察和迟到消息处理等主要机制。",
+    "给出了较完整的状态机、取消消息字段、客户端 stop 接口和重连恢复流程，具备较好的专利方案抽象性。"
+  ],
+  "weaknesses": [
+    "项目环境落点不够具体，没有明确落到当前的 WebSocketChatTransport、useAgentChat/useChat stop 行为、CF_AGENT_* 协议消息、activeRequestIds、AbortRegistry、resumable stream 测试等现有边界。",
+    "显式取消后的 late chunk/done 处理主要放在服务端终态丢弃，缺少当前客户端 transport 侧保留 active request id 并按 request id 过滤残余 chunk/done 的关键工程细节。",
+    "多标签取消投票机制可能削弱“用户点击停止即取消本次服务端回答”的确定性；如果一个标签页明确停止但其他观察者未投票，服务端 turn 可能继续运行。",
+    "request-lifetime 模式采用服务端心跳和 grace period 的方案，方向可行，但没有说明如何与当前已有 WebSocket close、stream.cancel、resume ACK/none 流程具体组合。",
+    "工具调用副作用分类和 cancellation_pending 标志较完整，但缺少当前项目工具 continuation 实际接入点和工具元数据来源说明。"
+  ],
+  "missing_key_mechanisms": [
+    "当前 transport 中 activeRequestIds 或等价 active request id 在显式取消后的保留、清理时机和 late done 过滤规则。",
+    "对当前 CF_AGENT_CHAT_REQUEST_CANCEL、CF_AGENT_STREAM_RESUME_REQUEST、CF_AGENT_STREAM_RESUME_ACK、CF_AGENT_STREAM_RESUME_NONE 等协议的直接映射。",
+    "对 WebSocketChatTransport.sendMessages 的 caller abort、ReadableStream.cancel、本地 cleanup 与服务端 cancel frame 如何拆分的源码级行为矩阵。",
+    "fallback/observed turn 注册到统一取消入口的具体客户端状态结构。",
+    "配套测试落点，如 abort 不取消 durable turn、显式 stop 发送 cancel、resume 后 late chunk 过滤、工具 continuation cancel。"
+  ],
+  "unsupported_claims": [
+    "方案中的 turn cancellation arbiter、observer set、cancel vote count、cancellation_pending 工具记录、session_id/last_acked_offset、clientInstanceId 写入 sessionStorage 等均未体现为当前项目已有源码事实，应视为 proposed mechanisms 而非已存在能力。",
+    "方案使用 CANCEL_TURN、RESUME、turn_id 等协议名，与当前项目已有 CF_AGENT_CHAT_REQUEST_CANCEL 和 stream resume 消息命名不一致；可作为等价设计，但不是当前源码事实。",
+    "方案提到 HTTP/SSE 推送和独立 HTTP cancel endpoint 作为可选通道，当前 useAgentChat 核心路径主要是 WebSocket transport，缺少项目依据。"
+  ],
+  "score_rationale": "该方案属于可用且相当完整的专利技术方案：核心问题识别准确，机制覆盖面广，包含默认 durable 与 request-lifetime opt-in、显式取消信令、turn id、恢复、工具 continuation、多标签和迟到消息处理，因此不适用 75 分以下或 80 分上限。但它没有充分基于当前源码说明 WebSocketChatTransport、activeRequestIds、实际 CF_AGENT 协议、AbortRegistry 与测试接入，且显式取消后的客户端 request id 保留和 late done 过滤不够具体；多标签投票也可能让明确 stop 的服务端取消语义变弱。因此未达到 90 分以上强答案档。"
+}

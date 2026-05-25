@@ -13,18 +13,14 @@ class ScriptedLLMClient:
     """驱动主 agent loop 的脚本化 stub。
 
     - generate_with_tools_stream 按外部提供的 script 顺序返回 action。
-    - 未脚本化子 agent 时，默认通过 write_pipe + finish 提交 section_writer 结果。
     """
 
     def __init__(
         self,
         script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]],
-        *,
-        script_subagents: bool = False,
     ) -> None:
         self._script = list(script)
         self._cursor = 0
-        self._script_subagents = script_subagents
         self.generated_text_prompts: list[dict[str, Any]] = []
 
     async def generate_with_tools_stream(
@@ -37,28 +33,6 @@ class ScriptedLLMClient:
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        tool_names = {str(tool.get("function", {}).get("name") or "") for tool in tools}
-        is_subagent_turn = {"write_pipe", "finish"}.issubset(tool_names)
-        if is_subagent_turn and not self._script_subagents:
-            task_content = str(messages[-1].get("content") or "")
-            target_section_id = "sec_000010" if "技术效果" in task_content else "sec_000007"
-            arguments = {"content": f"目标章节：{target_section_id}\n\n正文占位。"}
-            return {
-                "type": "tool_calls",
-                "tool_calls": [
-                    tool_call("write_pipe", arguments, "sub_write_1"),
-                    tool_call("finish", {}, "sub_finish_1"),
-                ],
-                "assistant_message": self._build_assistant_message(
-                    {
-                        "type": "tool_calls",
-                        "tool_calls": [
-                            tool_call("write_pipe", arguments, "sub_write_1"),
-                            tool_call("finish", {}, "sub_finish_1"),
-                        ],
-                    }
-                ),
-            }
         if self._cursor >= len(self._script):
             raise AssertionError("ScriptedLLMClient script exhausted")
         step = self._script[self._cursor]

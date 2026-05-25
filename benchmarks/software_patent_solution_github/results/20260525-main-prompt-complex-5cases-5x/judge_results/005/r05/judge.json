@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 2
+  },
+  "strengths": [
+    "准确抓住外部调用方需要快速 202 接收、后台执行、幂等重试、状态查询/取消/清理的核心问题。",
+    "方案总体沿用 Think 现有 Session、TurnQueue、AbortRegistry、runFiber/chatRecovery、ResumableStream 等边界，没有要求重写普通聊天路径。",
+    "提出了持久任务记录、idempotency_key 唯一约束、pending/running/terminal 状态机、条件领取和写入前/写入后/运行中崩溃恢复等主要机制。",
+    "能说明快速接收边界、重复提交去重、会话消息复用和取消语义统一带来的技术效果。"
+  ],
+  "weaknesses": [
+    "任务记录字段不完整：提交流程只明确记录请求体摘要、session_id、idempotency_key 等，没有明确持久保存待执行 messages 或稳定 message ids，导致 RECEIVED 后后台执行缺少可恢复输入。",
+    "没有定义类似 messagesAppliedAt、applied version、applied message ids 的持久消息应用边界；写入后崩溃只说检查会话中匹配消息，缺少任务记录侧的 durable checkpoint 和匹配依据。",
+    "缺少条件终态更新机制，未说明 completed/failed/recovery 的迟到写入如何避免覆盖已 CANCELLED、DELETED 或 reset 后的 SKIPPED 终态，触发 rubric 总分上限。",
+    "reset/clear conversation 与任务 ledger 的同步处理不足：只提到 generation 失败标记 SKIPPED，但状态机未包含 SKIPPED，也未覆盖 pending/received/running 任务的批量同步规则。",
+    "管理面不完整：有单任务 GET、cancel、delete，但缺少 list/inspect API、生命周期 observability events 和明确的后台 drain/alarm 唤醒策略。",
+    "QUEUED 状态被列出但执行领取流程直接从 RECEIVED 到 RUNNING，排队状态和并发限制的状态转换不一致。"
+  ],
+  "missing_key_mechanisms": [
+    "持久保存待执行 messages、message ids、requestId/turnId/recoveryId 等执行关联字段。",
+    "持久消息应用边界字段或等价 checkpoint，例如 messagesAppliedAt/appliedMessageIds，用于可靠区分写入前崩溃、写入后崩溃和恢复重放。",
+    "completed/failed/aborted/skipped/error 的条件终态更新规则，防止迟到完成覆盖取消、删除或 reset 结果。",
+    "clear/reset conversation 时同步更新 submission/task ledger 的完整规则。",
+    "任务列表、inspect、观测事件以及定期 cleanup/drain 唤醒的工程边界。"
+  ],
+  "unsupported_claims": [
+    "“Think 已有 INSERT OR IGNORE 消息插入机制”与当前源码不完全一致；当前 Session provider 是先查重再 INSERT，具备按 id 去重效果，但不是 artifact 所称的具体 SQL 机制。",
+    "“任务锁定 Think 的 TurnQueue 执行槽位”“状态为 SKIPPED 并通知调用方”等属于方案新增行为，当前源码没有异步 task ledger 与外部任务状态同步实现。",
+    "“cf_async_tasks”表、/tasks 端点、回调地址、任务进度 token 计数均是提案设计，不是当前项目已存在能力；作为方案可接受，但不能当作当前源码事实。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的答案。它理解了需求本质，并提出了 durable task ledger、幂等键、快速 accepted、后台领取、复用 Think Session/stream/recovery/cancel 的总体架构，技术闭环较强。但关键工程边界仍有缺口：任务记录未明确保存待执行消息，缺少持久 messagesAppliedAt 等价字段，恢复依赖“匹配消息存在”但没有定义稳定匹配依据；也没有条件终态更新来防止迟到完成覆盖取消/删除/跳过。根据 rubric，“没有终态条件更新总分通常不得高于 78 分”；同时 reset/cleanup/list/observability 也不完整，因此评分定为 78。"
+}

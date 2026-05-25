@@ -1,363 +1,43 @@
-# 一轮内部时序
+# Round Lifecycle
 
 ## 文档定位
 
-本文档定义“用户一次输入到主 agent 完成一次响应”这一轮内部处理时序。
+本文档定义一次用户消息从接收到完成的后端生命周期。当前系统采用单主 agent loop，不包含子 agent loop。
 
-该文档用于统一以下内容的时序关系：
+## 流程
 
-- 主 agent loop
-- 子 agent loop
-- tool 调用
-- session 日志记录
-- SSE 推送
-- 文档写入
-- git commit
+1. API 接收用户消息。
+2. `ChatService.prepare_round` 创建 session、message 和 round，并写入 `user_input`。
+3. `ContextManager.prepare_main_agent_messages` 恢复并必要时压缩上下文。
+4. 主 agent 基于 system prompt、messages 和工具声明生成下一步动作。
+5. 如果主 agent 返回工具调用，服务层依次执行工具并写入 `tool_call` / `tool_result`。
+6. 如果文档工具成功写入，广播 `document_changed`。
+7. 工具结果追加回主 agent messages，主 agent 继续下一步。
+8. 如果主 agent 直接回复，写入 `agent_message` 和 `agent_output`。
+9. 若文档有变更，工作区提交一次 git commit。
+10. 广播 `round_finished`。
 
-相关文档：
+## 工具调用
 
-- [Agent 基本设计原则](../core/agent-principles.md)
-- [子 Agent 定义](../core/subagents.md)
-- [子 Agent 管道协议](../core/subagent-pipe-protocol.md)
-- [Tools 设计](../core/tools.md)
-- [Session 事件日志 Schema](session-log.md)
-- [API 设计规范](api-design.md)
-- [前端交互规范](frontend-interaction.md)
+工具调用统一由 `ExecutorEngine.execute_tool` 执行。执行器只处理普通工具，不再把某个工具解释为 agent 调度。
 
-## 目标
+当前工具失败不会直接终止 round；失败结果会回填给主 agent，由主 agent 决定恢复、追问或结束。
 
-本文档回答两个问题：
+## 事件顺序
 
-1. 一轮请求在系统内部是如何运行的
-2. 文档修改、日志记录、SSE 推送和 git commit 在什么时机发生
+典型工具调用轮次：
 
-## 一、回合定义
+1. `user_input`
+2. `agent_message`
+3. `tool_call`
+4. `tool_result`
+5. `agent_message`
+6. `agent_output`
 
-一轮定义为：
+如果 assistant 在工具调用前带有可见文本，会额外写入一条 `agent_output` 作为 preamble。
 
-**用户一次输入，到主 agent 给出本轮最终回复，并完成本轮所有落盘与事件收束。**
+## 取消与失败
 
-也就是说，一轮的边界是：
+用户取消运行时，运行中的 asyncio task 被取消，项目状态恢复为空闲，并广播取消结果。
 
-```text
-用户输入 -> 主 agent 完成本轮 -> round_finished
-```
-
-## 二、参与者
-
-一轮内部涉及以下角色：
-
-1. 用户
-2. 主 agent
-3. 子 agent
-4. 执行器
-5. 上下文管理器
-
-一轮内部还会操作以下对象：
-
-- `disclosure.json`
-- `session log`
-- `git`
-
-## 三、总体时序
-
-一轮内部时序如下：
-
-```text
-user_input
--> log(user_input)
--> main_agent loop
-   -> tool_call / respond
-   -> if tool_call:
-      -> log(tool_call)
-      -> sse(tool_call_started)
-      -> execute
-      -> if execute_subagent:
-         -> subagent loop
-         -> subagent tool calls/results
-         -> subagent final result
-      -> log(tool_result)
-      -> sse(tool_call_finished)
-      -> if document write succeeded:
-         -> collect changed_section_ids / changed_block_ids
-         -> sse(document_changed)
-      -> context update
-      -> continue main loop
--> 记录 final agent_output
--> if changed ids exist: git commit
--> sse(round_finished)
-```
-
-## 四、Phase 1：进入回合
-
-1. 用户在 Agent Chat 区发送消息。
-2. 前端调用 `POST /api/projects/{project_id}/chat/messages`。
-3. 后端创建：
-   - `round_id`
-   - `message_id`
-   - `session_id`，如果请求未提供
-4. 后端把本轮 `user_input` 写入 session 日志。
-5. 前端持续读取该 `POST /api/projects/{project_id}/chat/messages` 返回的 SSE 流。
-
-并发约束：
-
-- 同一 project 任意时刻只允许一个 session 处于执行中。
-- 只要存在未完成的 round，新的消息请求直接拒绝，不进入排队。
-- 当前活跃 session 定义为最近聊过天的 session。
-
-## 五、Phase 2：主 agent 启动
-
-1. 上下文管理器组装主 agent 本轮输入。
-2. 输入包括：
-   - 系统提示词
-   - 当前用户输入
-   - 历史 messages
-   - 压缩历史 messages
-   - 主流程工具调用与工具结果
-3. 主 agent 开始本轮 loop。
-
-主 agent 需要当前项目标题和完整目录树时，通过 `document_read(action=get_project_context)` 获取。
-
-主 agent loop 的基本模式为：
-
-```text
-思考 -> 输出结构化动作 -> 执行 -> 拿结果 -> 再思考
-```
-
-## 六、Phase 3：主 agent loop
-
-主 agent 每一步只能做两类事：
-
-1. `respond`
-2. `tool_call`
-
-### 情况 A：主 agent 直接回复
-
-1. 主 agent 输出 `respond`。
-2. 后端记录 `agent_output`。
-3. SSE 推送主 agent 输出。
-4. 回合结束。
-
-### 情况 B：主 agent 调用工具
-
-1. 主 agent 输出 `tool_call`。
-2. 后端记录 `tool_call`。
-3. SSE 推送 `tool_call_started`。
-4. 执行器执行对应 tool。
-5. tool 返回结果。
-6. 后端记录 `tool_result`。
-7. SSE 推送 `tool_call_finished`。
-8. 上下文管理器把结果纳入主 agent 当前工作上下文。
-9. 主 agent 继续下一轮 loop。
-
-说明：
-
-- `tool_result.status=failed` 表示该工具调用失败，但不等同于整个 round 失败。
-- 工具失败结果应回填给主 agent，由主 agent 决定换一种方式、向用户说明限制，或结束本轮。
-- 只有运行时异常、协议不合法、模型无法收束等不可恢复错误，才推送 `round_failed`。
-
-## 七、如果 tool 是 `execute_subagent`
-
-这是主流程中的调度工具。
-
-### 主 agent 发起
-
-1. 主 agent 发出 `tool_call(name=execute_subagent)`。
-2. 执行器检查主 agent 权限。
-3. 执行器启动对应子 agent。
-4. 上下文管理器自动装配子 agent `messages`。
-
-### 子 agent 输入
-
-子 agent 接收：
-
-- 自己的 system prompt
-- 继承自调用方当前可见且已闭合的 `messages`
-- 由 `agent_task` barrier 渲染出的任务说明 message
-
-当前正在执行的 `execute_subagent` tool call 尚未闭合，不会被继承到该子 agent 的初始 `messages`。
-
-## 八、子 agent loop
-
-子 agent 同样支持 agent loop。
-
-但子 agent 的权限边界是：
-
-- 可以多轮调用允许范围内的 tools
-- 不允许调用文档写入工具
-- 不允许调用 `execute_subagent`
-
-因此，子 agent 内部时序如下：
-
-1. 子 agent 开始 loop。
-2. 如果需要工具：
-   - 记录 `tool_call`，`scope=subagent:<id>`
-   - SSE 推送 `tool_call_started`
-   - 执行器执行 tool
-   - 记录 `tool_result`
-   - SSE 推送 `tool_call_finished`
-3. 工具结果进入子 agent 工作上下文。
-4. 子 agent 继续 loop。
-5. 子 agent 最终按当前协议收束。
-
-执行要求：
-
-- 子 agent 内部工具事件的 `parent_call_id` 指向主流程的 `execute_subagent` 调用。
-- 子 agent 可调用的工作工具由自身声明和执行器权限决定。
-- 子 agent 通过 `write_pipe(content)` 写入给主 agent 的内容，并通过 `finish({})` 结束；执行器合并 pipe 内容后返回给主 agent。
-- 子 agent 工具失败不必然导致整个 round 失败，应以 `execute_subagent` 的工具失败结果回填给主 agent，由主 agent 决定恢复策略。
-
-### 子 agent 收束
-
-1. 执行器把子 agent 最终结果包装成 `execute_subagent` 的 tool result。
-2. 记录 `tool_result`，`scope=main`。
-3. SSE 推送主流程视角的 `tool_call_finished`。
-4. 主 agent 拿到这个结果，决定是否采纳、追问、继续拆分任务或调用文档写入工具。
-
-## 九、文档修改时序
-
-文档修改只通过专用文档写入工具发生。
-
-当主 agent 决定采纳候选修改时：
-
-1. 主 agent 发出文档写入工具调用。
-2. 执行器检查权限。
-3. 执行器调用对应写入工具。
-4. 写入工具完成参数校验、正文长度检查、文档 schema 校验和落盘。
-5. 写入工具返回：
-   - `changed_section_ids`
-   - `changed_block_ids`
-   - `primary_section_id`
-   - `primary_block_id`
-   - `change_scope`
-6. 后端记录 `tool_result`。
-7. 当前 round 累积 changed ids。
-
-## 十、文档修改后的即时行为
-
-文档一旦发生修改，立即刷新预览，不等整轮结束。
-
-具体动作：
-
-1. 后端推送 `document_changed`。
-2. 前端刷新：
-   - `outline`
-   - `render`
-3. 前端滚动到：
-   - `active_section_id`
-   - 或 `active_block_id`
-   - 或最近修改位置
-4. 前端对最近修改位置做短暂高亮。
-
-`document_changed` 至少包含：
-
-```json
-{
-  "changed": true,
-  "changed_section_ids": ["sec_000007"],
-  "changed_block_ids": ["blk_000014"],
-  "primary_section_id": "sec_000007",
-  "primary_block_id": "blk_000014",
-  "change_scope": "block_appended",
-  "active_section_id": "sec_000007",
-  "active_block_id": "blk_000014"
-}
-```
-
-## 十一、回合结束条件
-
-主 agent 一轮结束，满足以下任一条件即可：
-
-1. 主 agent 输出了最终 `respond`。
-2. 主 agent 判断本轮任务已经完成。
-3. 主 agent 判断当前需要等待用户补充信息，不能继续推进。
-
-## 十二、回合收束
-
-当主 agent 决定结束本轮时，执行以下动作：
-
-1. 记录最终 `agent_output`。
-2. 如果本轮 changed ids 非空：
-   - 执行一次 `git commit`
-3. 推送 `round_finished`。
-
-如果 `git commit` 失败：
-
-1. 不回滚已经写入的 `disclosure.json`。
-2. 本轮仍然通过 `round_finished` 收束。
-3. `committed` 置为 `false`。
-4. 附带 `commit_error`。
-
-`round_finished` 建议至少包含：
-
-```json
-{
-  "reply": "本轮最终回复",
-  "changed": true,
-  "changed_section_ids": ["sec_000007"],
-  "changed_block_ids": ["blk_000014"],
-  "primary_section_id": "sec_000007",
-  "primary_block_id": "blk_000014",
-  "change_scope": "block_appended",
-  "active_section_id": "sec_000007",
-  "active_block_id": "blk_000014",
-  "committed": false,
-  "commit_error": {
-    "code": "git_commit_failed",
-    "message": "git commit 执行失败。"
-  }
-}
-```
-
-## 十三、日志与 SSE 的关系
-
-建议明确区分：
-
-### 1. session 日志
-
-作用：
-
-- 追求完整
-- 便于回放
-- 便于调试
-- 便于审计
-
-### 2. SSE
-
-作用：
-
-- 追求用户可感知
-- 让前端知道当前正在做什么
-- 让前端知道什么时候刷新目录和渲染区
-
-说明：
-
-- 不是所有日志内容都需要原样推给前端。
-- 所有影响用户体验的重要状态变化，都应有对应 SSE 事件。
-- 请求已被接受但本轮中途失败时，应推送 `round_failed`。
-- 用户主动取消运行中的 round 时，应推送 `round_cancelled`，并将 project 恢复为空闲状态。
-
-## 十四、回合中的多次 agent 输出
-
-主 agent 在一轮中可以通过 `assistant_delta` 多次向前端输出自然语言片段。
-
-正常完成时必须有一个 `round_finished.reply` 作为本轮收束；用户主动取消时通过 `round_cancelled.reply` 收束，运行时失败时通过 `round_failed.reply` 收束。`agent_output` 只写入 session log，用于历史恢复与回放。
-
-这样可以兼顾：
-
-1. 中途过程可见
-2. 最终回合有明确结束语义
-
-## 十五、设计结论
-
-一轮内部时序采用以下原则：
-
-1. 主 agent 支持 loop。
-2. 子 agent 也支持 loop。
-3. 子 agent 只允许多轮 tool use，不允许继续调 agent。
-4. 子 agent 不允许调用文档写入工具。
-5. 文档修改只能通过专用文档写入工具发生。
-6. 文档一旦修改，立即刷新渲染区。
-7. git commit 只在本轮结束时执行一次。
-8. session 日志追求完整，SSE 追求可感知。
-9. 回合正常完成通过 `round_finished` 收束；取消和失败分别通过 `round_cancelled`、`round_failed` 收束。
+未捕获异常会写入失败的 `agent_output`，恢复项目空闲状态，并广播 `round_failed`。

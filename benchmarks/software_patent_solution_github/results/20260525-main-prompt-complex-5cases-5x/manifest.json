@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "result_id": "20260525-main-prompt-complex-5cases-5x",
+  "source_run_id": "20260525-main-prompt-complex-5cases-5x",
+  "source_run_dir": "runs/20260525-main-prompt-complex-5cases-5x",
+  "published_at": "2026-05-25T14:16:22+08:00",
+  "benchmark_git": {
+    "commit": "1bda602972f5caab421a561c94ac319654f31bbd",
+    "dirty": true
+  },
+  "metadata": {
+    "subject_model": "deepseek-v4-pro",
+    "judge_model": "codex-as-judge",
+    "provider": "deepseek",
+    "notes": "main-agent direct execution with complex-task prompt workflow; cases 004,005,006,007,010; repeats=5 workers=5; all 25 scored; overall avg 82.4; overall min 74; max elapsed 662.6s"
+  },
+  "case_ids": [
+    "004",
+    "005",
+    "006",
+    "007",
+    "010"
+  ],
+  "runs": 25,
+  "scored_runs": 25,
+  "artifact_success_runs": 25,
+  "included_files": [
+    "manifest.json",
+    "experiment_conclusion.md",
+    "evaluation_summary.json",
+    "evaluation_report.md",
+    "case_results.jsonl",
+    "artifacts/",
+    "judge_results/"
+  ],
+  "excluded_from_publish": [
+    "prepared_repo/",
+    "subject/session_events.jsonl",
+    "judge/codex_judge_events.jsonl",
+    "run_case_stdout.txt",
+    "run_case_stderr.txt",
+    "subject/disclosure.json",
+    "absolute local paths"
+  ]
+}

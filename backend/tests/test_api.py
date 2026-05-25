@@ -43,65 +43,7 @@ class StubLLMClient:
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """模拟主 agent loop：execute_subagent -> document write tools -> respond。"""
-        if "子 agent：section_writer" in system_prompt:
-            goal = str(messages[-1].get("content") or "")
-            target_section_id = "sec_000010" if "技术效果" in goal else "sec_000007"
-            if target_section_id == "sec_000007":
-                content = f"""## 技术方案候选正文
-
-本节结合用户当前要求“{goal}”，补充适用于低算力终端的整体方案说明。
-
-系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。
-
-## 整体架构
-
-预处理模块完成缩放、归一化和候选区域粗筛；推理模块仅对高价值候选区域执行完整检测。
-
-## 处理流程
-
-1. 获取当前帧图像并复用上一帧稳定特征。
-2. 筛出满足阈值的候选区域。
-3. 对候选区域执行轻量化检测与结果校正。"""
-            else:
-                content = """## 技术效果候选正文
-
-本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。
-
-- 缩短端到端检测时延，提升实时响应能力。
-- 在有限算力预算下保持检测稳定性。
-- 降低持续运行时的能耗和温升压力。"""
-            write_arguments = {"content": content}
-            return {
-                "type": "tool_calls",
-                "tool_calls": [
-                    {"tool": "write_pipe", "arguments": write_arguments, "tool_call_id": "stub_sub_write_1"},
-                    {"tool": "finish", "arguments": {}, "tool_call_id": "stub_sub_finish_1"},
-                ],
-                "assistant_message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "stub_sub_write_1",
-                            "type": "function",
-                            "function": {
-                                "name": "write_pipe",
-                                "arguments": json.dumps(write_arguments, ensure_ascii=False),
-                            },
-                        },
-                        {
-                            "id": "stub_sub_finish_1",
-                            "type": "function",
-                            "function": {
-                                "name": "finish",
-                                "arguments": "{}",
-                            },
-                        }
-                    ],
-                },
-            }
-
+        """模拟 main-only agent loop：document write tools -> respond。"""
         last_user_index = max(
             (index for index, message in enumerate(messages) if message.get("role") == "user"),
             default=-1,
@@ -119,35 +61,7 @@ class StubLLMClient:
                 if message.get("role") == "user"
             ]
             user_message = user_messages[-1] if user_messages else ""
-            target_section_id = "sec_000010" if "技术效果" in user_message else "sec_000007"
-            arguments = {
-                "agent_id": "section_writer",
-                "goal": f"根据用户最新请求完善 {target_section_id} 章节：{user_message}",
-            }
-            return {
-                "type": "tool_calls",
-                "tool_calls": [{"tool": "execute_subagent", "arguments": arguments, "tool_call_id": "stub_call_1"}],
-                "assistant_message": {
-                    "role": "assistant",
-                    "content": "",
-                    "reasoning_content": "需要调用 section_writer 完成章节写作。",
-                    "tool_calls": [
-                        {
-                            "id": "stub_call_1",
-                            "type": "function",
-                            "function": {
-                                "name": "execute_subagent",
-                                "arguments": json.dumps(arguments, ensure_ascii=False),
-                            },
-                        }
-                    ],
-                },
-            }
-
-        if len(tool_results) == 1:
-            subagent_result = json.loads(tool_results[0]["content"])
-            content = subagent_result["output"]["content"]
-            if "技术效果候选正文" in content:
+            if "技术效果" in user_message:
                 tool_calls = [
                     {
                         "tool": "document_replace_section_blocks",
@@ -235,7 +149,7 @@ class StubLLMClient:
                 "assistant_message": {
                     "role": "assistant",
                     "content": "",
-                    "reasoning_content": "需要将子 agent proposal 写入文档。",
+                    "reasoning_content": "主 agent 直接生成最终态正文并写入文档。",
                     "tool_calls": [
                         {
                             "id": call["tool_call_id"],
@@ -374,7 +288,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert "references" not in event_payloads[0]["payload"]
         assert "tool_call" in event_types
         assert "tool_result" in event_types
-        assert "subagent:section_writer" in scopes
+        assert all(not scope.startswith("subagent:") for scope in scopes)
         assert event_types[-1] == "agent_output"
 
         sessions_response = await client.get(f"/api/projects/{project_id}/sessions")

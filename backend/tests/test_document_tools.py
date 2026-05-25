@@ -85,22 +85,9 @@ def test_document_read_and_edit_protocol(tmp_path: Path) -> None:
     assert search_result["output"]["matches"][0]["block_id"] == block_id
 
 
-def test_document_write_tools_are_atomic_and_permission_checked(tmp_path: Path) -> None:
+def test_document_write_tools_are_atomic(tmp_path: Path) -> None:
     executor, project_id = make_executor(tmp_path)
     technical_problem_id = section_id(executor, project_id, "technical_problem")
-
-    denied_result = run_tool(
-        executor,
-        project_id,
-        "document_append_block",
-        {
-            "section_id": technical_problem_id,
-            "block": {"type": "paragraph", "text": "不应写入。"},
-        },
-        scope="subagent",
-    )
-    assert denied_result["status"] == "failed"
-    assert denied_result["output"]["code"] == "permission_denied"
 
     invalid_result = run_tool(
         executor,

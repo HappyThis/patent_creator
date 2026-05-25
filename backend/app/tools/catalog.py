@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
-from ..agents.registry import SUBAGENTS
-from ..agents.types import SubagentDeclaration
 from .builtin.document import (
     document_append_block,
     document_append_child_section,
@@ -16,15 +14,12 @@ from .builtin.document import (
     document_replace_block,
     document_replace_section_blocks,
 )
-from .builtin.pipe import SubagentPipe
 from .builtin.shell import exec_command
-from .builtin.subagent import execute_subagent
 from .metadata import ToolFunctionMetadata, get_tool_metadata
 from .types import AgentScope
 
 SummaryStarted = Callable[[dict[str, Any]], str]
 SummaryFinished = Callable[[dict[str, Any], dict[str, Any]], str]
-SUBAGENT_PROTOCOL_TOOL_NAMES = ("write_pipe", "finish")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,14 +85,6 @@ def build_openai_tools(tool_names: tuple[str, ...] | list[str]) -> list[dict[str
     return [get_tool_declaration(tool_name).openai_tool() for tool_name in tool_names]
 
 
-def subagent_tool_names(declaration: SubagentDeclaration) -> tuple[str, ...]:
-    return (*declaration.tool_permissions, *SUBAGENT_PROTOCOL_TOOL_NAMES)
-
-
-def build_subagent_tools(declaration: SubagentDeclaration) -> list[dict[str, Any]]:
-    return build_openai_tools(subagent_tool_names(declaration))
-
-
 def render_tool_manual(tool_names: tuple[str, ...] | list[str]) -> str:
     lines = [
         "以下工具说明由工具函数自动生成，是工具调用的唯一准确信息源。",
@@ -116,8 +103,6 @@ def render_tool_manual(tool_names: tuple[str, ...] | list[str]) -> str:
         if declaration.usage_rules:
             lines.append("- 使用规则：")
             lines.extend(f"  - {rule}" for rule in declaration.usage_rules)
-        if declaration.name == "execute_subagent":
-            lines.extend(_render_execute_subagent_catalog())
         if declaration.examples:
             lines.append("- 调用实例：")
             lines.extend(f"  - {label}：{_compact_json(arguments)}" for label, arguments in declaration.examples)
@@ -190,23 +175,6 @@ def _compact_json(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _render_execute_subagent_catalog() -> list[str]:
-    lines = ["- 可用子 agent："]
-    for declaration in SUBAGENTS.values():
-        tools = "、".join(declaration.tool_permissions)
-        lines.extend(
-            [
-                f"  - {declaration.id}",
-                f"    - 职责：{declaration.description}",
-                f"    - 输入要求：{declaration.input_expectation}",
-                f"    - 返回值：{declaration.output_contract}",
-                f"    - 使用边界：{declaration.usage_guidance}",
-                f"    - 可用工具：{tools}",
-            ]
-        )
-    return lines
-
-
 def _document_read_started(arguments: dict[str, Any]) -> str:
     section_id = arguments.get("section_id") or arguments.get("block_id") or ""
     return f"开始读取 {section_id}" if section_id else "开始读取章节"
@@ -231,16 +199,6 @@ def _exec_started(arguments: dict[str, Any]) -> str:
 
 def _exec_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
     return "诊断命令已完成"
-
-
-def _subagent_started(arguments: dict[str, Any]) -> str:
-    agent_id = str(arguments.get("agent_id") or "")
-    return f"已启动 {agent_id}" if agent_id else "已启动子 agent"
-
-
-def _subagent_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
-    agent_id = str(arguments.get("agent_id") or "")
-    return f"{agent_id} 已完成" if agent_id else "子 agent 已完成"
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,13 +226,11 @@ def _build_tool_registry(registrations: tuple[_ToolRegistration, ...]) -> dict[s
 
 
 _MAIN: frozenset[AgentScope] = frozenset({"main_agent"})
-_SUB: frozenset[AgentScope] = frozenset({"subagent"})
-_BOTH: frozenset[AgentScope] = frozenset({"main_agent", "subagent"})
 
 _TOOL_REGISTRATIONS = (
     _ToolRegistration(
         document_read,
-        _BOTH,
+        _MAIN,
         summary_started=_document_read_started,
         summary_finished=_document_read_finished,
     ),
@@ -313,15 +269,7 @@ _TOOL_REGISTRATIONS = (
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
-    _ToolRegistration(
-        execute_subagent,
-        _MAIN,
-        summary_started=_subagent_started,
-        summary_finished=_subagent_finished,
-    ),
-    _ToolRegistration(exec_command, _BOTH, summary_started=_exec_started, summary_finished=_exec_finished),
-    _ToolRegistration(SubagentPipe.write, _SUB),
-    _ToolRegistration(SubagentPipe.finish, _SUB),
+    _ToolRegistration(exec_command, _MAIN, summary_started=_exec_started, summary_finished=_exec_finished),
 )
 _TOOL_REGISTRY = _build_tool_registry(_TOOL_REGISTRATIONS)
 
@@ -331,4 +279,3 @@ DOCUMENT_WRITE_TOOL_NAMES = tuple(
 MAIN_AGENT_TOOL_NAMES = tuple(
     declaration.name for declaration in _TOOL_REGISTRY.values() if declaration.can_use("main_agent")
 )
-SUBAGENT_TOOLS = build_openai_tools(("document_read", "exec_command", *SUBAGENT_PROTOCOL_TOOL_NAMES))

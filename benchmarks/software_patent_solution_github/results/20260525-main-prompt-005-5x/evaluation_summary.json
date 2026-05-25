@@ -1,0 +1,39 @@
+[
+  {
+    "case_id": "005",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      75.0,
+      85.0,
+      82.0,
+      75.0,
+      75.0
+    ],
+    "average_score": 78.4,
+    "min_score": 75.0,
+    "max_score": 85.0,
+    "score_stddev": 4.2708313008125245,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "DELETE running 任务先取消再删除的策略会删除追踪记录，随后异步执行完成或恢复逻辑如何避免回写已删除记录没有说明。",
+      "cleanTask 描述与表设计不一致：表中不保存完整消息内容，却说清理消息内容释放 SQLite 空间，若清理 assistant_messages 又会影响普通会话语义。",
+      "关键缺口是接收提交时就在同一事务中把用户消息写入会话，缺少持久 submission ledger 到 Session 的明确消息应用边界，例如 messagesAppliedAt、applied message ids、turnId/requestId checkpoint 等；这违反 rubric 中高分方案对写入前/写入后崩溃区分的要求。",
+      "可观察性只覆盖查询接口和可选进度，缺少状态变化事件、list/inspect API 或 observability lifecycle event 的完整设计。",
+      "后台执行只描述工作循环和扫描，没有明确 Think/Workers 场景下的 drain/唤醒或 durable alarm/scheduled execution 如何触发。"
+    ],
+    "top_missing_key_mechanisms": [
+      "list/inspect API 与 submission lifecycle observability events。",
+      "list/inspect 与 submission lifecycle observability events。",
+      "list、delete、inspect 或等价生命周期管理接口，以及幂等键保留窗口的确定策略。",
+      "pending/accepted 任务的条件领取事务和 drain 循环，确保同一任务不会被多个后台执行路径领取。",
+      "pending/running 到终态的条件更新，防止取消、删除、reset 后被迟到完成覆盖。"
+    ]
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 8,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 7,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住外部提交需要快速 accepted 返回、后台执行、状态查询、取消和幂等重试，而不是同步等待模型完成。",
+    "提出了持久 submission ledger、idempotency_key、task_id/request_id、状态机、查询/list/cancel/delete/cleanup API，覆盖面较完整。",
+    "能识别并复用当前 Think/Agents 环境中的 saveMessages、TurnQueue、AbortRegistry、ResumableStream、runFiber/chatRecovery、cf_agents_workflows 分页等机制。",
+    "对 accepted 写入前、推理运行中、助手消息已持久化但任务状态未更新等崩溃窗口有一定分析，并说明了问题-手段-效果关系。"
+  ],
+  "weaknesses": [
+    "缺少真正的持久消息应用边界字段或等价 checkpoint，例如 messagesAppliedAt、applied message ids 或 apply transaction version。方案在用户消息注入 Session 前后没有可靠标记，崩溃恢复时仍可能重复追加用户消息。",
+    "后台执行更像 submit 后 waitUntil/TurnQueue 排队，缺少独立的 durable drain/claim 机制：没有明确按 ledger 查询最早 pending、条件领取 pending -> running、防止多个恢复/唤醒路径重复领取。",
+    "accepted -> running 的描述存在危险顺序：称状态更新发生在消息注入之后、推理之前；若消息注入后但 running 更新前崩溃，恢复扫描会把 accepted 当作未注入而重复执行。",
+    "没有覆盖 reset/clear conversation 与 submission ledger 的同步语义，只在 deleteTask 中可选 cleanupSession，不能处理普通 clearMessages/reset 导致 queued/running submission 迟到完成或继续写入的问题。",
+    "可观察性事件基本缺失；rubric 要求 lifecycle observability，方案只提供查询接口。",
+    "部分终态条件更新虽有笼统 WHERE previous_status 描述，但没有细化取消、删除、reset 后迟到 completed/error 如何被拒绝，工程边界仍不够清晰。"
+  ],
+  "missing_key_mechanisms": [
+    "持久会话应用边界：messagesAppliedAt、appliedMessageIds、事务版本或其他能区分写入前崩溃与写入后崩溃的 durable checkpoint。",
+    "后台 durable drain/claim：扫描 pending/accepted ledger、条件更新为 running、再应用消息与调用现有 saveMessages/turn 生命周期。",
+    "reset/clearMessages 与 submission 状态同步：pending/running 提交应被 skipped/aborted/error，且迟到完成不得覆盖这些终态。",
+    "submission 生命周期观测事件：created、claimed、applied、completed、aborted、error、cleanup 等。",
+    "更严格的恢复判定：消息已部分应用但缺少恢复证据时应标 error，而不是盲目重排或依赖 runFiber 概括处理。"
+  ],
+  "unsupported_claims": [
+    "“任务行与 assistant_messages 通过 request_id 关联”缺少当前源码依据；assistant_messages 表字段为 id、session_id、parent_id、role、content、created_at，没有 request_id 列。",
+    "“提交任务可通过 options.sessionId 动态绑定 Session.forSession()，遵循 WebSocket 多会话路径”依据不足；当前 Think 构造时通过 configureSession(baseSession) 建立一个 active session，未看到 per-submit 动态切换 Session 的现成路径。",
+    "“通过 ctx.waitUntil 调度后续处理”不符合当前 Think 代码的主要保活/后台模式；源码中 Think.saveMessages 使用 keepAliveWhile、TurnQueue 和 runFiber，方案未说明如何接入这些现有 API 取代泛化 waitUntil。",
+    "“_reconcileTaskSubmissions 在恢复链路之后执行且不阻塞 onStart”是新增设计可以成立，但当前源码不存在该方法，且与 Think 构造器包装 onStart、ResumableStream.restore、runFiber recovery 的确切顺序没有充分落地说明。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”档。它对需求理解较强，提出了持久任务表、幂等去重、快速确认、状态查询、取消、删除、清理和若干恢复窗口，且能引用当前 Think 的 saveMessages、TurnQueue、AbortRegistry、ResumableStream 与 runFiber/chat recovery。主要扣分点是 rubric 的核心机制“消息应用到 Session 的持久边界”缺失：方案没有 messagesAppliedAt 或等价 checkpoint，并且把 running 更新放在消息注入之后，导致写入后崩溃恢复可能重复追加用户消息。其次，后台执行缺少明确的 durable drain/条件 claim，reset/clear conversation 同步和 lifecycle observability 也缺失。根据分数上限规则，缺少持久消息应用边界时总分通常不得高于 75 分；同时还存在 claim/drain 与 reset 同步不足，因此不应进入 80 分以上。"
+}

@@ -94,7 +94,7 @@ class ContextManager:
         llm_client: SupportsContextCompression,
         on_context_event: ContextEventSink | None = None,
     ) -> list[dict[str, Any]]:
-        """恢复主 agent messages；必要时先压缩当前用户输入之前的历史。"""
+        """恢复主 agent messages；必要时先压缩当前用户输入前的历史。"""
 
         messages = self._build_main_agent_messages_unfitted(
             project_id,

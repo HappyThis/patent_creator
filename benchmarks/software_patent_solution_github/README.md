@@ -36,7 +36,7 @@ benchmark runner 根据 `snapshot.json` 拉取仓库并 checkout 到指定 commi
 
 `snapshot.json` 和 `focus_paths` 是隐藏维护信息，不作为用户输入，也不提供给被测 agent。`focus_paths` 只能用于人工复核、case 维护或诊断性分析，不能进入正式 agent 输入。
 
-正式评测走本系统完整主 agent 对话接口。评估器不直接调用子 agent，也不把主 agent 的最终聊天回复当作答案。主 agent 完成本轮后，评估器只从 `disclosure.json` 中抽取“技术方案”章节内容作为被评分产物。
+正式评测走本系统完整主 agent 对话接口，不把主 agent 的最终聊天回复当作答案。主 agent 完成本轮后，评估器只从 `disclosure.json` 中抽取“技术方案”章节内容作为被评分产物。
 
 ## Agent 输入契约
 
@@ -64,7 +64,7 @@ benchmark runner 根据 `snapshot.json` 拉取仓库并 checkout 到指定 commi
 
 评估对象只有一个：主 agent 写入 `disclosure.json` 的技术方案章节内容。
 
-评估器应在主 agent 写作结束后读取当前交底书文档，抽取 `technical_solution` 章节，生成 `evaluated_artifact.md` 并交给评分器。最终聊天回复、工具调用轨迹、子 agent proposal、session event、文档 diff 等不作为评分输入。
+评估器应在主 agent 写作结束后读取当前交底书文档，抽取 `technical_solution` 章节，生成 `evaluated_artifact.md` 并交给评分器。最终聊天回复、工具调用轨迹、session event、文档 diff 等不作为评分输入。
 
 评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能从 `disclosure.json` 中提取有效的 `technical_solution` 内容，就进入内容评分。
 

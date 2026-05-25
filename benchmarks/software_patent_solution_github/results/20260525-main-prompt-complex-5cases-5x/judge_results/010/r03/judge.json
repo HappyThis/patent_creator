@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 8,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 6,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确把握了用户级父实体与会话级子实体的分层结构，明确会话消息、分支、配置、扩展隔离，workspace、MCP、OAuth、广播和 schedule 按用户共享。",
+    "能落到当前项目已有能力：subAgent、parentAgent、onBeforeSubAgent、useAgent({ sub })、Think Session、Workspace、MCP、schedule、broadcast/setState 等。",
+    "访问控制方向正确，提出父级注册表门禁，在子会话唤醒前拒绝未知 session id。",
+    "实时同步和父级调度机制描述较完整，覆盖文件变化广播、多标签页刷新、会话列表同步和跨会话摘要任务。",
+    "问题-手段-效果链条清楚，能解释为什么父子 DO 优于单 agent 多 chat id，以及为什么共享资源需要父级代理。"
+  ],
+  "weaknesses": [
+    "workspace 代理没有覆盖 rubric 要求的完整文件系统边界，只举了 read/write/list 和 createWorkspaceTools 包装，缺少字节读写、append、exists、stat/lstat、readDir/glob、rm、cp/mv、symlink/readlink，以及 codemode stateTools/FileSystemStateBackend 所需接口的完整代理说明。",
+    "MCP 代理机制较接近目标，但没有明确每轮推理前从父级获取当前可序列化 tool descriptors 并在子侧构造 wrapper；“创建时传递 schema 列表”不足以处理连接状态和工具动态变化。",
+    "浏览器 callable 与内部父子 RPC 的边界存在关键问题：方案把 invokeMcpTool、getOAuthToken 等描述为 @callable，同时又声称外部 HTTP/浏览器无法直接调用 @callable，这与项目客户端 RPC 机制不符，可能暴露 raw MCP tool invocation。",
+    "删除会话语义与源码不一致：deleteSubAgent 在项目文档中会永久擦除子会话存储，而方案称子 DO 会软删除后自然休眠并由 TTL 回收、in-flight 写入仍可完成。",
+    "对 OAuth token 直接通过 getOAuthToken 暴露给子会话的设计不如父级代执行安全，未充分说明刷新令牌和敏感凭据最小暴露边界。"
+  ],
+  "missing_key_mechanisms": [
+    "完整 WorkspaceFsLike/FileSystem 代理接口，覆盖 Think workspace tools 和 codemode state backend 的全部文件能力。",
+    "MCP tool descriptor 的按轮同步、可序列化边界、子侧 wrapper 与父侧 callTool/invoke 的严格链路。",
+    "内部 RPC 方法与浏览器可调用 @callable 方法的权限隔离机制，尤其是禁止前端直接调用 raw MCP 执行入口。",
+    "workspace revision 或单调版本号机制；方案有 onChange/broadcast，但未明确 revision 如何驱动文件浏览器一致刷新。",
+    "deleteSubAgent 后子会话存储清理、元数据删除和共享 workspace/MCP 保留之间的精确状态流转。"
+  ],
+  "unsupported_claims": [
+    "“父实体的 @callable 方法仅在 DO RPC 上下文中可访问，外部 HTTP 请求无法直接调用”缺乏源码依据且与客户端 agent.call/RPC 语义冲突。",
+    "“deleteSubAgent 只从注册表移除，子 DO 自然休眠后由 TTL 回收”与 docs/sub-agents.md 中 deleteSubAgent 永久擦除存储的语义不符。",
+    "“删除后 in-flight 写入仍可完成持久化”缺少依据；项目文档描述 deleteSubAgent 会 abort running sub-agent 并删除存储。",
+    "“每个 ChatSession 拥有独立 assistant_messages 表”表述容易误导；当前 Session provider 表名存在，但通常以 session_id 区分，子 facet 独立 SQLite 才是隔离依据。"
+  ],
+  "score_rationale": "该方案整体方向强，覆盖父子 agent、会话隔离、共享资源代理、注册表门禁、实时广播和父级调度，且大量 API 与当前项目相符。主要扣分来自两个关键工程边界：一是 workspace proxy 未达到 rubric 要求的完整文件接口和 codemode state 代理粒度；二是 @callable/内部 RPC 权限边界表述错误，使 raw MCP 工具执行可能被浏览器绕过 agent 生命周期调用。按 rubric 的分数上限规则，同时缺完整 workspace proxy 与 RPC/callable 权限隔离时总分不应高于 78，因此给 78 分。"
+}

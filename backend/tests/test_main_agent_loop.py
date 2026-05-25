@@ -13,7 +13,7 @@ from helpers import ScriptedLLMClient, create_project, make_settings, tool_call,
 
 @pytest.mark.anyio
 async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
-    """覆盖 read -> execute_subagent -> document_replace_section_blocks -> respond 的完整链路。"""
+    """覆盖 read -> document_replace_section_blocks -> respond 的主 agent-only 链路。"""
 
     def step_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -27,32 +27,17 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
             ],
         }
 
-    def step_subagent(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "execute_subagent",
-                    {
-                        "agent_id": "section_writer",
-                        "goal": "补充技术效果章节",
-                    },
-                    "call_2",
-                )
-            ],
-        }
-
     def step_edit(messages: list[dict[str, Any]]) -> dict[str, Any]:
         last_tool = [m for m in messages if m.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
-        assert result["output"]["content"].endswith("正文占位。")
+        assert result["status"] == "success"
         return {
             "type": "tool_calls",
             "tool_calls": [
                 tool_call(
                     "document_replace_section_blocks",
                     {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "正文占位。"}]},
-                    "call_3",
+                    "call_2",
                 )
             ],
         }
@@ -60,7 +45,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {"type": "respond", "text": "已更新技术效果。"}
 
-    llm = ScriptedLLMClient([step_read, step_subagent, step_edit, step_respond])
+    llm = ScriptedLLMClient([step_read, step_edit, step_respond])
     services = AppServices(make_settings(tmp_path), llm_client=llm)
     project_id = await create_project(services)
 
@@ -79,15 +64,8 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
         if event.type == "tool_call" and event.scope == "main"
     ]
     assert main_tool_calls.count("document_read") == 1
-    assert main_tool_calls.count("execute_subagent") == 1
     assert main_tool_calls.count("document_replace_section_blocks") == 1
-    # 子 agent 不再由调度器自动预读章节；需要正文时由子 agent 自行调用 document_read。
-    sub_tool_calls = [
-        event.payload.get("tool")
-        for event in events
-        if event.type == "tool_call" and event.scope.startswith("subagent:")
-    ]
-    assert sub_tool_calls == ["write_pipe", "finish"]
+    assert all(not event.scope.startswith("subagent:") for event in events)
     assert "agent_output" in event_types
     assert event_types[-1] == "agent_output"
 

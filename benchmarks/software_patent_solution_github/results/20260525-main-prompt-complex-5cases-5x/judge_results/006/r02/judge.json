@@ -1,0 +1,35 @@
+{
+  "status": "scored",
+  "total_score": 94,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 18,
+    "essential_features": 10,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 9,
+    "feasibility": 9,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住核心问题：客户端本地生命周期清理不能默认等价于 Durable Object 内服务端 turn 取消，同时显式 stop 必须能真正传达取消意图。",
+    "覆盖了 durable 默认模式与 request-lifetime 可选模式，并说明 stop 在两种模式下均走显式服务端取消。",
+    "技术机制具体，包含 requestId/active id 跟踪、取消帧、AbortRegistry、ReadableStream 本地清理、resume 握手、工具 continuation、多标签观察、迟到消息过滤和 clearHistory 代际失效。",
+    "能落到当前项目的主要边界：useAgentChat、WebSocketChatTransport、AIChatAgent、ResumableStream、ContinuationState、TurnQueue、broadcastTransition 等。",
+    "问题-手段-效果闭环充分，能解释如何避免刷新/断线误杀长任务，同时保留用户主动停止、恢复、工具继续执行和多标签同步能力。"
+  ],
+  "weaknesses": [
+    "方案为了说明完整机制引入了大量源码级细节，其中少量具体名称或行为更像拟议实现而非当前快照中已存在的事实，需要在交底书中避免表述为现状。",
+    "request-lifetime 模式下将 WebSocket 断开、ReadableStream.cancel 与服务端取消的触发链描述得较直接，实际实现时还需要明确 onClose、stream cancel、caller abort 三者各自的触发点，避免把网络波动误归为用户取消。",
+    "对显式取消后的终态处理虽提到 active id 保留和 done 过滤，但对服务端取消后是否标记 completed/error/aborted 以及客户端如何展示部分响应的状态约束还可更精确。"
+  ],
+  "missing_key_mechanisms": [
+    "无重大缺失；所有 rubric 关键机制基本覆盖。可补强的是 request-lifetime 行为矩阵的事件级表格，以及显式取消后的服务端终态和客户端 UI 状态迁移。"
+  ],
+  "unsupported_claims": [
+    "`ResumableStream.restoreActiveStreams()` 这个具体方法名在当前快照中未见；当前实现中 ResumableStream 构造时调用的是 restore()。",
+    "`lifetime` 配置项是合理的拟议 API，但当前快照中未见该字段；作为新增方案可以接受，不应表述为已有 API。",
+    "`streamText 调用` 作为服务端推理循环的固定实现略过于具体；当前 AIChatAgent 通过 onChatMessage/_reply 处理响应流，用户实现可能使用不同 AI SDK 流来源。"
+  ],
+  "score_rationale": "该方案属于强答案档。它不仅区分了本地清理与显式服务端取消，还给出了 durable 默认、request-lifetime opt-in、requestId 取消帧、active id 保留、late chunk/done 过滤、resume fallback、工具 continuation、多标签观察和源码接入边界，满足 90 分以上锚点。少量扣分来自过度源码化的个别无依据方法名和 request-lifetime 触发链仍需实现层精化，但这些不是核心机制错误，不触发上限规则。"
+}

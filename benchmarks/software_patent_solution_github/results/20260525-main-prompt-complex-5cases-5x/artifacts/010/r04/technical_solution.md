@@ -1,0 +1,113 @@
+## 技术方案
+
+### 技术问题与设计思路
+
+本方案要解决的核心问题是：在已有的单会话Agent框架基础上，构建支持同一用户同时维护多个独立聊天会话的多会话助理系统，同时实现跨会话的共享资源管理和全局任务调度。
+
+现有框架基于Durable Object（DO）实现单会话Agent：每个Agent实例持有一个DO，内部通过Session组件管理树状消息历史、分支、压缩和上下文块；通过Workspace组件提供虚拟文件系统；通过MCP客户端连接外部工具服务器并支持OAuth授权；通过子Agent路由原语（subAgent、parentAgent、onBeforeSubAgent等）支持父Agent向子Agent转发请求。这些组件均运行在单个DO的SQLite存储和单线程执行模型之上。
+
+若简单地在单个DO内为多个会话分配chat id——即将所有会话的消息历史、配置和状态塞入同一DO——会带来三个核心缺陷：一是DO的单线程模型导致同一用户的所有会话请求串行执行，无法并行；二是会话间缺少隔离边界，消息历史和配置容易混淆；三是Workspace文件、MCP连接和OAuth凭据等本应按用户共享的资源缺乏统一的管理位置，要么在每个会话中重复创建和维护，要么散落在某个会话中导致其他会话不可用。
+
+本方案的设计思路是：引入用户级父Agent和会话级子Agent的双层结构。父Agent（例如AssistantDirectory）作为用户维度的根DO，负责管理会话列表、持有共享资源（Workspace文件、MCP连接、OAuth凭据）的真实状态，并执行定时任务等全局操作。每个聊天会话由一个独立的子Agent（例如MyAssistant）承载，子Agent作为父Agent的sub-agent存在，拥有独立的DO和存储，管理自己的消息历史、分支、个性化配置和记忆。子Agent不直接持有共享资源，而是通过受控代理（RemoteContextProvider、RemoteSearchProvider等远程上下文提供者）访问父Agent上的共享状态。
+
+### 整体架构：用户级父Agent与会话级子Agent
+
+系统采用两层Agent结构：一个用户级父Agent（UserDirectory）管理该用户的所有聊天会话，以及一组会话级子Agent（ChatSession），每个子Agent对应一个独立的聊天会话。
+
+父Agent（UserDirectory）：每个认证用户对应一个父Agent DO实例。父Agent的DO名称由用户的唯一标识（如GitHub登录名）派生，确保一个用户始终路由到同一个父DO。父Agent内部维护以下状态：（1）会话索引表，记录每个子会话的ID、标题、创建时间、最后更新时间、最后消息预览等元数据，存储在SQLite表chats_index中；（2）共享Workspace实例，通过Workspace组件提供虚拟文件系统，文件内容按用户维度存储；（3）MCP服务器连接注册表，记录用户添加的所有MCP服务器名称、URL、传输类型和OAuth授权状态；（4）OAuth凭据存储，保存授权后的access token和refresh token；（5）共享上下文块存储，例如用户级记忆（user_memory），供所有子会话读取和追加。
+
+子Agent（ChatSession）：每个聊天会话对应一个子Agent DO实例，由父Agent通过subAgent(ChatSession, chatId)创建。子Agent沿用了现有框架的Think Agent能力，包括：基于Session组件的树状消息历史管理、消息分支与再生、自动压缩、上下文块（如会话级记忆）、FTS5全文搜索、工具调用（包括MCP工具）、扩展加载、配置管理和会话恢复。每个子Agent的DO存储完全独立，不同会话之间消息历史不互通。
+
+父子通信机制：父Agent与子Agent之间通过现有子Agent路由原语进行通信。（1）父到子：父Agent通过subAgent(ChildClass, name)获取子Agent的类型化RPC存根，调用子Agent暴露的@callable方法；子Agent在父Agent的cf_agents_sub_agents注册表中登记。（2）子到父：子Agent通过parentAgent(ParentClass)获取父Agent的类型化RPC存根，调用父Agent暴露的@callable方法（如getSharedContext、setSharedContext、appendSharedContext等）。（3）客户端到子：客户端通过useAgent({ agent: parentClassName, name: userId, sub: [{ agent: childClassName, name: chatId }] })建立嵌套路由连接，请求经Worker入口到达父Agent，父Agent的onBeforeSubAgent钩子进行访问控制检查后，将WebSocket或HTTP请求转发给子Agent。
+
+### 父Agent的职责与状态管理
+
+父Agent作为用户维度的管理实体，承担以下核心职责：
+
+会话生命周期管理：父Agent通过@callable方法暴露createChat、listChats、deleteChat、renameChat、searchChats等RPC接口。createChat在chats_index表中插入新行，并通过subAgent(ChatSession, chatId)懒创建子Agent DO。deleteChat采用软删除策略——在chats_index表中设置deleted_at时间戳，通过broadcast()向所有连接的客户端推送更新后的会话列表，子Agent DO不立即删除，而是让其自然休眠并由DO的TTL机制回收，以避免中断正在进行的写入操作。renameChat更新chats_index中的标题字段并广播状态变更。
+
+共享Workspace管理：父Agent持有唯一的Workspace实例，该实例基于DO SQLite存储小文件（content列内联，阈值1.5MB），超大文件溢出到R2对象存储。所有子会话通过远程代理访问Workspace——子Agent调用父Agent暴露的workspace操作方法（如readFile、writeFile、readDir等），父Agent在本地Workspace实例上执行实际操作。Workspace的onChange回调连接到agent.broadcast()，当文件发生创建、更新或删除时，父Agent向所有连接的客户端广播变更事件，实现多标签页的实时同步。
+
+MCP连接与OAuth授权管理：父Agent持有MCP连接注册表和OAuth凭据。当用户在任一子会话中添加MCP服务器时，子Agent将addMcpServer请求转发给父Agent，父Agent执行实际的MCP服务器连接（包括OAuth授权流程）。授权完成后，access token和refresh token存储在父Agent的SQLite表中。当子Agent需要调用MCP工具时，子Agent通过父Agent的RPC接口发起工具调用，父Agent使用已建立的MCP客户端连接执行实际调用并返回结果。这种设计确保用户只需授权一次，所有子会话即可共享同一MCP连接和授权状态，同时MCP工具的可用性列表（getMcpServers）也由父Agent统一维护和提供。
+
+共享上下文存储：父Agent提供getSharedContext、setSharedContext和appendSharedContext方法，用于存储跨会话共享的上下文块（如用户偏好、长期记忆）。子Agent通过RemoteContextProvider访问这些共享上下文——RemoteContextProvider是一个本地ContextProvider实现，其get/set/append方法通过父Agent RPC调用转发到父Agent的实际存储。对于并发安全问题，appendSharedContext采用追加语义而非读取-修改-写入模式，避免子会话间的丢失更新。
+
+### 子Agent的职责与会话隔离
+
+每个子Agent（ChatSession）是一个独立的DO实例，承载单个聊天会话的完整执行上下文。其核心职责包括：
+
+消息历史与会话状态隔离：每个子Agent通过Session组件独立管理其消息历史。Session使用树状结构存储消息（每条消息含parent_id），支持消息分支与再生、自动压缩（基于令牌预算的hermes风格算法）、上下文块注入和FTS5全文搜索。子Agent的assistant_messages表、assistant_compactions表、assistant_config表均限定在自身的DO SQLite存储内，不同子Agent之间消息历史完全隔离。
+
+个性化配置隔离：每个子Agent维护独立的会话配置（如模型选择、系统提示词、温度参数等），通过assistant_config表存储。子Agent的扩展加载、压缩阈值、搜索配置等也在各自DO内独立设置。
+
+共享资源受控访问：子Agent不直接持有Workspace实例、MCP客户端连接或OAuth凭据，而是通过父Agent RPC间接访问。具体机制如下：（1）Workspace访问：子Agent调用父Agent的workspace操作方法（readFile、writeFile、readDir、glob、search等），父Agent在本地Workspace实例上执行并返回结果。（2）MCP工具调用：子Agent调用父Agent的invokeMcpTool(serverName, toolName, args)方法，父Agent使用已建立的MCP客户端连接执行工具调用并返回结果。（3）共享上下文：子Agent通过RemoteContextProvider访问父Agent的共享上下文块。RemoteContextProvider的get/set操作均通过父Agent RPC转发，fail-soft设计确保父Agent暂时不可达时子Agent仍可正常工作（共享上下文返回空值）。
+
+### 访问控制与安全机制
+
+系统通过多层访问控制防止未授权访问和会话ID猜测攻击：
+
+第一层——Worker入口认证：在Worker的fetch处理中，对所有/chat路径的请求进行用户认证检查（如验证GitHub OAuth会话cookie）。未认证请求直接返回401或重定向到登录页。Worker路由仅暴露/chat和/auth路径，不暴露/agents/*路径，防止绕过认证直接访问Agent DO。
+
+第二层——父Agent的onBeforeSubAgent钩子：当客户端通过嵌套路由（useAgent({ sub: [...] })）连接子Agent时，请求首先到达父Agent。父Agent的onBeforeSubAgent钩子在转发请求前执行访问控制检查。实现严格注册表门控（strict registry gate）：检查子Agent的className和name是否在cf_agents_sub_agents注册表中存在——如果子会话ID不在父Agent的注册表中，返回404阻止访问。这防止用户通过猜测或枚举会话ID访问不存在的或属于其他用户的子会话。
+
+第三层——子Agent身份验证：在建立WebSocket连接时，子Agent设置sendIdentityOnConnect为true，子Agent将自身的DO名称通过cf_agent_identity消息发送给客户端。客户端验证返回的身份与预期的会话ID一致，防止中间人攻击。
+
+共享资源访问约束：浏览器或子会话不应绕过Agent生命周期直接执行原始MCP工具调用。所有MCP工具调用必须经过父Agent的RPC接口：子Agent在LLM推理过程中收到工具调用请求后，通过parentAgent(ParentClass).invokeMcpTool()将请求发送给父Agent，由父Agent使用已授权的MCP客户端连接执行实际调用。这确保：（1）工具调用的授权状态由父Agent集中验证；（2）工具调用结果可被父Agent审计和限流；（3）MCP服务器的连接凭证不会泄露到子Agent或浏览器端。
+
+### 实时同步与文件变更通知
+
+系统通过父Agent的状态广播机制实现跨会话和跨浏览器标签页的实时同步：
+
+会话列表同步：当用户在任一标签页中创建、重命名或删除会话时，父Agent更新chats_index表后通过agent.broadcast()向所有连接到父Agent的客户端推送更新后的ChatsState。连接到父Agent的侧边栏客户端接收到状态广播后更新UI，无需轮询。
+
+文件变更通知：Workspace组件支持onChange回调，在文件创建、更新和删除操作后触发。父Agent将onChange回调连接到agent.broadcast()，当任一子会话通过父Agent代理修改Workspace文件时，变更事件通过WebSocket广播到所有连接到父Agent的客户端。每个客户端在收到变更事件后，可触发前端文件树刷新或文件内容重新加载。由于workspace文件按用户维度共享且由父Agent统一持有，所有子会话对文件的修改都经过同一Workspace实例，变更事件天然覆盖所有标签页。
+
+增量同步优化：为减少不必要的全量刷新，文件变更事件携带操作类型（create/update/delete）和受影响的文件路径。客户端可根据事件类型和路径做增量更新——例如仅刷新被修改文件的编辑器内容，而非重新加载整个文件树。对于频繁写入的场景，可采用防抖（debounce）策略合并短时间内的多次变更事件后再触发UI刷新。
+
+### 定时任务调度机制
+
+定时任务和跨会话全局操作由父Agent统一调度，而非分散在各个子Agent中：
+
+调度所有权：父Agent拥有DO的alarm（闹钟）能力。父Agent通过DO Alarm API注册定时回调。当alarm触发时，父Agent在onAlarm()中执行预定的全局任务。子Agent不注册独立的alarm——任何需要定时执行的操作（如每日摘要、跨会话搜索索引重建、过期会话清理）均由父Agent统一调度。
+
+跨会话摘要任务：以每日摘要为例，父Agent在onAlarm()中执行以下流程：（1）遍历chats_index表中活跃的子会话列表；（2）对每个子会话，通过subAgent(ChatSession, chatId)获取RPC存根；（3）调用子Agent的generateSummary方法（子Agent内部使用Session的压缩能力生成摘要）；（4）汇总所有子会话的摘要，生成用户级日报；（5）将日报存入共享上下文块或通过推送通知发送给用户。父Agent负责决定调度频率、选择哪些子会话纳入摘要范围，以及处理子Agent在摘要时不可达（如DO休眠）的容错。
+
+容错与重调度：父Agent在执行定时任务时采用最佳努力（best-effort）策略。若某子Agent在调用时处于休眠状态，DO平台会自动唤醒它，唤醒延迟可接受。若RPC调用失败（如临时网络错误），父Agent记录失败日志并在下一个alarm周期重试。对于关键任务（如过期会话清理），父Agent维护任务执行状态表，记录每个子会话的处理进度，确保崩溃恢复后可从断点继续。
+
+### 与现有系统的复用关系
+
+本方案最大程度复用现有框架的已交付能力，不在框架层引入新的路由机制或存储层：
+
+子Agent路由原语：复用已交付的subAgent(Cls, name)、deleteSubAgent(Cls, name)、parentAgent(Cls)、onBeforeSubAgent、hasSubAgent、listSubAgents和useAgent({ sub: [...] })。父Agent通过subAgent创建子Agent，子Agent通过parentAgent访问父Agent，客户端通过嵌套useAgent连接子Agent，父Agent通过onBeforeSubAgent实施访问控制。
+
+Session组件：复用已有的Session存储层，包括树状消息管理、分支与再生、自动压缩、上下文块提供者系统和FTS5全文搜索。子Agent内部的configureSession方法与现有Think Agent保持一致。
+
+Workspace组件：复用已有的Workspace虚拟文件系统（DO SQLite内联+R2溢出、POSIX风格操作、glob、diff、symlink）。父Agent持有Workspace实例，子Agent通过父Agent RPC代理访问。Workspace的onChange回调直接用于文件变更广播。
+
+MCP客户端：复用已有的addMcpServer、getMcpServers、removeMcpServer等MCP管理接口，以及MCP工具调用、资源和提示的协议支持。区别在于MCP连接由父Agent集中持有，子Agent通过父Agent RPC代理调用。RemoteContextProvider/RemoteSearchProvider：复用已设计的远程上下文提供者模式，用于子Agent访问父Agent上的共享上下文块。Chat Recovery：复用已有的可恢复流式传输机制，子Agent在WebSocket断开后可通过resumeStream恢复进行中的推理。
+
+### 技术效果
+
+本方案的技术效果可以从以下几个维度衡量：
+
+并行性：每个子会话拥有独立的DO，同一用户的不同会话可以并行执行LLM推理和工具调用，互不阻塞。父Agent仅在会话管理操作（创建、列表、删除）和共享资源访问时参与请求路径，在子会话正常聊天期间不在热路径上。
+
+隔离性：消息历史、分支、压缩状态、会话配置、扩展和会话级记忆均限定在子Agent的DO存储内。一个会话的消息泄露或配置错误不会影响其他会话。删除一个会话只需软删除父Agent中的索引行并让子Agent DO休眠回收。
+
+资源共享效率：Workspace文件、MCP连接和OAuth凭据在用户维度仅维护一份，避免在每个子会话中重复创建和同步。用户授权一次MCP服务器后所有子会话即时可用。Workspace文件变更通过父Agent广播实现多标签页实时同步，无需轮询。
+
+安全性：三层访问控制（Worker认证、父Agent onBeforeSubAgent注册表门控、子Agent身份验证）防止未授权访问和会话ID猜测。MCP工具调用约束在父Agent代理路径内，浏览器和子Agent不直接持有MCP连接凭证。扩展性：方案基于已交付的子Agent路由原语构建，不引入新的路由层。父Agent和子Agent均可独立扩展各自的sub-agent（如子Agent内部使用Researcher子Agent进行工具执行），层级嵌套由路由原语原生支持。
+
+### 风险与待确认问题
+
+以下方面需要在具体实施中进一步验证和确认：
+
+MCP工具调用代理的性能开销：每次MCP工具调用需要经过子Agent到父Agent的DO RPC往返，然后父Agent再通过MCP客户端执行实际调用。对于高频工具调用场景（如代码执行中的多次文件读写），这一额外的RPC跳转可能引入可感知的延迟。缓解策略：对于Workspace文件操作（高频场景），可考虑为子Agent提供对Workspace的直接访问能力而非全部经过父Agent RPC，但需在共享一致性和访问控制之间权衡。
+
+父Agent的单线程瓶颈：父Agent作为DO本身是单线程的。虽然子会话的聊天推理路径不经过父Agent，但所有会话管理操作（创建、删除、重命名）和共享资源访问（Workspace读写、MCP工具调用、共享上下文读写）都会经过父Agent。在多个子会话同时高频修改共享文件或调用MCP工具时，父Agent可能成为瓶颈。缓解策略：Workspace读写操作在父Agent本地SQLite中执行，延迟极低；MCP工具调用本身是外部网络IO，其延迟远超DO RPC开销；会话管理操作为低频操作。
+
+共享上下文的一致性延迟：子Agent的Session在每轮推理开始时通过withCachedPrompt()冻结系统提示词快照。若在推理过程中另一个子会话更新了共享上下文块（如user_memory），当前正在推理的子会话不会感知到更新，直到下一轮推理调用refreshSystemPrompt()。这是设计上的可接受妥协（避免推理中途提示词变更导致不一致），但需在文档中明确说明。
+
+跨会话搜索的可扩展性：父Agent的searchMessages方法通过向所有活跃子会话并行发起RPC调用来实现跨会话全文搜索。该策略在子会话数量不超过50个时表现良好，超过此规模需要引入父Agent侧的集中式FTS索引——由子Agent在消息写入时通过钩子向父Agent同步索引增量。这是已识别的后续优化点，不影响v1交付。
+
+子Agent内的扩展兼容性：子Agent作为父Agent的sub-agent运行时，现有的扩展加载机制（如动态工具注册、生命周期钩子）需要验证在嵌套DO环境中是否正常工作。特别是当子Agent自身也需要创建sub-agent（如用于代码执行的Researcher）时，需确保扩展在多层嵌套结构中正确加载和运行。

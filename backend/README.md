@@ -22,7 +22,7 @@ export OPENAI_MODEL=mimo-v2.5-pro
 
 - `app/api/`: FastAPI app factory and HTTP/SSE route definitions.
 - `app/services/`: Round orchestration, SSE event bus, and app service wiring.
-- `app/agents/`: Agent declarations, prompts, model runtime adapters, and subagent workers.
+- `app/agents/`: Main agent prompt, model runtime adapters, and worker loop helpers.
 - `app/runtime/`: Context manager plus executor engine and tool implementations.
 - `app/storage/`: File-system persistence, workspace git, and export operations.
 - `app/domain/`: Disclosure document structure, render transforms, and pure document tool logic.
@@ -44,7 +44,7 @@ export OPENAI_MODEL=mimo-v2.5-pro
 
 - New HTTP endpoint: add it under `app/api/routes/`.
 - New multi-step backend workflow: add it under `app/services/`.
-- New subagent declaration, prompt, or model adapter: add it under `app/agents/`.
+- New main-agent prompt behavior or model adapter: add it under `app/agents/`.
 - New executor tool or runtime plumbing: add it under `app/runtime/`.
 - New disclosure/document transformation or validation: add it under `app/domain/`.
 - New persistence concern: add it under `app/storage/`.
@@ -54,4 +54,4 @@ export OPENAI_MODEL=mimo-v2.5-pro
 
 - Keep splitting `app/api/routes/` by bounded context as project, chat, export, and session concerns grow.
 - Keep the main agent planner in `app/services/` light, and continue moving concrete reasoning/writing behaviors into `app/agents/`.
-- Keep real-model coverage focused on the registered lightweight subagents: `section_writer`, `material_analyst`, and `solution_refiner`.
+- Keep real-model coverage focused on the main agent's document reading, planning, editing, and recovery behavior.

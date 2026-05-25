@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 95,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 19,
+    "essential_features": 10,
+    "problem_mechanism_effect": 15,
+    "constraint_adherence": 10,
+    "feasibility": 9,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 语义内容与本机高频运行时信号混写的核心矛盾，并明确说明其导致 VC 噪声、合并冲突和审阅困难。",
+    "字段分层清晰，保留 title/summary/tags/keywords/related 等共享语义字段，同时将 importance/recency/accessCount/updateCount/maturity 等动态信号迁入本机旁路存储。",
+    "提出了较完整的 Runtime Signal Store 机制：相对路径键、单条 JSON sidecar、读取融合、默认值、惰性迁移、失败降级、按条目隔离、原子重命名和 version 乐观并发。",
+    "覆盖了检索排序、memory scoring、curate、archive、manifest、dream/prune/synthesize 等关键消费路径或生命周期路径，并说明动态信号不再回写 Markdown。",
+    "对归档、剪枝、合并、孤儿扫描和恢复场景给出清理一致性策略，满足补充约束。",
+    "技术效果闭环充分，能对应解释减少版本控制噪声、降低协作冲突、保持可审阅性、保留排序和自动整理能力、增强失败隔离。"
+  ],
+  "weaknesses": [
+    "sidecar store 的最小接口边界没有以接口形式完整列出，例如 getMany、batchUpdate、delete、list/scan 等能力是散落在流程描述中，而非明确抽象为可实现契约。",
+    "将 createdAt/updatedAt 归入动态运行时信号有争议；参考方案和通常知识资产语义中，创建/更新时间更接近稳定审阅字段，至少 updatedAt 若表示内容更新时间应留在 Markdown。",
+    "迁移策略中“首次访问即重写 Markdown 并生成一次 CoGit 差异”可行，但会在普通读取路径引入写入副作用；更稳妥的方案应区分读取兼容与显式迁移/新写入剥离。",
+    "部分具体源码接入点和方法名可能过细，若当前快照中不存在会降低源码事实可靠性，但不影响核心机制成立。"
+  ],
+  "missing_key_mechanisms": [
+    "缺少明确的 RuntimeSignalStore 接口清单和批量读取 API 契约，虽然相关能力在文字中被隐含覆盖。",
+    "未充分区分内容创建/更新时间与运行时访问更新时间，createdAt/updatedAt 的字段归属需要进一步限定语义。",
+    "没有详细说明 service initializer 或依赖注入层如何把 RSS 注入 search、curate、dream 等服务，工程接线仍偏方案级。"
+  ],
+  "unsupported_claims": [
+    "MarkdownWriter.parseContent() 扩展后对 SearchKnowledgeService、FileContextFileReader、FileContextTreeManifestService 保持透明这一具体类名和调用关系需要源码验证，方案中未给证据。",
+    "memory-scoring.ts 中存在 recordAccessHits()、applyDecay()、determineTier() 且保持纯函数的表述属于具体源码事实，若当前项目没有这些函数名则为无依据细节。",
+    "FileContextTreeArchiveService.archiveEntry()、归档 stub 的 ghost cue、drillDown() 恢复路径、FileContextTreeMerger 三路合并和 .brv/context-tree-conflicts/ 等具体机制需要源码支持，方案自身未证明。",
+    "derived-artifact.ts 中 isExcludedFromSync() 及 FileContextTreeSnapshotService 扫描逻辑是合理接入点假设，但属于具体源码事实，需以当前快照为准。"
+  ],
+  "score_rationale": "该方案属于强答案档位。它不仅提出了旁路运行时信号存储，而且覆盖字段分层、相对路径键、读取融合、写入剥离、迁移兼容、默认值、失败 fail-open、并发 CAS/原子重命名、归档/剪枝/合并清理一致性以及检索排序和自动整理继续消费动态信号等关键机制。按 rubric 的 90 分以上标准，核心机制完整且与现有 ByteRover context tree、search、curate、dream/archive/prune 方向高度贴合，因此不适用 82/80 分等上限。主要扣分来自两点：一是 store 接口没有集中给出 get/getMany/update/batchUpdate/delete/list 等最小契约，二是 createdAt/updatedAt 被整体迁入动态信号层存在语义争议；另外若干具体类名和函数名未经源码佐证，应列为 unsupported claims 但多为边缘实现细节，不构成阻断实现的核心缺口。"
+}

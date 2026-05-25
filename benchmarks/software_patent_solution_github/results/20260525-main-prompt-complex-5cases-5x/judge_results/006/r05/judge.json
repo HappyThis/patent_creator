@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 84,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 8,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住本地生命周期清理与服务端 durable turn 取消语义耦合的问题。",
+    "明确提出默认 durable 模式下刷新、卸载、reader cancel、网络断开不发送服务端取消，以及显式 Stop 才携带 turnId 取消服务端 turn。",
+    "覆盖了可配置 request-lifetime 模式、恢复、工具调用 continuation、多标签页和迟到消息处理等主要需求边界。",
+    "问题、技术手段和效果之间有较完整闭环，适合作为专利交底草稿的机制抽象。"
+  ],
+  "weaknesses": [
+    "对当前项目源码接入点描述偏泛化，没有明确落到 WebSocketChatTransport、useAgentChat stop/abort 行为、现有 MessageType 取消帧和 resume fallback 处理。",
+    "缺少客户端 active request id 在显式取消后保留、校验并过滤 late chunk/done 的具体状态机；用 cancellation boundary marker 替代，但没有说明如何与现有 requestId 过滤链路结合。",
+    "没有单独覆盖 observed turn / fallback observer 场景，只笼统描述多标签页和服务端推送。",
+    "提出独立 HTTP POST 控制通道、sessionStorage、seq 缓冲等设计，但未说明如何兼容当前项目已有 WebSocket 协议和 replay/resume 标记。"
+  ],
+  "missing_key_mechanisms": [
+    "transport 层 activeRequestId / activeRequestIds 的生命周期保留与清理规则。",
+    "显式取消后对残余 chunk、done、replayComplete 的 requestId 过滤和最终清理时机。",
+    "现有 WebSocket 协议中的取消帧与 useAgentChat stop() 的具体接入方式。",
+    "fallback observer / cross-tab observed stream 与显式取消入口的登记和取消路径。"
+  ],
+  "unsupported_claims": [
+    "当前源码中没有依据表明 useAgentChat 会把 turnId 写入 sessionStorage 来恢复。",
+    "当前源码中没有依据表明网络断开通过 navigator.onLine、保留 reader/AbortController 并按该流程恢复。",
+    "当前项目现有 resume 协议未体现 evaluated_artifact 所述 lastReceivedSeq 单调序列恢复机制。",
+    "当前源码中没有依据表明服务端已有 cancellation boundary marker，或取消后按该标记丢弃后续消息。",
+    "独立 HTTP POST 控制通道不是当前 WebSocket chat transport 中已有的取消协议形态。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的高档答案。它正确区分了本地清理和服务端显式取消，覆盖 durable 默认、request-lifetime opt-in、turnId 取消、恢复、工具 continuation、多标签和迟到消息，整体技术闭环较强。但它没有充分基于当前源码说明 WebSocketChatTransport/useAgentChat 的接入点，也缺少参考 rubric 强调的 active request id 保留、late chunk/done requestId 过滤、fallback observer 取消路径等工程边界。若要给 90 分以上，需要更贴合现有 MessageType、activeRequestIds、reconnectToStream/handleStreamResuming 和 stop/abort 状态机；因此总分限制在 85 分以下。"
+}

@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 80,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 15.5,
+    "essential_features": 8,
+    "problem_mechanism_effect": 12.5,
+    "constraint_adherence": 7,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了父 agent 单会话内调度独立子 agent、并将过程流回主会话 UI 的核心问题。",
+    "提出了较完整的 retained run 思路，包括 run_id、parent_tool_call_id、后台运行、状态表、事件表、seq 去重、重连重放、取消和清理。",
+    "能覆盖模型工具调用、服务端命令式调用、无父工具调用的后台运行三种模式，方向符合需求。",
+    "能结合现有 Durable Object facet、sub-agent 路由、WebSocket broadcast、ResumableStream、onBeforeSubAgent 等项目机制进行设计。",
+    "问题、手段、效果闭环清楚，专利方案表达较完整。"
+  ],
+  "weaknesses": [
+    "没有落到参考项目中更具体的框架级接入面，如 agentTool、runAgentTool、agent-tool-event、useAgentToolEvents 或等价的 React 聚合 hook，客户端聚合层描述偏弱。",
+    "没有分别说明 AIChatAgent 与 Think 子运行在启动、恢复、取消、结果抽取上的适配边界，只在风险中笼统提到 Think。",
+    "缺少 headless 子 agent 中浏览器 client tools 不可直接使用时的降级或父侧中介策略，触发 rubric 上限。",
+    "父模型工具调用的最终返回契约不够明确，未清楚区分 completed/error/aborted/interrupted 对父模型返回的结构化结果和父回合中断语义。",
+    "访问控制提到 onBeforeSubAgent，但未明确未知 runId/已清理 run 不得唤醒或创建新 facet 的一致响应策略。",
+    "把父 DO 唤醒后超过 30 秒的 running run 直接标记 failed，可能过度简化现有 durable stream/fiber 恢复和 parent observer interrupted 语义。"
+  ],
+  "missing_key_mechanisms": [
+    "框架级工具包装入口和命令式入口的源码级映射，例如 agentTool/runAgentTool 或明确等价 API。",
+    "客户端 headless reducer/hook，用于按 runId、parentToolCallId、displayOrder 聚合 live/replay 子运行事件。",
+    "AIChatAgent 与 Think 的具体 child adapter：start、inspect、stored chunks replay、cancel、summary/output extraction。",
+    "headless 子 agent 对 browser/client tools 的不可用、转发、降级或父侧中介执行边界。",
+    "父模型最终 tool result 契约，包括成功摘要、结构化失败、取消和 interrupted 的返回格式。",
+    "已删除或未知 run 的 drill-in 访问响应、tombstone/删除后一致性策略。"
+  ],
+  "unsupported_claims": [
+    "`SubAgentRunManager`、`SubAgentEventRelay`、`SubAgentRunHandle.emit`、`runSubAgent`、`runSubAgentBackground`、`cancelSubAgentRun`、`cf_agents_sub_runs`、`cf_agents_sub_events`、`cf_agent_sub_run_*` 是方案新增设计，不是当前源码中已有机制；方案表述总体可接受，但不能当作已存在项目事实。",
+    "`ctx.facets.abort(facetKey, reason)` 会触发子 Agent 内部 `AbortSignal` 和 `onAbort` 钩子的说法缺少当前源码依据；现有代码有 abortSubAgent/facets.abort 和 Think/AIChat 的外部 signal 能力，但没有通用 onAbort 钩子契约。",
+    "`scheduleEvery` 在 onStart 中注册子运行清理适用于所有该类清理任务的表述偏乐观，当前项目有 scheduleEvery，但方案未说明 facet/root 调度约束和清理运行中 child 的精确执行边界。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”的较高档：它形成了清晰的 retained sub-agent run 机制，覆盖运行身份、父子关联、事件持久化、实时回流、重放去重、后台运行、取消和清理，且多数机制与当前项目的 Durable Object、facet sub-agent、WebSocket 和 ResumableStream 环境相容。扣分主要来自工程边界不足：没有采用或映射到项目已有的 agentTool/runAgentTool/agent-tool-event/useAgentToolEvents 方向；AIChatAgent 与 Think 的恢复、取消、结果抽取适配没有分别展开；完全遗漏 headless client tools 边界；父模型最终 tool result 契约不够具体。根据 rubric，上述缺口使其不应进入 85+ 强答案区间；但由于主体机制完整且覆盖补充约束中的三类运行和恢复/取消/访问控制，未按 74 分以下处理。"
+}

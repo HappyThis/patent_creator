@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 14,
+    "essential_features": 7,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 3
+  },
+  "strengths": [
+    "准确识别了外部 webhook/RPC/Worker 调用需要快速 202 接收、后续查询控制、幂等重试和崩溃恢复的问题本质。",
+    "方案能结合当前 Think 的 Session、TurnQueue、requestId、AbortRegistry、chatRecovery/runFiber、onRequest、cf_agent_tool_child_runs 等现有上下文，整体方向不是另建独立推理系统。",
+    "给出了持久任务表、状态机、幂等键、查询、取消、删除、恢复分支和技术效果，具备较强的工程可读性。",
+    "对幂等键并发竞争、保留窗口和元数据清理有一定考虑。"
+  ],
+  "weaknesses": [
+    "核心会话应用边界设计偏弱：方案在接收阶段即写入 Session，并把 accepted 定义为任务记录和用户消息均已持久化，缺少 messagesAppliedAt、message ids、apply checkpoint 或等价字段来明确记录消息是否已应用。",
+    "缺少后台 drain/claim 机制：没有说明持久 pending 记录如何被条件领取，accepted/running 状态更新也没有事务化 claim，无法防止并发恢复或多执行器重复领取。",
+    "没有条件终态更新规则，未说明 completed/error/aborted 回写必须带 status 条件，存在迟到完成覆盖 cancelled/deleted/error 的风险。",
+    "未覆盖 reset/clear conversation 与任务 ledger 的同步处理，普通聊天清空或 turn reset 后尚未执行/正在执行的外部任务如何 skipped/aborted 不清楚。",
+    "管理能力不完整：有 GET/cancel/delete，但缺少 list/inspect 批量可观察能力和 lifecycle observability events。",
+    "DELETE running 任务先取消再删除的策略会删除追踪记录，随后异步执行完成或恢复逻辑如何避免回写已删除记录没有说明。"
+  ],
+  "missing_key_mechanisms": [
+    "持久消息应用边界字段或等价 checkpoint，例如 messagesAppliedAt、applied message ids、apply transaction version。",
+    "基于持久 ledger 的后台 drain/唤醒与 pending -> running 条件领取事务。",
+    "终态条件更新，防止迟到完成、错误或恢复逻辑覆盖取消、清理、reset 后状态。",
+    "resetTurnState/clearMessages 与外部提交 ledger 的同步跳过、取消或错误标记规则。",
+    "submission list/inspect API 与结构化 observability events。",
+    "运行中任务删除后的 tombstone 或 deletedAt 语义。"
+  ],
+  "unsupported_claims": [
+    "声称任务记录创建与 session.appendMessage 在同一事务上下文中完成，但当前 Think 的 session.appendMessage 是独立 SQL 写入，方案未说明实际如何开启或封装同一事务。",
+    "DDL 中没有保存 applied message ids/messages_applied_at，却声称恢复扫描可可靠判断 accepted 任务是否已有对应 Session 消息，依据不足。",
+    "称调用 saveMessages 的等效逻辑异步入队并立即返回，但当前 saveMessages 会等待 TurnQueue 中的模型 turn 完成；方案没有说明新增非等待入口如何与 keepAlive/waitUntil 挂接。",
+    "称 running 取消后 finally 块更新任务状态为 aborted，但当前 Think 的推理 finally 只清理 AbortRegistry；外部任务状态回写需要新增条件逻辑。"
+  ],
+  "score_rationale": "该方案属于“方向正确但关键工程边界不完整”的可用草稿。它有持久任务表、幂等键、快速确认、状态查询、取消/删除和对 Think 现有执行语义的复用意图，因此不能按普通异步接口低分处理。但 rubric 的高分锚点要求 durable submission ledger 之外还要有明确的会话应用边界、后台条件领取、终态条件更新、reset/cleanup 同步和可观察性。方案把消息在接收阶段直接写入 Session，缺少 applied checkpoint；accepted -> running 也没有持久 claim/drain；终态回写和 reset 同步缺失。因此适用“缺少两个或更多关键机制通常不高于 75 分”的上限，最终给 75 分。"
+}

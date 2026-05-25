@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 89,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 9,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 8,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住共享 Markdown frontmatter 与本机高频运行时信号混写的问题本质，并能对应到当前项目中的 markdown-writer、memory-scoring、SearchKnowledgeService、manifest、archive、curate、merge 等真实消费路径。",
+    "提出了清晰的字段分层、以相对路径为键的本机 sidecar、读取融合层、旧 frontmatter 回退/懒迁移、写入剥离、失败降级和归档/剪枝/合并清理机制。",
+    "技术效果闭环较完整，能说明为什么可以减少 Git diff 噪声和合并冲突，同时继续保留 importance、recency、access/update count 等排序信号。",
+    "方案没有把全部知识迁入私有数据库，也没有简单删除动态信号，整体符合需求边界。"
+  ],
+  "weaknesses": [
+    "将 maturity 保留在共享 Markdown 并改为人工 curation 字段，与当前代码中 maturity 由 importance 推导、参与排序 tier boost 的动态机制存在偏离；这可能削弱“成熟度判断动态信号不污染共享文件”的需求覆盖。",
+    "IScoringProvider 接口列出了 get/record/batch，但没有把后文依赖的 removeEntry、migrateEntry、list/scan、batchUpdate 或 updater/CAS 作为明确最小接口，生命周期边界略松。",
+    "并发方案描述为多进程各自持有内存 Map、落盘时读磁盘合并；如果没有变更增量、版本号或 CAS，accessCount/updateCount 的 sum 规则可能重复计数，旧内存快照也可能覆盖或丢失并发更新。",
+    "对 dream/synthesize/prune 的读取融合和写入剥离只做了概念覆盖，未像 search、manifest、curate 那样明确到具体接入点。",
+    "JSON sidecar 全量加载和 debounced 异步刷盘可行，但对崩溃窗口、跨进程文件锁、写入失败后的重放语义还不够工程化。"
+  ],
+  "missing_key_mechanisms": [
+    "将 sidecar store 的完整接口边界固定为 get/getMany/update(updater)/batchUpdate/delete/list 或等价能力。",
+    "并发 read-modify-write 的版本/CAS、文件锁、单写队列或基于增量日志的去重合并机制。",
+    "maturity 作为动态信号时的迁移和融合策略，或保留在 Markdown 时如何不破坏现有 determineTier/compoundScore 行为。",
+    "dream、synthesize、prune、memory-symbol-tree 等自动整理和展示路径的明确读取融合接入点。"
+  ],
+  "unsupported_claims": [
+    "“归档后的 .stub.md 本质上不再参与搜索排序/importance 排序”缺少源码依据；当前 isDerivedArtifact 对 .stub.md 返回 false，isArchiveStub 只是同步排除，搜索路径可索引 stub。",
+    "“SearchKnowledgeService.buildIndex()”不是当前源码中的实际公开方法名；相关逻辑分布在 buildFreshIndex、acquireIndex、indexOriginDocuments 等函数中，属于轻微命名不准。",
+    "“Runtime Sidecar 遵循 isDerivedArtifact()/isExcludedFromSync() 机制”作为目标设计可以成立，但当前源码只识别既有派生产物模式，不能直接推出新增 .runtime-signals.json 已被这些谓词覆盖。"
+  ],
+  "score_rationale": "该方案属于强可用答案，核心机制完整且大量源码事实准确，覆盖了字段分层、sidecar、路径映射、读取融合、迁移兼容、fail-open、并发和清理一致性，因此不适用 80/82 分上限。扣分主要来自 maturity 字段处理与需求中“成熟度动态判断”存在张力、sidecar 最小接口和并发原子性不够严谨，以及部分自动整理路径和源码细节覆盖不够实。"
+}

@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 15,
+    "technical_mechanism": 15,
+    "essential_features": 7,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 语义内容与本机高频运行时信号混写导致 VC 噪声和协作冲突的核心矛盾。",
+    "提出了较完整的字段分层、路径键 sidecar、读取融合、写入隔离、懒迁移、默认评分、归档/恢复/删除清理和 fail-open 思路。",
+    "与当前项目中的 MarkdownWriter、memory-scoring、search-knowledge-service、curate-tool、manifest、archive/prune 等路径有较强对应关系。",
+    "技术效果闭环清楚：减少 Markdown diff 噪声和合并冲突，同时保留 importance、recency、maturity、accessCount 等排序和整理信号。"
+  ],
+  "weaknesses": [
+    "并发控制不足。方案只说明单进程事件循环串行和整文件临时写入/rename，未提供多 agent 进程下的 per-path read-modify-write、CAS、文件锁或单写队列，整 Map 回写可能发生最后写入覆盖。",
+    "缺少明确 sidecar store 最小接口边界，如 getMany、update(updater)、batchUpdate、delete、list/scan 等，工程接入仍偏实现描述而非稳定服务契约。",
+    "dream/consolidate/synthesize、memory-symbol-tree、summary/_index、manifest 和 prune 对融合信号的统一读取接入说明不够完整，主要集中在 search 和 curate。",
+    "失败隔离只说静默失败，缺少日志、指标、损坏 sidecar 自愈和孤儿记录扫描；而新格式 Markdown 已移除评分后，sidecar 丢失无法真正回退到历史动态信号。",
+    "迁移兼容段落中提到 sidecar 不可用时评分更新可继续写回 Markdown，这与写入剥离目标相冲突，容易重新引入 VC 噪声。"
+  ],
+  "missing_key_mechanisms": [
+    "跨进程安全的原子 updater、CAS、文件锁或集中写队列，避免 accessCount、importance、updateCount 等并发更新丢失。",
+    "明确的 RuntimeSignalStore/sidecar store 接口和依赖注入边界，覆盖批量读取、单记录更新、删除、列表/孤儿扫描。",
+    "对 dream consolidate、synthesize、prune、memory-symbol-tree、manifest、summary 文件和 archive stub 的统一读取融合及写入剥离策略。",
+    "sidecar 失败日志记录、损坏文件隔离/重建、orphan repair，以及归档/删除/重命名后的全量一致性校验。",
+    "对 createdAt、updatedAt、summary/_index.md frontmatter scoring 等稳定语义字段与运行时字段边界的更细粒度定义。"
+  ],
+  "unsupported_claims": [
+    "称 .scoring.json 会按现有 derived artifact 约定被 isExcludedFromSync 排除，但当前 isExcludedFromSync 只覆盖 _index.md、_manifest.json、abstract/overview、_archived full/stub 等路径；需要明确修改 predicate 或 gitignore。",
+    "称多 agent 进程分别维护侧车 Map 只会造成短暂滞后且不影响正确性，缺少当前代码依据；在整文件 JSON 回写模型下更可能发生评分更新覆盖。",
+    "称 sidecar 损坏或缺失时仍可从 Markdown frontmatter 恢复评分数据，但新写入路径会移除评分字段，许多文件只能退回默认值而非恢复历史信号。",
+    "归档侧车记录中保留 evicted_importance、evicted_at 的说法与前文定义的 sidecar scoring schema 不一致；当前项目是 archive stub frontmatter 保存 evicted_importance。"
+  ],
+  "score_rationale": "该方案属于方向正确且工程细节较丰富的可用答案，覆盖了字段分层、sidecar、路径键、读取融合、写入剥离、懒迁移、归档/删除清理和技术效果，明显不是泛泛方案。但它没有给出稳定的 sidecar store 接口，也没有解决多进程并发 read-modify-write 覆盖问题；对 dream/consolidate/synthesize、memory-symbol-tree、summary/manifest 等源码消费路径的融合接入不完整，失败隔离也缺少日志和自愈。根据 rubric 的分数上限规则，缺少并发 RMW/CAS 或等价机制时总分通常不得高于 82 分，因此定为 82。"
+}

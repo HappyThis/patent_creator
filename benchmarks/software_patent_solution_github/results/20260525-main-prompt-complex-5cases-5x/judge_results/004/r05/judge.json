@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 88,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 9,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 9,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确把问题定位为共享 Markdown 语义内容与本机高频运行时信号混写导致的版本控制噪声、合并冲突和审阅负担。",
+    "字段分层较清楚，明确 title、summary、tags、related、keywords、createdAt 留在 Markdown，importance、recency、maturity、accessCount、updateCount、updatedAt 迁入旁路信号层。",
+    "覆盖了读取融合、旧 frontmatter 兼容、默认评分、惰性迁移、失败隔离、归档/剪枝/合并清理以及共享 source 场景。",
+    "能落到当前源码中的 SearchKnowledgeService、pendingAccessHits、buildFreshIndex、compoundScore、memory-scoring、markdown-writer、curate、dream/prune/consolidate、archive/manifest 等真实上下文。",
+    "技术效果闭环明确：减少 git diff 噪声和无意义冲突，同时保留动态排序、成熟度判断和 dream 自动整理能力。"
+  ],
+  "weaknesses": [
+    "旁路信号存储的接口边界不够完整，没有明确抽象出 get、getMany、set、update/updater、batchUpdate、delete、list/scan 等最小能力，只描述了文件读写形态。",
+    "并发更新机制偏弱。临时文件加 rename 只能保证单次写入完整，不能避免 flushAccessHits 与 consolidate/curate 对同一 signal 的读改写覆盖；方案把 mtime 乐观锁列为可选增强，未作为核心机制。",
+    "对 curate、markdown writer、memory symbol tree、manifest 等消费路径的接入更多停留在最后的范围列表，具体读写流程不如 search 和 dream 部分充分。",
+    "迁移标记 _signalMigrated 写入共享 frontmatter 会新增一个共享元字段，虽然是一次性变更，但没有充分说明它是否属于可审阅稳定字段，以及 signal 文件被本机删除后如何自愈。",
+    "失败处理说读取失败可静默回退，虽然提到 debug 日志，但对写入失败后的重试、告警和长期积压清理策略仍较粗略。"
+  ],
+  "missing_key_mechanisms": [
+    "缺少明确的 RuntimeSignalStore/IRuntimeSignalStore 最小接口，尤其是批量读取、单路径原子 updater、batchUpdate、delete、list/scan。",
+    "缺少强制性的原子 read-modify-write、CAS、mtime 版本检查或单写队列机制来避免 accessCount、updateCount、maturity 合并时丢更新。",
+    "curate ADD/UPDATE/MERGE、MarkdownWriter.generateContext/mergeContexts、memory symbol tree 和 manifest 读取融合的具体改造流程不足。",
+    "signal 存储 schemaVersion、路径重命名处理、批量 orphan repair 的设计可进一步明确。"
+  ],
+  "unsupported_claims": [
+    "“信号文件需标记为 isDerivedArtifact”是合理改造建议，但当前 derived-artifact.ts 只识别 _index.md、_manifest.json、*.abstract.md、*.overview.md、_archived/*.full.md 等，并不存在 signal 文件识别。",
+    "“更新时使用 _signalMigrated 标记快速判断是否需要回退读取”属于方案新增机制，当前源码没有该字段或相关读取路径依据。",
+    "“共享源已采用双层分离方案时消费者使用默认评分初始化本地信号记录”是可行设计，但当前 source/search 路径尚无本地 signal 初始化机制。"
+  ],
+  "score_rationale": "该方案属于强答案边缘：源码事实大体准确，覆盖了字段分层、sidecar 存储、路径映射、读取融合、迁移兼容、fail-open、归档/剪枝/合并清理和技术效果，且没有违反“保留 Markdown、不能丢弃动态信号”的核心约束。没有给到 90 分以上，主要因为旁路 store 的最小接口和批量能力没有形成清晰边界，并发更新只做到写入完整性而非原子读改写，且 curate/manifest/symbol tree 等全链路接入细节不如 search/dream 充分。这些是强工程落地答案的关键缺口，但不足以触发 82 分上限，因为方案已经覆盖了大多数关键机制并能指导实现。"
+}
