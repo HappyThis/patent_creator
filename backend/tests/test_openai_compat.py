@@ -129,6 +129,19 @@ def test_generate_text_does_not_request_json_response_format(tmp_path: Path) -> 
     assert "response_format" not in fake.completions.calls[0]
 
 
+def test_generate_text_uses_reasoning_when_content_is_empty(tmp_path: Path) -> None:
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="", reasoning_content="# 分析\n\n压缩状态"))],
+        usage=None,
+    )
+    fake = FakeOpenAIClient(completion)
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="deepseek", thinking="enabled"), client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(client.generate_text(system_prompt="system", user_prompt="user"))
+
+    assert result == "# 分析\n\n压缩状态"
+
+
 def test_generate_with_tools_stream_writes_payload_trace_when_enabled(tmp_path: Path) -> None:
     fake = FakeOpenAIClient(FakeStream("ok"))
     settings = make_settings(tmp_path)

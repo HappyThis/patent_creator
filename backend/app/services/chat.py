@@ -147,21 +147,11 @@ class ChatService:
                 },
             )
 
-        messages = await self.context_manager.prepare_main_agent_messages(
-            project_id,
-            state.session_id,
-            user_message=payload.message,
-            active_section_id=payload.active_section_id,
-            active_block_id=payload.active_block_id,
-            current_message_id=state.message_id,
-            round_id=state.round_id,
-            llm_client=self.llm_client,
-            on_context_event=on_context_event,
-        )
         changed_payload: dict[str, Any] = dict(DEFAULT_CHANGED_PAYLOAD)
         changed_payload["active_section_id"] = payload.active_section_id
         changed_payload["active_block_id"] = payload.active_block_id
         final_reply: str | None = None
+        messages: list[dict[str, Any]] = []
         logger.info(
             "round started project=%s session=%s round=%s message_len=%d",
             project_id,
@@ -182,6 +172,17 @@ class ChatService:
                     step_index,
                     project_id,
                     state.session_id,
+                )
+                messages = await self.context_manager.prepare_main_agent_messages(
+                    project_id,
+                    state.session_id,
+                    user_message=payload.message,
+                    active_section_id=payload.active_section_id,
+                    active_block_id=payload.active_block_id,
+                    current_message_id=state.message_id,
+                    round_id=state.round_id,
+                    llm_client=self.llm_client,
+                    on_context_event=on_context_event,
                 )
 
                 async def on_text_delta(delta: str) -> None:

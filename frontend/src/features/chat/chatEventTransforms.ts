@@ -77,17 +77,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       continue;
     }
 
-    if (event.type === 'context_pruned') {
-      events.push({
-        id: event.id,
-        kind: 'context_status',
-        timestamp: formatTimestamp(event.ts),
-        round_id: event.round_id,
-        message_id: event.message_id,
-        seq: event.seq,
-        status: 'failed',
-        summary: '上下文压缩失败',
-      });
+    if (event.type === 'agent_message') {
       continue;
     }
 

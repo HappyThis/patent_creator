@@ -30,6 +30,8 @@ class ModelProfile:
 
     def prepare_messages_for_request(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         prepared = copy.deepcopy(messages)
+        for message in prepared:
+            message.pop("usage", None)
         if self.replay_reasoning_content:
             return prepared
         for message in prepared:

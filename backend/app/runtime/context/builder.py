@@ -7,13 +7,14 @@ from typing import Any, Awaitable, Callable, Protocol
 from ...agents.runtime.model_profiles import prepare_messages_for_model_request
 from ...core import Settings
 from ...storage.workspace_store import WorkspaceStore
+from .barrier import COMPRESSED_CONTEXT_MESSAGE
 from .compression import (
+    COMPRESSED_MEMORY_PREFIX,
     build_compression_prompt,
-    fallback_compressed_markdown,
+    extract_compressed_summary,
     prepare_compressed_markdown_messages,
-    validate_compressed_markdown,
 )
-from .history import MAIN_CONTEXT_EVENT_TYPES, context_anchor, current_user_event, project_main_events, restore_main_chat_messages
+from .history import MAIN_CONTEXT_EVENT_TYPES, context_anchor, project_main_event_segments, restore_main_chat_messages
 from .prompts import context_compressor_system_prompt
 from .usage import ContextUsage, estimate_messages_tokens, usage_for_messages
 
@@ -52,7 +53,7 @@ class ContextManager:
     ) -> list[dict[str, Any]]:
         """从 session log 恢复主 agent messages，并把当前用户输入作为最后一条 user message。"""
 
-        messages = self._build_main_agent_messages_unfitted(
+        messages = self._build_main_agent_messages_raw(
             project_id,
             session_id,
             user_message=user_message,
@@ -60,10 +61,9 @@ class ContextManager:
             active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
-        messages = prepare_messages_for_model_request(messages, self.settings)
-        return self._fit_messages_to_budget(messages)
+        return prepare_messages_for_model_request(self._emergency_trim_messages(messages), self.settings)
 
-    def _build_main_agent_messages_unfitted(
+    def _build_main_agent_messages_raw(
         self,
         project_id: str,
         session_id: str | None,
@@ -94,9 +94,9 @@ class ContextManager:
         llm_client: SupportsContextCompression,
         on_context_event: ContextEventSink | None = None,
     ) -> list[dict[str, Any]]:
-        """恢复主 agent messages；必要时先压缩当前用户输入前的历史。"""
+        """恢复主 agent messages；每次模型调用前必要时滚动压缩当前窗口。"""
 
-        messages = self._build_main_agent_messages_unfitted(
+        raw_messages = self._build_main_agent_messages_raw(
             project_id,
             session_id,
             user_message=user_message,
@@ -104,10 +104,10 @@ class ContextManager:
             active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
-        messages = prepare_messages_for_model_request(messages, self.settings)
-        usage = usage_for_messages(messages, self.settings)
+        request_messages = prepare_messages_for_model_request(raw_messages, self.settings)
+        usage = usage_for_messages(raw_messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
-            return messages
+            return request_messages
 
         if not session_id or not self.store.session_exists(project_id, session_id):
             logger.info(
@@ -117,7 +117,8 @@ class ContextManager:
                 usage.used_tokens,
                 usage.threshold_tokens,
             )
-            return self._fit_messages_to_budget(messages)
+            trimmed = self._emergency_trim_messages(raw_messages)
+            return prepare_messages_for_model_request(trimmed, self.settings)
 
         logger.info(
             "context compression triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
@@ -135,7 +136,7 @@ class ContextManager:
                     "scope": "main",
                     "used_tokens": usage.used_tokens,
                     "threshold_tokens": usage.threshold_tokens,
-                    "summary": "上下文正在压缩",
+                    "summary": "上下文正在滚动压缩",
                 },
             )
         try:
@@ -167,10 +168,10 @@ class ContextManager:
                         "summary": "上下文压缩失败",
                     },
                 )
-            compressed = False
+            compressed = None
 
         if compressed:
-            messages = self._build_main_agent_messages_unfitted(
+            raw_messages = self._build_main_agent_messages_raw(
                 project_id,
                 session_id,
                 user_message=user_message,
@@ -178,8 +179,18 @@ class ContextManager:
                 active_block_id=active_block_id,
                 current_message_id=current_message_id,
             )
-            messages = prepare_messages_for_model_request(messages, self.settings)
-            usage = usage_for_messages(messages, self.settings)
+            usage = usage_for_messages(raw_messages, self.settings)
+            if on_context_event is not None:
+                await on_context_event(
+                    "context_compression_completed",
+                    {
+                        "scope": "main",
+                        "used_tokens": usage.used_tokens,
+                        "threshold_tokens": usage.threshold_tokens,
+                        "summary": "上下文压缩已完成",
+                        **compressed,
+                    },
+                )
             if usage.used_tokens <= usage.threshold_tokens:
                 logger.info(
                     "context compression accepted scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
@@ -190,21 +201,10 @@ class ContextManager:
                     usage.used_tokens,
                     usage.threshold_tokens,
                 )
-                if on_context_event is not None:
-                    await on_context_event(
-                        "context_compression_completed",
-                        {
-                            "scope": "main",
-                            "used_tokens": usage.used_tokens,
-                            "threshold_tokens": usage.threshold_tokens,
-                            "summary": "上下文压缩已完成",
-                            **compressed,
-                        },
-                    )
-                return self._fit_messages_to_budget(messages)
+                return prepare_messages_for_model_request(raw_messages, self.settings)
 
             logger.warning(
-                "context compression still over limit scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
+                "context compression completed but emergency trim is still needed scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
                 project_id,
                 session_id,
                 round_id,
@@ -212,9 +212,21 @@ class ContextManager:
                 usage.used_tokens,
                 usage.threshold_tokens,
             )
+            trimmed = self._emergency_trim_messages(raw_messages)
+            if on_context_event is not None:
+                await on_context_event(
+                    "context_emergency_trim_applied",
+                    {
+                        "scope": "main",
+                        "used_tokens": usage.used_tokens,
+                        "threshold_tokens": usage.threshold_tokens,
+                        "summary": "上下文压缩后仍超限，已应用最终兜底裁剪",
+                    },
+                )
+            return prepare_messages_for_model_request(trimmed, self.settings)
 
         logger.warning(
-            "context prune fallback triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s reason=compression_failed_or_still_over_limit used_tokens=%s threshold_tokens=%s",
+            "context emergency trim triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s reason=compression_unavailable used_tokens=%s threshold_tokens=%s",
             project_id,
             session_id,
             round_id,
@@ -224,36 +236,21 @@ class ContextManager:
         )
         if on_context_event is not None:
             await on_context_event(
-                "context_compression_failed",
+                "context_emergency_trim_applied",
                 {
                     "scope": "main",
                     "used_tokens": usage.used_tokens,
                     "threshold_tokens": usage.threshold_tokens,
-                    "summary": "上下文压缩失败",
+                    "summary": "上下文压缩不可用，已应用最终兜底裁剪",
                 },
             )
-        self._prune_main_history(
-            project_id,
-            session_id,
-            current_message_id=current_message_id,
-            round_id=round_id,
-            reason="compression_failed_or_still_over_limit",
-            usage_before=usage,
-        )
-        return self.build_main_agent_messages(
-            project_id,
-            session_id,
-            user_message=user_message,
-            active_section_id=active_section_id,
-            active_block_id=active_block_id,
-            current_message_id=current_message_id,
-        )
+        trimmed = self._emergency_trim_messages(raw_messages)
+        return prepare_messages_for_model_request(trimmed, self.settings)
 
     def context_usage(self, project_id: str, session_id: str | None) -> ContextUsage | None:
         if not session_id or not self.store.session_exists(project_id, session_id):
             return None
         messages = self._restore_main_chat_messages(project_id, session_id)
-        messages = prepare_messages_for_model_request(messages, self.settings)
         return usage_for_messages(messages, self.settings)
 
     def _restore_main_chat_messages(
@@ -285,102 +282,101 @@ class ContextManager:
         usage_before: ContextUsage,
     ) -> dict[str, Any] | None:
         events = self.store.read_session_events(project_id, session_id)
-        current_event = current_user_event(events, current_message_id)
-        if current_event is None:
-            logger.info(
-                "context compression skipped scope=main reason=current_event_missing project_id=%s session_id=%s round_id=%s message_id=%s",
-                project_id,
-                session_id,
-                round_id,
-                current_message_id,
-            )
-            return None
-
         anchor = context_anchor(events)
-        compressible = [
+        candidate_events = [
             event
             for event in events
             if event.scope == "main"
             and event.type in MAIN_CONTEXT_EVENT_TYPES
-            and anchor["cursor_seq"] <= event.seq < current_event.seq
+            and event.seq >= anchor["cursor_seq"]
         ]
-        if len(compressible) < 2:
+        segments = project_main_event_segments(candidate_events)
+        if not segments:
             logger.info(
-                "context compression skipped scope=main reason=insufficient_events project_id=%s session_id=%s round_id=%s message_id=%s compressible_events=%s cursor_seq=%s current_seq=%s",
+                "context compression skipped scope=main reason=no_safe_boundary project_id=%s session_id=%s round_id=%s message_id=%s candidate_events=%s cursor_seq=%s",
                 project_id,
                 session_id,
                 round_id,
                 current_message_id,
-                len(compressible),
+                len(candidate_events),
                 anchor["cursor_seq"],
-                current_event.seq,
+            )
+            return None
+        latest_candidate_seq = candidate_events[-1].seq
+        if segments[-1].end_seq < latest_candidate_seq:
+            logger.info(
+                "context compression skipped scope=main reason=latest_event_not_safe_boundary project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_end=%s latest_candidate_seq=%s",
+                project_id,
+                session_id,
+                round_id,
+                current_message_id,
+                segments[-1].end_seq,
+                latest_candidate_seq,
             )
             return None
 
-        source_messages = project_main_events(compressible)
-        if len(source_messages) < 2:
+        source_messages: list[dict[str, Any]] = []
+        for segment in segments:
+            source_messages.extend(segment.messages)
+        if not source_messages:
             logger.info(
-                "context compression skipped scope=main reason=insufficient_messages project_id=%s session_id=%s round_id=%s message_id=%s compressible_events=%s source_messages=%s",
+                "context compression skipped scope=main reason=insufficient_messages project_id=%s session_id=%s round_id=%s message_id=%s candidate_events=%s source_messages=%s",
                 project_id,
                 session_id,
                 round_id,
                 current_message_id,
-                len(compressible),
+                len(candidate_events),
                 len(source_messages),
             )
             return None
-        source_estimated_tokens = estimate_messages_tokens(source_messages)
+        covered_seq_start = segments[0].start_seq
+        covered_seq_end = segments[-1].end_seq
+        source_estimated_tokens = estimate_messages_tokens(
+            source_messages,
+            char_coefficient=self.settings.context_token_char_coefficient,
+        )
         logger.info(
-            "context compression started scope=main project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_start=%s covered_seq_end=%s compressible_events=%s source_messages=%s estimated_tokens_before=%s source_estimated_tokens=%s model=%s",
+            "context compression started scope=main project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_start=%s covered_seq_end=%s candidate_events=%s safe_segments=%s source_messages=%s estimated_tokens_before=%s source_estimated_tokens=%s model=%s",
             project_id,
             session_id,
             round_id,
             current_message_id,
-            compressible[0].seq,
-            compressible[-1].seq,
-            len(compressible),
+            covered_seq_start,
+            covered_seq_end,
+            len(candidate_events),
+            len(segments),
             len(source_messages),
             usage_before.used_tokens,
             source_estimated_tokens,
             self.settings.openai_model,
         )
         prompt = build_compression_prompt(
-            current_user_message=str(current_event.payload.get("text") or ""),
-            compressible_messages=_strip_reasoning_content(source_messages),
+            previous_compressed_markdown=str(anchor.get("compressed_markdown") or ""),
+            messages_to_merge=_strip_reasoning_content(source_messages),
         )
-        warnings: list[Any] = []
-        try:
-            raw_markdown = await llm_client.generate_text(
-                system_prompt=context_compressor_system_prompt(),
-                user_prompt=prompt,
-                temperature=0.1,
-                timeout=self.settings.context_compression_timeout,
-                trace_context={
-                    "scope": "context_compression",
-                    "agent_scope": "main",
-                    "project_id": project_id,
-                    "session_id": session_id,
-                    "round_id": round_id,
-                    "message_id": current_message_id,
-                    "covered_seq_start": compressible[0].seq,
-                    "covered_seq_end": compressible[-1].seq,
-                },
-            )
-            compressed_markdown = validate_compressed_markdown(raw_markdown)
-        except Exception as exc:
-            logger.warning(
-                "context compression markdown fallback scope=main project_id=%s session_id=%s round_id=%s message_id=%s error=%s",
-                project_id,
-                session_id,
-                round_id,
-                current_message_id,
-                exc,
-            )
-            compressed_markdown = fallback_compressed_markdown(str(exc))
-            warnings.append({"code": "compression_markdown_fallback", "message": str(exc)})
+        raw_markdown = await llm_client.generate_text(
+            system_prompt=context_compressor_system_prompt(),
+            user_prompt=prompt,
+            temperature=0.1,
+            timeout=self.settings.context_compression_timeout,
+            trace_context={
+                "scope": "context_compression",
+                "agent_scope": "main",
+                "project_id": project_id,
+                "session_id": session_id,
+                "round_id": round_id,
+                "message_id": current_message_id,
+                "covered_seq_start": covered_seq_start,
+                "covered_seq_end": covered_seq_end,
+            },
+        )
+        compressed_markdown = extract_compressed_summary(raw_markdown)
         compressed_memory_messages = prepare_compressed_markdown_messages(compressed_markdown)
         estimated_messages = compressed_memory_messages
-        estimated_tokens_after = estimate_messages_tokens(estimated_messages)
+        estimated_tokens_after = estimate_messages_tokens(
+            estimated_messages,
+            char_coefficient=self.settings.context_token_char_coefficient,
+        )
         self.store.append_session_event(
             project_id,
             session_id,
@@ -390,15 +386,15 @@ class ContextManager:
             message_id=current_message_id or "",
             payload={
                 "agent_scope": "main",
-                "covered_seq_start": compressible[0].seq,
-                "covered_seq_end": compressible[-1].seq,
+                "covered_seq_start": covered_seq_start,
+                "covered_seq_end": covered_seq_end,
                 "compressed_markdown": compressed_markdown,
                 "estimated_tokens_before": usage_before.used_tokens,
                 "estimated_tokens_after": estimated_tokens_after,
                 "compression_model": self.settings.openai_model,
-                "compression_mode": "markdown_memory",
-                "cursor_seq_after": compressible[-1].seq + 1,
-                "warnings": warnings,
+                "compression_mode": "rolling_markdown_memory",
+                "cursor_seq_after": covered_seq_end + 1,
+                "warnings": [],
             },
         )
         logger.info(
@@ -407,145 +403,134 @@ class ContextManager:
             session_id,
             round_id,
             current_message_id,
-            compressible[0].seq,
-            compressible[-1].seq,
+            covered_seq_start,
+            covered_seq_end,
             len(compressed_markdown),
             usage_before.used_tokens,
             estimated_tokens_after,
-            len(warnings),
-            compressible[-1].seq + 1,
+            0,
+            covered_seq_end + 1,
         )
         return {
-            "covered_seq_start": compressible[0].seq,
-            "covered_seq_end": compressible[-1].seq,
+            "covered_seq_start": covered_seq_start,
+            "covered_seq_end": covered_seq_end,
             "compressed_chars": len(compressed_markdown),
             "estimated_tokens_before": usage_before.used_tokens,
             "estimated_tokens_after": estimated_tokens_after,
-            "cursor_seq_after": compressible[-1].seq + 1,
+            "cursor_seq_after": covered_seq_end + 1,
         }
 
-    def _prune_main_history(
-        self,
-        project_id: str,
-        session_id: str,
-        *,
-        current_message_id: str | None,
-        round_id: str,
-        reason: str,
-        usage_before: ContextUsage,
-    ) -> None:
-        events = self.store.read_session_events(project_id, session_id)
-        current_event = current_user_event(events, current_message_id)
-        if current_event is None:
-            logger.warning(
-                "context prune skipped scope=main reason=current_event_missing project_id=%s session_id=%s round_id=%s message_id=%s",
-                project_id,
-                session_id,
-                round_id,
-                current_message_id,
-            )
-            return
-
-        visible = [
-            event
-            for event in events
-            if event.scope == "main" and event.type in {"user_input", "agent_message", "agent_output"} and event.seq <= current_event.seq
-        ]
-        user_events = [event for event in visible if event.type == "user_input"]
-        if not user_events:
-            logger.warning(
-                "context prune skipped scope=main reason=no_user_events project_id=%s session_id=%s round_id=%s message_id=%s visible_events=%s",
-                project_id,
-                session_id,
-                round_id,
-                current_message_id,
-                len(visible),
-            )
-            return
-        keep_users = max(1, self.settings.context_recent_full_rounds)
-        new_cursor_event = user_events[-keep_users] if len(user_events) > keep_users else user_events[0]
-        old_cursor_seq = context_anchor(events)["cursor_seq"]
-        if new_cursor_event.seq <= old_cursor_seq:
-            logger.warning(
-                "context prune skipped scope=main reason=cursor_not_advanced project_id=%s session_id=%s round_id=%s message_id=%s old_cursor_seq=%s new_cursor_seq=%s",
-                project_id,
-                session_id,
-                round_id,
-                current_message_id,
-                old_cursor_seq,
-                new_cursor_event.seq,
-            )
-            return
-        dropped_estimated_tokens = max(
-            0,
-            usage_before.used_tokens
-            - usage_for_messages(
-                [{"role": "user", "content": str(new_cursor_event.payload.get("text") or "")}],
-                self.settings,
-            ).used_tokens,
-        )
-        self.store.append_session_event(
-            project_id,
-            session_id,
-            event_type="context_pruned",
-            scope="main",
-            round_id=round_id,
-            message_id=current_message_id or "",
-            payload={
-                "agent_scope": "main",
-                "old_cursor_seq": old_cursor_seq,
-                "new_cursor_seq": new_cursor_event.seq,
-                "reason": reason,
-                "dropped_estimated_tokens": dropped_estimated_tokens,
-                "first_visible_message_role": "user",
-            },
-        )
-        logger.warning(
-            "context pruned scope=main project_id=%s session_id=%s round_id=%s message_id=%s reason=%s old_cursor_seq=%s new_cursor_seq=%s dropped_estimated_tokens=%s",
-            project_id,
-            session_id,
-            round_id,
-            current_message_id,
-            reason,
-            old_cursor_seq,
-            new_cursor_event.seq,
-            dropped_estimated_tokens,
-        )
-
-    def _fit_messages_to_budget(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _emergency_trim_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         usage = usage_for_messages(messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
             return messages
 
-        current = messages[-1:] if messages and messages[-1].get("role") == "user" else []
-        history = messages[: -len(current)] if current else messages
-        trimmed_history = _recent_history_from_user_boundary(history, max(1, self.settings.context_recent_full_rounds))
-        fitted = [*trimmed_history, *current]
-        fitted_usage = usage_for_messages(fitted, self.settings)
-        if fitted_usage.used_tokens <= usage.threshold_tokens:
-            return fitted
+        protected_prefix, tail = _split_compressed_prefix(messages)
+        tail_segments = _message_segments(tail)
+        if not tail_segments:
+            return protected_prefix or messages[-1:]
 
-        # 兜底：从历史窗口前部继续移动 cursor，保证第一条业务消息是 user，当前输入保留。
-        while trimmed_history and fitted_usage.used_tokens > usage.threshold_tokens:
-            trimmed_history = trimmed_history[1:]
-            while trimmed_history and trimmed_history[0].get("role") != "user":
-                trimmed_history = trimmed_history[1:]
-            fitted = [*trimmed_history, *current]
-            fitted_usage = usage_for_messages(fitted, self.settings)
-        return fitted
+        target_tokens = max(1, usage.used_tokens // 2)
+        prefix_tokens = estimate_messages_tokens(
+            protected_prefix,
+            char_coefficient=self.settings.context_token_char_coefficient,
+        )
+        tail_budget = max(1, target_tokens - prefix_tokens)
+        selected_start = _emergency_trim_start_index(
+            tail_segments,
+            tail_budget,
+            char_coefficient=self.settings.context_token_char_coefficient,
+        )
+        selected = tail_segments[selected_start:]
 
-
-def _recent_history_from_user_boundary(history: list[dict[str, Any]], keep_user_messages: int) -> list[dict[str, Any]]:
-    user_indexes = [index for index, message in enumerate(history) if message.get("role") == "user"]
-    if not user_indexes:
-        return []
-    start = user_indexes[-keep_user_messages] if len(user_indexes) >= keep_user_messages else user_indexes[0]
-    return history[start:]
+        trimmed_tail = [message for segment in selected for message in segment]
+        trimmed = [*protected_prefix, *trimmed_tail]
+        logger.warning(
+            "context emergency trim applied messages_before=%s messages_after=%s used_tokens=%s threshold_tokens=%s target_tokens=%s selected_start=%s",
+            len(messages),
+            len(trimmed),
+            usage.used_tokens,
+            usage.threshold_tokens,
+            target_tokens,
+            selected_start,
+        )
+        return trimmed
 
 
 def _strip_reasoning_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     stripped = copy.deepcopy(messages)
     for message in stripped:
+        message.pop("usage", None)
         if message.get("role") == "assistant":
             message.pop("reasoning_content", None)
     return stripped
+
+
+def _split_compressed_prefix(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if len(messages) >= 2:
+        first = str(messages[0].get("content") or "")
+        second = str(messages[1].get("content") or "")
+        if (
+            messages[0].get("role") == "user"
+            and messages[1].get("role") == "user"
+            and first.startswith(COMPRESSED_MEMORY_PREFIX)
+            and second == COMPRESSED_CONTEXT_MESSAGE
+        ):
+            return messages[:2], messages[2:]
+    return [], messages
+
+
+def _message_segments(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    segments: list[list[dict[str, Any]]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        role = message.get("role")
+        raw_calls = message.get("tool_calls")
+        if role == "assistant" and isinstance(raw_calls, list) and raw_calls:
+            call_ids = [str(call.get("id") or "") for call in raw_calls if isinstance(call, dict) and call.get("id")]
+            segment = [message]
+            index += 1
+            seen: set[str] = set()
+            while index < len(messages) and messages[index].get("role") == "tool":
+                tool_message = messages[index]
+                tool_call_id = str(tool_message.get("tool_call_id") or "")
+                if tool_call_id in call_ids:
+                    seen.add(tool_call_id)
+                    segment.append(tool_message)
+                    index += 1
+                    continue
+                break
+            segments.append(segment)
+            continue
+        segments.append([message])
+        index += 1
+    return segments
+
+
+def _emergency_trim_start_index(
+    segments: list[list[dict[str, Any]]],
+    token_budget: int,
+    *,
+    char_coefficient: float,
+) -> int:
+    user_starts = [
+        index
+        for index, segment in enumerate(segments)
+        if segment and segment[0].get("role") == "user"
+    ]
+    for index in user_starts:
+        suffix = [message for segment in segments[index:] for message in segment]
+        suffix_tokens = estimate_messages_tokens(suffix, char_coefficient=char_coefficient)
+        if suffix_tokens <= token_budget:
+            return index
+    if user_starts:
+        return user_starts[-1]
+
+    selected_tokens = 0
+    for index in range(len(segments) - 1, -1, -1):
+        segment_tokens = estimate_messages_tokens(segments[index], char_coefficient=char_coefficient)
+        if index < len(segments) - 1 and selected_tokens + segment_tokens > token_budget:
+            return index + 1
+        selected_tokens += segment_tokens
+    return 0

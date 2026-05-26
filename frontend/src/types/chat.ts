@@ -58,7 +58,7 @@ export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent | Con
 export type SessionEventRecord = {
   id: string;
   ts: string;
-  type: 'user_input' | 'agent_output' | 'tool_call' | 'tool_result' | 'context_summary' | 'context_pruned';
+  type: 'user_input' | 'agent_message' | 'agent_output' | 'tool_call' | 'tool_result' | 'context_summary';
   seq: number;
   scope: string;
   round_id: string;

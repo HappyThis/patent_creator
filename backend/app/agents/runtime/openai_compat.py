@@ -216,6 +216,7 @@ class OpenAICompatibleClient:
             "tools": tools,
             "tool_choice": "auto",
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         profile.apply_chat_parameters(request_payload)
         if response_format_json:
@@ -356,6 +357,7 @@ class OpenAICompatibleClient:
                 content=content,
                 reasoning_content=reasoning_content,
                 tool_calls=ordered_tool_calls,
+                usage=usage,
             )
             parsed_tool_calls = [
                 self._parse_tool_call(item, index) for index, item in enumerate(ordered_tool_calls)
@@ -385,6 +387,7 @@ class OpenAICompatibleClient:
                 content=content,
                 reasoning_content=reasoning_content,
                 tool_calls=[],
+                usage=usage,
             ),
         }
 
@@ -394,12 +397,16 @@ class OpenAICompatibleClient:
         content: str,
         reasoning_content: str,
         tool_calls: list[dict[str, Any]],
+        usage: Any = None,
     ) -> dict[str, Any]:
         message: dict[str, Any] = {"role": "assistant", "content": content}
         if reasoning_content:
             message["reasoning_content"] = reasoning_content
         if tool_calls:
             message["tool_calls"] = tool_calls
+        usage_payload = _usage_payload(usage)
+        if usage_payload:
+            message["usage"] = usage_payload
         return message
 
     @classmethod
@@ -430,7 +437,10 @@ class OpenAICompatibleClient:
         if not completion.choices:
             raise ApiError(502, "llm_empty_response", "模型未返回 choices。")
         message = completion.choices[0].message
-        return OpenAICompatibleClient._message_content_to_text(message)
+        content = OpenAICompatibleClient._message_content_to_text(message)
+        if content.strip():
+            return content
+        return OpenAICompatibleClient._message_reasoning_to_text(message)
 
     @staticmethod
     def _message_content_to_text(message: Any) -> str:
@@ -450,6 +460,29 @@ class OpenAICompatibleClient:
                         text_parts.append(str(text))
             return "".join(text_parts)
         raise ApiError(502, "llm_invalid_response", "模型返回的 message.content 格式不支持。")
+
+    @staticmethod
+    def _message_reasoning_to_text(message: Any) -> str:
+        reasoning = getattr(message, "reasoning_content", None)
+        if reasoning is None:
+            reasoning = getattr(message, "reasoning", None)
+        if reasoning is None:
+            model_extra = getattr(message, "model_extra", None)
+            if isinstance(model_extra, dict):
+                reasoning = model_extra.get("reasoning_content") or model_extra.get("reasoning")
+        if reasoning is None:
+            return ""
+        if isinstance(reasoning, str):
+            return reasoning
+        if isinstance(reasoning, list):
+            return "".join(str(item) for item in reasoning if item)
+        if isinstance(reasoning, dict):
+            for key in ("content", "text", "summary"):
+                value = reasoning.get(key)
+                if value:
+                    return str(value)
+            return json.dumps(reasoning, ensure_ascii=False)
+        return str(reasoning)
 
     def _write_llm_payload_trace(
         self,
@@ -586,3 +619,24 @@ def _describe_usage(usage: Any) -> str:
         )
     except Exception:  # pragma: no cover
         return str(usage)
+
+
+def _usage_payload(usage: Any) -> dict[str, int]:
+    if usage is None:
+        return {}
+    if isinstance(usage, dict):
+        raw = usage
+    else:
+        model_dump = getattr(usage, "model_dump", None)
+        raw = model_dump() if callable(model_dump) else {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = getattr(usage, key, None)
+            if isinstance(value, int):
+                raw[key] = value
+
+    payload: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = raw.get(key)
+        if isinstance(value, int) and value >= 0:
+            payload[key] = value
+    return payload

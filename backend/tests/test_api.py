@@ -24,13 +24,23 @@ class StubLLMClient:
         trace_context: dict[str, Any] | None = None,
     ) -> str:
         context = json.loads(user_prompt[user_prompt.index("{") :])
+        message_count = len(context.get("messages_to_merge") or [])
         return (
-            "## 已确认事实\n\n"
-            f"- 已压缩 {len(context.get('compressible_messages') or [])} 条历史消息相关的信息。\n\n"
-            "## 当前进展\n\n"
+            "<analysis>测试压缩。</analysis>\n"
+            "<summary>\n"
+            "## 当前任务\n\n"
+            "- 继续沿用压缩前的用户要求。\n\n"
+            "## 执行进度\n\n"
+            f"- 已滚动压缩 {message_count} 条新增消息相关的信息。\n\n"
+            "## 已完成事项\n\n"
             "- 当前任务继续沿用压缩前的上下文。\n\n"
-            "## 后续注意\n\n"
-            "- 后续如信息不足，应重新读取必要上下文。"
+            "## 关键事实与证据\n\n"
+            "- 暂无。\n\n"
+            "## 待办与下一步\n\n"
+            "- 后续如信息不足，应重新读取必要上下文。\n"
+            "\n## 风险与约束\n\n"
+            "- 暂无。\n"
+            "</summary>"
         )
 
     async def generate_with_tools_stream(

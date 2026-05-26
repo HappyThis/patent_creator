@@ -142,12 +142,13 @@ export function useWorkspaceStream({
       if (
         eventName === 'context_compression_started' ||
         eventName === 'context_compression_completed' ||
-        eventName === 'context_compression_failed'
+        eventName === 'context_compression_failed' ||
+        eventName === 'context_emergency_trim_applied'
       ) {
         const status =
           eventName === 'context_compression_started'
             ? 'running'
-            : eventName === 'context_compression_completed'
+            : eventName === 'context_compression_completed' || eventName === 'context_emergency_trim_applied'
               ? 'done'
               : 'failed';
         setEvents((current) => applyContextCompressionEvent(current, payload, status));

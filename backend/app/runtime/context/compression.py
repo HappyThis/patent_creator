@@ -7,64 +7,56 @@ from typing import Any
 from ...core import ApiError
 from .barrier import render_barrier_message
 
-REQUIRED_MARKDOWN_HEADINGS = ("## 已确认事实", "## 当前进展", "## 后续注意")
-OPTIONAL_MARKDOWN_HEADINGS = ("## 关键片段", "## 待确认问题")
-COMPRESSED_MEMORY_PREFIX = "【系统压缩后的历史记忆，不是当前用户的新请求】"
+COMPRESSED_MEMORY_PREFIX = "【系统压缩后的累计工作状态，不是当前用户的新请求】"
 
 
 def build_compression_prompt(
     *,
-    current_user_message: str,
-    compressible_messages: list[dict[str, Any]],
+    previous_compressed_markdown: str,
+    messages_to_merge: list[dict[str, Any]],
 ) -> str:
     payload = {
-        "current_user_message": {
-            "content": current_user_message,
-            "usage": "仅用于判断压缩重点，不得写成当前用户的新请求。",
+        "previous_compressed_markdown": {
+            "content": previous_compressed_markdown,
+            "usage": "上一轮累计摘要。若为空，表示这是第一次压缩。必须与本次新增上下文合并成新的单一累计摘要。",
         },
-        "compressible_messages": compressible_messages,
+        "messages_to_merge": messages_to_merge,
     }
     return (
-        "请压缩以下上下文。当前用户消息只用于判断压缩重点，不要写成新指令。\n\n"
+        "请滚动压缩以下上下文，生成新的累计工作状态。旧摘要和本次新增消息必须合并成一个新的 summary，不要堆叠多个摘要。\n"
+        "输出必须先包含 <analysis>...</analysis>，再包含 <summary>...</summary>。\n"
+        "<summary> 内写后续 agent 可直接继续执行的 Markdown 状态，必须说明当前任务执行到哪一步。\n\n"
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
 
 
 def prepare_compressed_markdown_messages(markdown: str) -> list[dict[str, Any]]:
-    normalized = validate_compressed_markdown(markdown)
+    normalized = str(markdown or "").strip()
+    if not normalized:
+        raise ApiError(502, "context_compression_empty_output", "上下文压缩结果为空。")
     return [
         {"role": "user", "content": f"{COMPRESSED_MEMORY_PREFIX}\n\n{normalized}"},
         render_barrier_message({"kind": "compressed_context"}),
     ]
 
 
-def validate_compressed_markdown(markdown: str) -> str:
-    normalized = _strip_markdown_fence(markdown).strip()
+def extract_compressed_summary(raw_output: str) -> str:
+    """剥离压缩模型的 scratchpad；剥离不到正文时保留非空原文。"""
+
+    normalized = _strip_markdown_fence(raw_output).strip()
     if not normalized:
         raise ApiError(502, "context_compression_empty_output", "上下文压缩结果为空。")
 
-    missing = [heading for heading in REQUIRED_MARKDOWN_HEADINGS if heading not in normalized]
-    if missing:
-        raise ApiError(502, "context_compression_invalid_markdown", f"上下文压缩结果缺少必要标题：{', '.join(missing)}")
+    summary = _tag_body(normalized, "summary")
+    if summary is not None:
+        extracted = _strip_markdown_fence(summary).strip()
+    else:
+        extracted = _remove_tag_block(normalized, "analysis")
+        extracted = _strip_markdown_fence(extracted).strip()
 
-    for heading in REQUIRED_MARKDOWN_HEADINGS:
-        body = _section_body(normalized, heading)
-        if not body:
-            raise ApiError(502, "context_compression_invalid_markdown", f"上下文压缩标题下内容为空：{heading}")
-
-    return normalized
-
-
-def fallback_compressed_markdown(reason: str) -> str:
-    detail = reason.strip() or "压缩模型未生成合格 Markdown 记忆。"
-    return (
-        "## 已确认事实\n\n"
-        f"- 历史上下文已触发压缩，但自动压缩结果未通过弱校验：{detail}\n\n"
-        "## 当前进展\n\n"
-        "- 系统将保留最近若干轮可见上下文继续执行。\n\n"
-        "## 后续注意\n\n"
-        "- 如继续执行时信息不足，应重新读取必要文档、代码或运行状态。"
-    )
+    if not extracted:
+        return normalized
+    return extracted
 
 
 def _strip_markdown_fence(markdown: str) -> str:
@@ -75,17 +67,12 @@ def _strip_markdown_fence(markdown: str) -> str:
     return text
 
 
-def _section_body(markdown: str, heading: str) -> str:
-    start = markdown.find(heading)
-    if start < 0:
-        return ""
-    body_start = start + len(heading)
-    next_positions = [
-        pos
-        for candidate in (*REQUIRED_MARKDOWN_HEADINGS, *OPTIONAL_MARKDOWN_HEADINGS)
-        if candidate != heading
-        for pos in [markdown.find(candidate, body_start)]
-        if pos >= 0
-    ]
-    body_end = min(next_positions) if next_positions else len(markdown)
-    return markdown[body_start:body_end].strip()
+def _tag_body(text: str, tag: str) -> str | None:
+    match = re.search(rf"<{tag}>\s*(?P<body>.*?)\s*</{tag}>", text, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        return None
+    return match.group("body")
+
+
+def _remove_tag_block(text: str, tag: str) -> str:
+    return re.sub(rf"<{tag}>\s*.*?\s*</{tag}>", "", text, flags=re.DOTALL | re.IGNORECASE)

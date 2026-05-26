@@ -87,7 +87,6 @@ class SessionEvent(BaseModel):
         "tool_call",
         "tool_result",
         "context_summary",
-        "context_pruned",
     ]
     seq: int
     scope: str

@@ -47,16 +47,19 @@ class ScriptedLLMClient:
     @staticmethod
     def _build_assistant_message(result: dict[str, Any]) -> dict[str, Any]:
         if result.get("type") == "respond":
-            return {
+            message = {
                 "role": "assistant",
                 "content": str(result.get("text") or ""),
                 "reasoning_content": "测试推理内容。",
             }
+            if "usage" in result:
+                message["usage"] = result["usage"]
+            return message
         if result.get("type") in {"tool_call", "tool_calls"}:
             raw_calls = result.get("tool_calls")
             if not isinstance(raw_calls, list):
                 raw_calls = [result]
-            return {
+            message = {
                 "role": "assistant",
                 "content": "",
                 "reasoning_content": "测试工具调用推理内容。",
@@ -72,6 +75,9 @@ class ScriptedLLMClient:
                     for call in raw_calls
                 ],
             }
+            if "usage" in result:
+                message["usage"] = result["usage"]
+            return message
         return {"role": "assistant", "content": ""}
 
     async def generate_text(
@@ -83,24 +89,51 @@ class ScriptedLLMClient:
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> str:
-        if "上下文压缩 agent" in system_prompt:
-            marker = "待压缩上下文："
-            if marker in user_prompt:
-                context = json.loads(user_prompt.split(marker, 1)[1].strip())
-            else:
-                context = json.loads(user_prompt[user_prompt.index("{") :])
+        if "上下文" in system_prompt and "压缩" in system_prompt:
+            context = json.loads(user_prompt[user_prompt.index("{") :])
             context["_timeout"] = timeout
             self.generated_text_prompts.append(context)
-            message_count = len(context.get("compressible_messages") or [])
-            return (
-                "## 已确认事实\n\n"
-                f"- 已压缩 {message_count} 条历史消息相关的信息。\n\n"
-                "## 当前进展\n\n"
-                "- 当前任务继续沿用压缩前的上下文。\n\n"
-                "## 后续注意\n\n"
-                "- 后续如信息不足，应重新读取必要上下文。"
+            previous = str((context.get("previous_compressed_markdown") or {}).get("content") or "")
+            messages_to_merge = context.get("messages_to_merge") or []
+            message_count = len(messages_to_merge)
+            last_user = next(
+                (
+                    str(message.get("content") or "")
+                    for message in reversed(messages_to_merge)
+                    if isinstance(message, dict) and message.get("role") == "user"
+                ),
+                "",
             )
-        return "## 已确认事实\n\n- 压缩后的历史。\n\n## 当前进展\n\n- 暂无。\n\n## 后续注意\n\n- 暂无。"
+            return (
+                "<analysis>\n"
+                f"需要把上一轮摘要和 {message_count} 条新增消息合并成专利写作状态。\n"
+                "</analysis>\n"
+                "<summary>\n"
+                "## 当前任务\n\n"
+                "- 继续沿用压缩前的用户要求。\n\n"
+                "## 执行进度\n\n"
+                f"- 已滚动压缩 {message_count} 条新增消息；最新用户输入：{last_user or '暂无'}。\n\n"
+                "## 已完成事项\n\n"
+                "- 当前任务继续沿用压缩前的上下文。\n\n"
+                "## 关键事实与证据\n\n"
+                f"- 上一轮摘要长度：{len(previous)}。\n\n"
+                "## 待办与下一步\n\n"
+                "- 后续如信息不足，应重新读取必要上下文。\n"
+                "\n## 风险与约束\n\n"
+                "- 不做工具结果轻量化/投影。\n"
+                "</summary>"
+            )
+        return (
+            "<analysis>暂无。</analysis>\n"
+            "<summary>\n"
+            "## 当前任务\n\n- 暂无。\n\n"
+            "## 执行进度\n\n- 暂无。\n\n"
+            "## 已完成事项\n\n- 暂无。\n\n"
+            "## 关键事实与证据\n\n- 压缩后的历史。\n\n"
+            "## 待办与下一步\n\n- 暂无。\n\n"
+            "## 风险与约束\n\n- 暂无。\n"
+            "</summary>"
+        )
 
 
 def make_settings(tmp_path: Path) -> Settings:

@@ -187,20 +187,22 @@ def test_barrier_renderer_only_outputs_compressed_context_messages() -> None:
     compressed = render_barrier_message({"kind": "compressed_context"})
 
     assert compressed["role"] == "user"
-    assert "系统压缩后的历史上下文" in compressed["content"]
+    assert "系统压缩后的累计工作状态" in compressed["content"]
     with pytest.raises(ValueError):
         render_barrier_message({"kind": "agent_task", "task": "检查提示词冲突"})
 
 
-def test_context_compressor_prompt_defines_markdown_memory_template() -> None:
+def test_context_compressor_prompt_defines_xml_summary_protocol() -> None:
     prompt = context_compressor_system_prompt()
 
-    assert "只输出 Markdown 正文" in prompt
+    assert "<analysis>" in prompt
+    assert "<summary>" in prompt
     assert "不要输出 JSON" in prompt
-    assert "## 已确认事实" in prompt
-    assert "## 当前进展" in prompt
-    assert "## 后续注意" in prompt
-    assert "## 关键片段" in prompt
-    assert "## 待确认问题" in prompt
+    assert "## 当前任务" in prompt
+    assert "## 执行进度" in prompt
+    assert "## 已完成事项" in prompt
+    assert "## 关键事实与证据" in prompt
+    assert "## 待办与下一步" in prompt
+    assert "## 风险与约束" in prompt
     assert "工具调用 ID" in prompt
     assert "target_estimated_tokens" not in prompt

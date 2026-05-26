@@ -26,7 +26,7 @@ class Settings:
     context_max_tokens: int = 128000
     context_compress_threshold_ratio: float = 0.8
     context_reserved_output_tokens: int = 8000
-    context_recent_full_rounds: int = 8
+    context_token_char_coefficient: float = 0.5
     log_dir: Path = Path("logs")
     log_level: str = "INFO"
     log_backup_days: int = 30
@@ -63,7 +63,9 @@ class Settings:
                 os.getenv("PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO", "0.8")
             ),
             context_reserved_output_tokens=int(os.getenv("PATENT_CREATOR_CONTEXT_RESERVED_OUTPUT_TOKENS", "8000")),
-            context_recent_full_rounds=int(os.getenv("PATENT_CREATOR_CONTEXT_RECENT_FULL_ROUNDS", "8")),
+            context_token_char_coefficient=float(
+                os.getenv("PATENT_CREATOR_CONTEXT_TOKEN_CHAR_COEFFICIENT", "0.5")
+            ),
             log_dir=log_dir,
             log_level=os.getenv("PATENT_CREATOR_LOG_LEVEL", "INFO"),
             log_backup_days=int(os.getenv("PATENT_CREATOR_LOG_BACKUP_DAYS", "30")),

@@ -20,17 +20,17 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
 
     def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [message["content"] for message in messages]
-        assert any("## 已确认事实" in content for content in contents)
-        assert not any(content == long_text for content in contents[:-1])
-        assert messages[-1] == {"role": "user", "content": "继续完善"}
+        assert any("## 当前任务" in content for content in contents)
+        assert any("最新用户输入：继续完善" in content for content in contents)
+        assert not any(content == long_text for content in contents)
+        assert messages[-1]["content"].startswith("【上下文恢复说明】")
         return {"type": "respond", "text": "继续处理。"}
 
     llm = ScriptedLLMClient([first_round, second_round])
     settings = make_settings(tmp_path)
-    settings.context_max_tokens = 400
+    settings.context_max_tokens = 1000
     settings.context_reserved_output_tokens = 0
-    settings.context_compress_threshold_ratio = 0.5
-    settings.context_recent_full_rounds = 1
+    settings.context_compress_threshold_ratio = 0.4
     settings.context_compression_timeout = 123
     services = AppServices(settings, llm_client=llm)
     project_id = await create_project(services)
@@ -53,15 +53,71 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
     compression_payload = llm.generated_text_prompts[-1]
     assert compression_payload["_timeout"] == 123
     assert "target_estimated_tokens" not in compression_payload
+    assert "compressible_messages" not in compression_payload
+    assert len(compression_payload["messages_to_merge"]) >= 3
     assert "summary" not in summary_event.payload
-    assert summary_event.payload["compression_mode"] == "markdown_memory"
-    assert summary_event.payload["compressed_markdown"].startswith("## 已确认事实")
+    assert summary_event.payload["compression_mode"] == "rolling_markdown_memory"
+    assert summary_event.payload["compressed_markdown"].startswith("## 当前任务")
     usage = services.context_manager.context_usage(project_id, first.session_id)
     assert usage is not None
     assert usage.used_tokens > 0
 
+
 @pytest.mark.anyio
-async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(tmp_path: Path) -> None:
+async def test_context_manager_rolls_previous_summary_into_next_summary(tmp_path: Path) -> None:
+    first_text = "历史技术细节" * 60
+    second_reply = "第二轮新增材料" * 120
+
+    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1]["content"] == first_text
+        return {"type": "respond", "text": "第一轮记录。" + first_text}
+
+    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [message["content"] for message in messages]
+        assert any("最新用户输入：继续完善" in content for content in contents)
+        return {"type": "respond", "text": second_reply}
+
+    def third_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [message["content"] for message in messages]
+        assert any("上一轮摘要长度：" in content for content in contents)
+        assert any("最新用户输入：继续第三轮" in content for content in contents)
+        return {"type": "respond", "text": "第三轮继续。"}
+
+    llm = ScriptedLLMClient([first_round, second_round, third_round])
+    settings = make_settings(tmp_path)
+    settings.context_max_tokens = 1000
+    settings.context_reserved_output_tokens = 0
+    settings.context_compress_threshold_ratio = 0.35
+    services = AppServices(settings, llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message=first_text))
+    await wait_until_idle(services, project_id)
+    await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(session_id=first.session_id, message="继续完善"),
+    )
+    await wait_until_idle(services, project_id)
+    await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(session_id=first.session_id, message="继续第三轮"),
+    )
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, first.session_id)
+    summaries = [event for event in events if event.type == "context_summary"]
+    assert len(summaries) == 2
+    assert len(llm.generated_text_prompts) == 2
+    assert llm.generated_text_prompts[0]["previous_compressed_markdown"]["content"] == ""
+    assert (
+        llm.generated_text_prompts[1]["previous_compressed_markdown"]["content"]
+        == summaries[0].payload["compressed_markdown"]
+    )
+    assert summaries[1].payload["cursor_seq_after"] > summaries[0].payload["cursor_seq_after"]
+
+
+@pytest.mark.anyio
+async def test_context_manager_compresses_before_emergency_trim_hides_over_limit(tmp_path: Path) -> None:
     long_text = "历史技术细节" * 1200
 
     def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -70,16 +126,16 @@ async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(
 
     def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [message["content"] for message in messages]
-        assert any("## 已确认事实" in content for content in contents)
-        assert messages[-1] == {"role": "user", "content": "继续完善"}
+        assert any("## 当前任务" in content for content in contents)
+        assert any("最新用户输入：继续完善" in content for content in contents)
+        assert messages[-1]["content"].startswith("【上下文恢复说明】")
         return {"type": "respond", "text": "继续处理。"}
 
     llm = ScriptedLLMClient([first_round, second_round])
     settings = make_settings(tmp_path)
-    settings.context_max_tokens = 1000
+    settings.context_max_tokens = 10000
     settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.5
-    settings.context_recent_full_rounds = 1
     services = AppServices(settings, llm_client=llm)
     project_id = await create_project(services)
 
@@ -94,4 +150,55 @@ async def test_context_manager_compresses_before_temporary_fit_hides_over_limit(
 
     events = services.store.read_session_events(project_id, first.session_id)
     summary_event = next(event for event in events if event.type == "context_summary")
-    assert summary_event.payload["compressed_markdown"].startswith("## 已确认事实")
+    assert summary_event.payload["compressed_markdown"].startswith("## 当前任务")
+
+
+@pytest.mark.anyio
+async def test_context_manager_rechecks_context_before_each_tool_followup(tmp_path: Path) -> None:
+    old_text = "历史技术细节" * 80
+
+    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert messages[-1]["content"] == old_text
+        return {"type": "respond", "text": "已记录。"}
+
+    def second_round_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [message["content"] for message in messages]
+        assert not any("## 当前任务" in content for content in contents)
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call("document_read", {"action": "get_section", "section_id": "sec_000003"}, "call_read")
+            ],
+        }
+
+    def second_round_after_tool(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        contents = [message["content"] for message in messages]
+        assert any("## 当前任务" in content for content in contents)
+        assert not any(message.get("role") == "tool" and message.get("tool_call_id") == "call_read" for message in messages)
+        assert messages[-1]["content"].startswith("【上下文恢复说明】")
+        return {"type": "respond", "text": "继续处理。"}
+
+    llm = ScriptedLLMClient([first_round, second_round_read, second_round_after_tool])
+    settings = make_settings(tmp_path)
+    settings.context_max_tokens = 520
+    settings.context_reserved_output_tokens = 0
+    settings.context_compress_threshold_ratio = 0.5
+    services = AppServices(settings, llm_client=llm)
+    project_id = await create_project(services)
+
+    first = await services.chat.start_round(project_id, ChatMessageRequest(message=old_text))
+    await wait_until_idle(services, project_id)
+
+    await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(session_id=first.session_id, message="读取背景后继续。"),
+    )
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, first.session_id)
+    assert any(event.type == "context_summary" for event in events)
+    assert len(llm.generated_text_prompts) == 1
+    assert any(
+        message.get("role") == "tool" and message.get("tool_call_id") == "call_read"
+        for message in llm.generated_text_prompts[0]["messages_to_merge"]
+    )

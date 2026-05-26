@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from ...schemas import SessionEvent
 from .compression import prepare_compressed_markdown_messages
 
 MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_message", "agent_output", "tool_call", "tool_result"}
+
+
+@dataclass(frozen=True, slots=True)
+class MessageSegment:
+    """A safe-cut OpenAI message segment.
+
+    The messages inside a segment can be moved, compressed, or retained as a unit
+    without splitting assistant tool calls from their tool results.
+    """
+
+    start_seq: int
+    end_seq: int
+    messages: list[dict[str, Any]]
 
 
 def restore_main_chat_messages(
@@ -28,9 +42,15 @@ def restore_main_chat_messages(
     messages.extend(project_main_events(visible))
 
     if current_user_message is not None:
-        if current_message_id and not any(
-            event.message_id == current_message_id and event.type == "user_input" for event in events
-        ):
+        current_message_exists = bool(
+            current_message_id
+            and any(
+                event.message_id == current_message_id and event.type == "user_input" for event in events
+            )
+        )
+        if current_message_exists:
+            return messages
+        if current_message_id:
             messages.append({"role": "user", "content": current_user_message})
         elif not messages or messages[-1] != {"role": "user", "content": current_user_message}:
             messages.append({"role": "user", "content": current_user_message})
@@ -42,109 +62,127 @@ def context_anchor(events: list[SessionEvent]) -> dict[str, Any]:
         (
             event
             for event in reversed(events)
-            if event.scope == "main" and event.type in {"context_summary", "context_pruned"}
+            if event.scope == "main" and event.type == "context_summary"
         ),
         None,
     )
     if marker is None:
         return {"cursor_seq": 1, "compressed_markdown": ""}
-    if marker.type == "context_summary":
-        cursor_seq = int(marker.payload.get("cursor_seq_after") or marker.payload.get("covered_seq_end") or 0) + (
-            0 if marker.payload.get("cursor_seq_after") else 1
-        )
-        compressed_markdown = marker.payload.get("compressed_markdown")
-        return {
-            "cursor_seq": max(1, cursor_seq),
-            "compressed_markdown": compressed_markdown if isinstance(compressed_markdown, str) else "",
-        }
-    return {
-        "cursor_seq": max(1, int(marker.payload.get("new_cursor_seq") or 1)),
-        "compressed_markdown": "",
-    }
-
-
-def current_user_event(events: list[SessionEvent], current_message_id: str | None) -> SessionEvent | None:
-    if current_message_id:
-        match = next(
-            (
-                event
-                for event in events
-                if event.scope == "main" and event.type == "user_input" and event.message_id == current_message_id
-            ),
-            None,
-        )
-        if match is not None:
-            return match
-    return next(
-        (event for event in reversed(events) if event.scope == "main" and event.type == "user_input"),
-        None,
+    cursor_seq = int(marker.payload.get("cursor_seq_after") or marker.payload.get("covered_seq_end") or 0) + (
+        0 if marker.payload.get("cursor_seq_after") else 1
     )
+    compressed_markdown = marker.payload.get("compressed_markdown")
+    return {
+        "cursor_seq": max(1, cursor_seq),
+        "compressed_markdown": compressed_markdown if isinstance(compressed_markdown, str) else "",
+    }
 
 
 def project_main_events(events: list[SessionEvent]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
+    for segment in project_main_event_segments(events):
+        messages.extend(segment.messages)
+    return messages
+
+
+def project_main_event_segments(events: list[SessionEvent]) -> list[MessageSegment]:
+    segments: list[MessageSegment] = []
     index = 0
     while index < len(events):
         event = events[index]
         if event.type == "user_input":
-            messages.append({"role": "user", "content": str(event.payload.get("text") or "")})
+            segments.append(
+                MessageSegment(
+                    start_seq=event.seq,
+                    end_seq=event.seq,
+                    messages=[{"role": "user", "content": str(event.payload.get("text") or "")}],
+                )
+            )
             index += 1
             continue
 
         if event.type == "agent_message":
-            agent_messages, index = _consume_agent_message(events, index)
-            messages.extend(agent_messages)
+            segment, index = _consume_agent_message_segment(events, index)
+            if segment is None:
+                break
+            segments.append(segment)
             continue
 
         if event.type == "agent_output":
             preamble = str(event.payload.get("text") or "")
             next_event = events[index + 1] if index + 1 < len(events) else None
             if next_event is not None and next_event.type in {"tool_call", "tool_result"}:
-                tool_messages, index = _consume_tool_block(events, index + 1, assistant_content=preamble)
-                messages.extend(tool_messages)
+                segment, index = _consume_tool_block_segment(events, index + 1, assistant_content=preamble)
+                if segment is None:
+                    break
+                segments.append(
+                    MessageSegment(
+                        start_seq=event.seq,
+                        end_seq=segment.end_seq,
+                        messages=segment.messages,
+                    )
+                )
                 continue
-            messages.append({"role": "assistant", "content": preamble})
+            segments.append(
+                MessageSegment(
+                    start_seq=event.seq,
+                    end_seq=event.seq,
+                    messages=[{"role": "assistant", "content": preamble}],
+                )
+            )
             index += 1
             continue
 
         if event.type == "tool_call":
-            tool_messages, index = _consume_tool_block(events, index, assistant_content="")
-            messages.extend(tool_messages)
+            segment, index = _consume_tool_block_segment(events, index, assistant_content="")
+            if segment is None:
+                break
+            segments.append(segment)
             continue
 
         index += 1
-    return messages
+    return segments
 
 
-def _consume_agent_message(events: list[SessionEvent], start_index: int) -> tuple[list[dict[str, Any]], int]:
+def _consume_agent_message_segment(
+    events: list[SessionEvent],
+    start_index: int,
+) -> tuple[MessageSegment | None, int]:
     event = events[start_index]
     message = _agent_message(event)
     if message is None:
-        return [], start_index + 1
+        return None, start_index + 1
 
     messages = [message]
     index = start_index + 1
+    end_seq = event.seq
     while (
         index < len(events)
         and events[index].type == "agent_output"
         and events[index].round_id == event.round_id
         and events[index].message_id == event.message_id
     ):
+        end_seq = events[index].seq
         index += 1
 
     raw_calls = message.get("tool_calls")
     if not isinstance(raw_calls, list) or not raw_calls:
-        return messages, index
+        return MessageSegment(event.seq, end_seq, messages), index
 
     call_ids = {str(call.get("id") or "") for call in raw_calls if isinstance(call, dict) and call.get("id")}
+    result_call_ids: set[str] = set()
     while index < len(events) and events[index].type in {"tool_call", "tool_result"}:
         next_event = events[index]
         if next_event.round_id != event.round_id or next_event.message_id != event.message_id:
             break
         if next_event.type == "tool_result" and next_event.call_id and str(next_event.call_id) in call_ids:
+            result_call_ids.add(str(next_event.call_id))
             messages.append(_tool_result_message(next_event))
+        end_seq = next_event.seq
         index += 1
-    return messages, index
+    if call_ids and result_call_ids != call_ids:
+        return None, start_index
+    return MessageSegment(event.seq, end_seq, messages), index
 
 
 def _agent_message(event: SessionEvent) -> dict[str, Any] | None:
@@ -163,12 +201,12 @@ def _agent_message(event: SessionEvent) -> dict[str, Any] | None:
     return message
 
 
-def _consume_tool_block(
+def _consume_tool_block_segment(
     events: list[SessionEvent],
     start_index: int,
     *,
     assistant_content: str,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[MessageSegment | None, int]:
     block: list[SessionEvent] = []
     index = start_index
     while index < len(events) and events[index].type in {"tool_call", "tool_result"}:
@@ -182,9 +220,11 @@ def _consume_tool_block(
         if event.type == "tool_call" and event.call_id and str(event.call_id) in result_call_ids
     ]
     if not calls:
-        return [], index
+        return None, start_index
 
     call_ids = {str(event.call_id) for event in calls if event.call_id}
+    if call_ids != result_call_ids:
+        return None, start_index
     messages: list[dict[str, Any]] = [
         {
             "role": "assistant",
@@ -195,7 +235,7 @@ def _consume_tool_block(
     for event in block:
         if event.type == "tool_result" and event.call_id and str(event.call_id) in call_ids:
             messages.append(_tool_result_message(event))
-    return messages, index
+    return MessageSegment(block[0].seq, block[-1].seq, messages), index
 
 
 def _assistant_tool_call(event: SessionEvent) -> dict[str, Any]:
