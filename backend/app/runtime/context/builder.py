@@ -10,12 +10,16 @@ from ...storage.workspace_store import WorkspaceStore
 from .barrier import COMPRESSED_CONTEXT_MESSAGE
 from .compression import (
     COMPRESSED_MEMORY_PREFIX,
-    build_compression_prompt,
     extract_compressed_summary,
     prepare_compressed_markdown_messages,
 )
-from .history import MAIN_CONTEXT_EVENT_TYPES, context_anchor, project_main_event_segments, restore_main_chat_messages
-from .prompts import context_compressor_system_prompt
+from .history import (
+    MAIN_CONTEXT_EVENT_TYPES,
+    latest_context_summary_marker,
+    project_main_event_segments,
+    restore_main_chat_messages,
+)
+from .prompts import context_compression_user_prompt
 from .usage import ContextUsage, estimate_messages_tokens, usage_for_messages
 
 logger = logging.getLogger("patent_creator.context")
@@ -29,6 +33,7 @@ class SupportsContextCompression(Protocol):
         *,
         system_prompt: str,
         user_prompt: str,
+        messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
@@ -91,6 +96,7 @@ class ContextManager:
         active_block_id: str | None,
         current_message_id: str | None,
         round_id: str,
+        system_prompt: str,
         llm_client: SupportsContextCompression,
         on_context_event: ContextEventSink | None = None,
     ) -> list[dict[str, Any]]:
@@ -145,6 +151,7 @@ class ContextManager:
                 session_id,
                 current_message_id=current_message_id,
                 round_id=round_id,
+                system_prompt=system_prompt,
                 llm_client=llm_client,
                 usage_before=usage,
             )
@@ -278,34 +285,35 @@ class ContextManager:
         *,
         current_message_id: str | None,
         round_id: str,
+        system_prompt: str,
         llm_client: SupportsContextCompression,
         usage_before: ContextUsage,
     ) -> dict[str, Any] | None:
         events = self.store.read_session_events(project_id, session_id)
-        anchor = context_anchor(events)
+        compression_marker = latest_context_summary_marker(events)
         candidate_events = [
             event
             for event in events
             if event.scope == "main"
             and event.type in MAIN_CONTEXT_EVENT_TYPES
-            and event.seq >= anchor["cursor_seq"]
+            and event.seq >= compression_marker["cursor_seq"]
         ]
         segments = project_main_event_segments(candidate_events)
         if not segments:
             logger.info(
-                "context compression skipped scope=main reason=no_safe_boundary project_id=%s session_id=%s round_id=%s message_id=%s candidate_events=%s cursor_seq=%s",
+                "context compression skipped scope=main reason=no_complete_segment project_id=%s session_id=%s round_id=%s message_id=%s candidate_events=%s cursor_seq=%s",
                 project_id,
                 session_id,
                 round_id,
                 current_message_id,
                 len(candidate_events),
-                anchor["cursor_seq"],
+                compression_marker["cursor_seq"],
             )
             return None
         latest_candidate_seq = candidate_events[-1].seq
         if segments[-1].end_seq < latest_candidate_seq:
             logger.info(
-                "context compression skipped scope=main reason=latest_event_not_safe_boundary project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_end=%s latest_candidate_seq=%s",
+                "context compression skipped scope=main reason=latest_event_not_complete_segment project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_end=%s latest_candidate_seq=%s",
                 project_id,
                 session_id,
                 round_id,
@@ -336,7 +344,7 @@ class ContextManager:
             char_coefficient=self.settings.context_token_char_coefficient,
         )
         logger.info(
-            "context compression started scope=main project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_start=%s covered_seq_end=%s candidate_events=%s safe_segments=%s source_messages=%s estimated_tokens_before=%s source_estimated_tokens=%s model=%s",
+            "context compression started scope=main project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_start=%s covered_seq_end=%s candidate_events=%s complete_segments=%s source_messages=%s estimated_tokens_before=%s source_estimated_tokens=%s model=%s",
             project_id,
             session_id,
             round_id,
@@ -350,13 +358,15 @@ class ContextManager:
             source_estimated_tokens,
             self.settings.openai_model,
         )
-        prompt = build_compression_prompt(
-            previous_compressed_markdown=str(anchor.get("compressed_markdown") or ""),
-            messages_to_merge=_strip_reasoning_content(source_messages),
-        )
+        compression_messages: list[dict[str, Any]] = []
+        previous_markdown = str(compression_marker.get("compressed_markdown") or "").strip()
+        if previous_markdown:
+            compression_messages.extend(prepare_compressed_markdown_messages(previous_markdown))
+        compression_messages.extend(_strip_reasoning_content(source_messages))
         raw_markdown = await llm_client.generate_text(
-            system_prompt=context_compressor_system_prompt(),
-            user_prompt=prompt,
+            system_prompt=system_prompt,
+            messages=compression_messages,
+            user_prompt=context_compression_user_prompt(),
             temperature=0.1,
             timeout=self.settings.context_compression_timeout,
             trace_context={

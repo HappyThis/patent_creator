@@ -8,7 +8,7 @@ from app.agents.prompts import build_main_agent_system_prompt
 from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_split_main_agent_system_prompt
 from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
 from app.runtime.context.barrier import render_barrier_message
-from app.runtime.context.prompts import context_compressor_system_prompt
+from app.runtime.context.prompts import context_compression_user_prompt
 from app.tools import DOCUMENT_WRITE_TOOL_NAMES, MAIN_AGENT_TOOL_NAMES, render_tool_manual
 
 
@@ -192,9 +192,15 @@ def test_barrier_renderer_only_outputs_compressed_context_messages() -> None:
         render_barrier_message({"kind": "agent_task", "task": "检查提示词冲突"})
 
 
-def test_context_compressor_prompt_defines_xml_summary_protocol() -> None:
-    prompt = context_compressor_system_prompt()
+def test_context_compression_user_prompt_defines_xml_summary_protocol() -> None:
+    prompt = context_compression_user_prompt()
 
+    assert "请只执行上下文滚动压缩" in prompt
+    assert "系统内部的上下文维护指令" in prompt
+    assert "不得把“用户要求只做上下文压缩”" in prompt
+    assert "最终交接版本" in prompt
+    assert "已成功写入的内容按最终落盘结果记录" in prompt
+    assert "不要把本条压缩指令本身" in prompt
     assert "<analysis>" in prompt
     assert "<summary>" in prompt
     assert "不要输出 JSON" in prompt

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -8,26 +7,6 @@ from ...core import ApiError
 from .barrier import render_barrier_message
 
 COMPRESSED_MEMORY_PREFIX = "【系统压缩后的累计工作状态，不是当前用户的新请求】"
-
-
-def build_compression_prompt(
-    *,
-    previous_compressed_markdown: str,
-    messages_to_merge: list[dict[str, Any]],
-) -> str:
-    payload = {
-        "previous_compressed_markdown": {
-            "content": previous_compressed_markdown,
-            "usage": "上一轮累计摘要。若为空，表示这是第一次压缩。必须与本次新增上下文合并成新的单一累计摘要。",
-        },
-        "messages_to_merge": messages_to_merge,
-    }
-    return (
-        "请滚动压缩以下上下文，生成新的累计工作状态。旧摘要和本次新增消息必须合并成一个新的 summary，不要堆叠多个摘要。\n"
-        "输出必须先包含 <analysis>...</analysis>，再包含 <summary>...</summary>。\n"
-        "<summary> 内写后续 agent 可直接继续执行的 Markdown 状态，必须说明当前任务执行到哪一步。\n\n"
-        f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
-    )
 
 
 def prepare_compressed_markdown_messages(markdown: str) -> list[dict[str, Any]]:

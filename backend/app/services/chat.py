@@ -181,6 +181,7 @@ class ChatService:
                     active_block_id=payload.active_block_id,
                     current_message_id=state.message_id,
                     round_id=state.round_id,
+                    system_prompt=system_prompt,
                     llm_client=self.llm_client,
                     on_context_event=on_context_event,
                 )

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.config import Settings
+from app.runtime.context.compression import COMPRESSED_MEMORY_PREFIX
 from app.services import AppServices
 
 
@@ -85,21 +86,35 @@ class ScriptedLLMClient:
         *,
         system_prompt: str,
         user_prompt: str,
+        messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> str:
-        if "上下文" in system_prompt and "压缩" in system_prompt:
-            context = json.loads(user_prompt[user_prompt.index("{") :])
-            context["_timeout"] = timeout
+        if "上下文滚动压缩" in user_prompt:
+            prompt_messages = list(messages or [])
+            context = {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "messages": prompt_messages,
+                "_timeout": timeout,
+            }
             self.generated_text_prompts.append(context)
-            previous = str((context.get("previous_compressed_markdown") or {}).get("content") or "")
-            messages_to_merge = context.get("messages_to_merge") or []
-            message_count = len(messages_to_merge)
+            previous = next(
+                (
+                    str(message.get("content") or "")
+                    for message in prompt_messages
+                    if isinstance(message, dict)
+                    and message.get("role") == "user"
+                    and str(message.get("content") or "").startswith(COMPRESSED_MEMORY_PREFIX)
+                ),
+                "",
+            )
+            message_count = len(prompt_messages)
             last_user = next(
                 (
                     str(message.get("content") or "")
-                    for message in reversed(messages_to_merge)
+                    for message in reversed(prompt_messages)
                     if isinstance(message, dict) and message.get("role") == "user"
                 ),
                 "",

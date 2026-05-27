@@ -44,7 +44,7 @@ def usage_for_messages(messages: list[dict[str, Any]], settings: Settings) -> Co
     max_tokens = settings.context_max_tokens
     threshold_tokens = max(
         1,
-        int((max_tokens - settings.context_reserved_output_tokens) * settings.context_compress_threshold_ratio),
+        int(max_tokens * settings.context_compress_threshold_ratio),
     )
     used_ratio = used_tokens / max_tokens if max_tokens > 0 else 0
     status = "over_limit" if used_tokens > threshold_tokens else "ok"

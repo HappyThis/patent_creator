@@ -12,7 +12,7 @@ MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_message", "agent_output", "tool
 
 @dataclass(frozen=True, slots=True)
 class MessageSegment:
-    """A safe-cut OpenAI message segment.
+    """A complete OpenAI message segment.
 
     The messages inside a segment can be moved, compressed, or retained as a unit
     without splitting assistant tool calls from their tool results.
@@ -29,15 +29,15 @@ def restore_main_chat_messages(
     current_user_message: str | None = None,
     current_message_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    anchor = context_anchor(events)
+    marker = latest_context_summary_marker(events)
     messages: list[dict[str, Any]] = []
-    if anchor["compressed_markdown"]:
-        messages.extend(prepare_compressed_markdown_messages(anchor["compressed_markdown"]))
+    if marker["compressed_markdown"]:
+        messages.extend(prepare_compressed_markdown_messages(marker["compressed_markdown"]))
 
     visible = [
         event
         for event in events
-        if event.scope == "main" and event.seq >= anchor["cursor_seq"] and event.type in MAIN_CONTEXT_EVENT_TYPES
+        if event.scope == "main" and event.seq >= marker["cursor_seq"] and event.type in MAIN_CONTEXT_EVENT_TYPES
     ]
     messages.extend(project_main_events(visible))
 
@@ -57,7 +57,7 @@ def restore_main_chat_messages(
     return messages
 
 
-def context_anchor(events: list[SessionEvent]) -> dict[str, Any]:
+def latest_context_summary_marker(events: list[SessionEvent]) -> dict[str, Any]:
     marker = next(
         (
             event

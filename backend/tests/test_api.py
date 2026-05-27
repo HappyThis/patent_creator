@@ -19,12 +19,12 @@ class StubLLMClient:
         *,
         system_prompt: str,
         user_prompt: str,
+        messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> str:
-        context = json.loads(user_prompt[user_prompt.index("{") :])
-        message_count = len(context.get("messages_to_merge") or [])
+        message_count = len(messages or [])
         return (
             "<analysis>测试压缩。</analysis>\n"
             "<summary>\n"

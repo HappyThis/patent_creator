@@ -66,16 +66,20 @@ class OpenAICompatibleClient:
         *,
         system_prompt: str,
         user_prompt: str,
+        messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> str:
         client = self._require_client()
+        profile = resolve_model_profile(self.settings)
+        prepared_messages = profile.prepare_messages_for_request(messages or [])
         if self.settings.log_llm_payload:
             logger.debug(
-                "generate_text request model=%s system_len=%d user_len=%d timeout=%s",
+                "generate_text request model=%s system_len=%d messages_count=%d user_len=%d timeout=%s",
                 self.settings.openai_model,
                 len(system_prompt),
+                len(prepared_messages),
                 len(user_prompt),
                 timeout if timeout is not None else self.settings.llm_timeout,
             )
@@ -86,10 +90,10 @@ class OpenAICompatibleClient:
                 "temperature": temperature,
                 "messages": [
                     {"role": "system", "content": system_prompt},
+                    *prepared_messages,
                     {"role": "user", "content": user_prompt},
                 ],
             }
-            profile = resolve_model_profile(self.settings)
             profile.apply_chat_parameters(request_payload)
             self._write_llm_payload_trace(
                 kind="generate_text",

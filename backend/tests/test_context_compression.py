@@ -15,7 +15,7 @@ from app.runtime.context.compression import (
     prepare_compressed_markdown_messages,
 )
 from app.runtime.context.history import project_main_event_segments, restore_main_chat_messages
-from app.runtime.context.usage import estimate_messages_tokens, token_count_with_estimation
+from app.runtime.context.usage import estimate_messages_tokens, token_count_with_estimation, usage_for_messages
 from app.schemas import SessionEvent
 
 
@@ -96,6 +96,18 @@ def test_usage_estimate_prefers_latest_usage_plus_tail() -> None:
 
     assert estimate_messages_tokens([{"role": "user", "content": "abcd"}], char_coefficient=0.5) == 2
     assert token_count_with_estimation(messages, char_coefficient=0.5) == 102
+
+
+def test_compression_threshold_does_not_subtract_reserved_output_tokens(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path, git_user_name="Test User", git_user_email="test@example.com")
+    settings.context_max_tokens = 1000
+    settings.context_reserved_output_tokens = 200
+    settings.context_compress_threshold_ratio = 0.8
+
+    usage = usage_for_messages([{"role": "user", "content": "abcd"}], settings)
+
+    assert usage.threshold_tokens == 800
+    assert usage.reserved_output_tokens == 200
 
 
 def test_prepare_messages_for_request_strips_usage_metadata(tmp_path: Path) -> None:

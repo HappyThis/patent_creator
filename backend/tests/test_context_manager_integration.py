@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.schemas import ChatMessageRequest
+from app.runtime.context.compression import COMPRESSED_MEMORY_PREFIX
 from app.services import AppServices
 
 from helpers import ScriptedLLMClient, create_project, make_settings, tool_call, wait_until_idle
@@ -52,9 +53,13 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
     assert "context_compression_completed" in bus_event_names
     compression_payload = llm.generated_text_prompts[-1]
     assert compression_payload["_timeout"] == 123
+    assert "你是本系统的主 agent" in compression_payload["system_prompt"]
+    assert "上下文滚动压缩 agent" not in compression_payload["system_prompt"]
+    assert "请只执行上下文滚动压缩" in compression_payload["user_prompt"]
     assert "target_estimated_tokens" not in compression_payload
     assert "compressible_messages" not in compression_payload
-    assert len(compression_payload["messages_to_merge"]) >= 3
+    assert "messages_to_merge" not in compression_payload
+    assert len(compression_payload["messages"]) >= 3
     assert "summary" not in summary_event.payload
     assert summary_event.payload["compression_mode"] == "rolling_markdown_memory"
     assert summary_event.payload["compressed_markdown"].startswith("## 当前任务")
@@ -108,10 +113,14 @@ async def test_context_manager_rolls_previous_summary_into_next_summary(tmp_path
     summaries = [event for event in events if event.type == "context_summary"]
     assert len(summaries) == 2
     assert len(llm.generated_text_prompts) == 2
-    assert llm.generated_text_prompts[0]["previous_compressed_markdown"]["content"] == ""
-    assert (
-        llm.generated_text_prompts[1]["previous_compressed_markdown"]["content"]
-        == summaries[0].payload["compressed_markdown"]
+    assert not any(
+        str(message.get("content") or "").startswith(COMPRESSED_MEMORY_PREFIX)
+        for message in llm.generated_text_prompts[0]["messages"]
+    )
+    previous_summary_message = llm.generated_text_prompts[1]["messages"][0]
+    assert previous_summary_message["role"] == "user"
+    assert previous_summary_message["content"] == (
+        f"{COMPRESSED_MEMORY_PREFIX}\n\n{summaries[0].payload['compressed_markdown']}"
     )
     assert summaries[1].payload["cursor_seq_after"] > summaries[0].payload["cursor_seq_after"]
 
@@ -200,5 +209,5 @@ async def test_context_manager_rechecks_context_before_each_tool_followup(tmp_pa
     assert len(llm.generated_text_prompts) == 1
     assert any(
         message.get("role") == "tool" and message.get("tool_call_id") == "call_read"
-        for message in llm.generated_text_prompts[0]["messages_to_merge"]
+        for message in llm.generated_text_prompts[0]["messages"]
     )
