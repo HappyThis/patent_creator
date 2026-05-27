@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 7,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "正确把问题定位为 OpenCode 作为原生本地 runtime 接入，而不是简单增加外部工具入口。",
+    "覆盖了 runtime 注册、可配置发现、适配器合约、会话扫描、会话列表归一化、能力声明和 UI/API gating 的总体方向。",
+    "明确提出 OPENCODE_STATE_DIR/OPENCODE_BIN、兼容式解析、experimental continue、fixture/命令替身验证，基本符合补充约束中“不假设已实现格式或命令”的要求。",
+    "能结合当前项目中已有的 agent-runtimes、/api/agent-runtimes、/api/sessions、local-agent-sync、/api/agents/register 等集成点提出扩展方案。",
+    "技术效果能抽象为异构本地 agent runtime 的状态适配、会话归一化和能力边界控制，具备一定专利化表达。"
+  ],
+  "weaknesses": [
+    "最大缺口是没有设计 OpenCode transcript API/parser 接入，未说明如何把 OpenCode 历史消息归一化为 role、timestamp、text、tool_use、tool_result 或不可解析占位。",
+    "能力声明没有覆盖 terminal/PTY attach gating。当前项目已有 /api/pty/attach 和 TerminalView 针对 claude-code/codex-cli 的能力边界，方案只说 canStreamOutput=false，不能等同于防止终端入口误开。",
+    "continue 机制仍偏假设性，直接写出 opencode continue --session --prompt，但没有规定本地命令失败时如何透传或分类为 binary missing、session missing、provider/model/auth missing 等可诊断错误。",
+    "没有说明 OpenAPI、API index、schema/types、CLI/TUI 或前端 session kind 类型如何同步，容易出现接口契约与实现不一致。",
+    "测试方案只覆盖发现、列表和 continue 的 fixture 思路，缺少 transcript、continue 失败、PTY unsupported、API contract 的可复现验证。",
+    "方案中引入 RuntimeSessionScanner/RuntimeCapabilities 作为新抽象，但没有充分说明如何与当前代码中按 route 聚合 Claude/Codex/Hermes/OpenClaw 的既有实现渐进集成。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript 读取与消息归一化机制，包括无法识别载荷的降级占位。",
+    "OpenCode session detail/transcript API 路由，以及 chat workspace/conversation list 加载 transcript 的具体接入。",
+    "terminal/PTY attach capability gating，应在 /api/pty/attach、TerminalView、split pane 或能力字段中显式禁止 OpenCode 终端附着。",
+    "OpenAPI/API index/schema/type union/前端能力字段传播的契约同步。",
+    "continue 命令失败的真实错误返回与诊断分类，不应只返回泛化失败或实验性 warning。",
+    "覆盖 session list、transcript、continue、PTY unsupported、API contract 的 OpenCode fixture 与 binary stub 测试。"
+  ],
+  "unsupported_claims": [
+    "当前源码未发现已有 RuntimeSessionScanner 或 RuntimeCapabilities 结构；作为拟新增机制可以成立，但不能当作现有项目基础事实。",
+    "当前源码没有统一共享的 SessionStats 类型兼容 Claude/Codex/Hermes/OpenClaw；Claude、Codex、Hermes 各自有 stats 类型，/api/sessions 再映射为统一列表对象。",
+    "OpenCode 默认状态目录 ~/.opencode/、sessions/ 子目录、config.json、auth status、默认端口/PID 文件、continue --session --prompt 等均不是当前项目中可验证的事实，方案虽在风险中声明待确认，但主流程写得过于具体。",
+    "opencodeSessionScanner、detectOpenCode、installOpenCodeLocal、opencode-harness.spec.ts 等具体名称在当前源码中不存在，应视为拟新增命名而非已存在实现。"
+  ],
+  "score_rationale": "该方案方向正确，能把 OpenCode 作为异构本地 runtime 通过可配置发现、适配器、会话归一化和能力声明接入 Mission Control，并注意到未知能力要 experimental/gating。按一般维度可达到可用方案档位。但 rubric 明确要求 transcript、continue 诊断失败、PTY gating、API 契约和可复现测试等关键工程边界；本方案至少缺失 transcript、PTY gating、API 契约和 continue 失败分类，触发“三个或更多关键机制缺失时总分不得高于 72”的上限。因此总分定为 72，而不是按总体架构完整度给到 75 分以上。"
+}

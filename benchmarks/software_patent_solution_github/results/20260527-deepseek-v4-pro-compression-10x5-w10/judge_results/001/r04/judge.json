@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 13,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "能把问题定位为异构本地 agent runtime 接入，而不是只增加一个 UI 选项。",
+    "覆盖了 runtime 类型注册、可配置本地状态发现、兼容式解析、session list 归一化、continue 命令模板和能力边界提示等核心方向。",
+    "基本遵守补充约束，没有把 OpenCode 状态目录、文件格式或继续命令当作已确认事实，而是提出配置、适配器和命令替身。",
+    "能说明新增 OpenCode 不应破坏 Claude、Codex、Hermes、OpenClaw 既有路径，并形成一定的专利化抽象。"
+  ],
+  "weaknesses": [
+    "缺少 transcript API/parser 的接入方案，没有说明如何读取 OpenCode 历史消息、归一化 role/content/tool payload 或对不可解析载荷降级展示。",
+    "没有明确 terminal/PTY attach 能力 gating；当前项目存在 terminal view 和 /api/pty/attach 路径，高分方案应说明 OpenCode 未支持时禁用或返回 unsupported。",
+    "未覆盖 OpenAPI、API index/schema、前端能力字段传播等契约同步，容易出现实现与文档/测试不一致。",
+    "测试验证不足，只泛泛提到 fixture/命令替身，未覆盖 session list、transcript、continue、PTY unsupported、API/E2E 等可复现验证路径。",
+    "continue 方案只有命令模板和输出捕获，缺少 binary missing、provider/model missing、session missing、命令失败透传等诊断性失败处理。",
+    "FrameworkAdapter/eventBus 段落更像通用 agent 框架适配，不足以替代 Mission Control 本地 session runtime 的发现、transcript 和 continue 链路。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript 读取、消息结构归一化与 /api/sessions/transcript kind 路由。",
+    "OpenCode terminal/PTY attach capability gating，以及 terminal view / /api/pty/attach 的 unsupported 行为。",
+    "OpenAPI、API index、类型/schema 与前端能力字段同步。",
+    "真实结构本地状态 fixture、OpenCode binary stub、API/E2E 测试覆盖 session list/transcript/continue/PTY unsupported。",
+    "continue 命令失败的结构化或至少可诊断错误返回。",
+    "settings、onboarding、conversation list、chat workspace 的完整接入路径说明。"
+  ],
+  "unsupported_claims": [
+    "方案写法暗示 GET /api/sessions 已通过 getLocalOpenCodeSessions() 接入 OpenCode，但当前源码只聚合 gateway、Claude、Codex、Hermes，本快照中没有 getLocalOpenCodeSessions() 或 opencode-sessions.ts。",
+    "detectOpenCode、OpenCodeSessionStats、OpenCodeAdapter、OPENCODE_STATE_DIR、OPENCODE_CONFIG_PATH、OPENCODE_BIN、OPENCODE_CONTINUE_COMMAND 等具体符号在当前源码中不存在；作为新增设计可以接受，但不能作为已存在项目事实。",
+    "方案称 POST /api/sessions 的 set-thinking、set-verbose、set-reasoning、set-label 可对 OpenCode 返回不支持提示，但当前 route 不携带 runtime kind，实际是直接调用 OpenClaw gateway RPC。"
+  ],
+  "score_rationale": "该方案属于“方向正确但关键工程边界缺失”的可用草稿。它较好覆盖了 runtime 注册、本地状态发现、session list 归一化、continue 模板和能力边界声明，且基本遵守不要假设 OpenCode 目录/格式/命令已实现的约束。但 rubric 明确要求高分方案必须覆盖 transcript、PTY gating、API 契约同步和可复现测试。该答案缺失 transcript API/parser、terminal/PTY gating、OpenAPI/API index 契约同步，测试也未覆盖关键路径；同时 continue 失败处理不够诊断化。依据分数上限规则，缺失三个以上关键机制时总分不得高于 72 分，因此即使总体架构方向较好，也不能进入 75 分以上档位。"
+}

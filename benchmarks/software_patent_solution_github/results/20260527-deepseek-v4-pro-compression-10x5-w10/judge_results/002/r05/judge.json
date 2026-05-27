@@ -1,0 +1,47 @@
+{
+  "status": "scored",
+  "total_score": 74,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了问题本质：Mission Control 的任务、会话、spawn history、成本、审查、评估和安全数据分散，缺少统一可查询运行记录契约。",
+    "方案能结合当前项目中真实存在的若干分散模块和表，如 spawn_history、token_usage、mcp_call_log、security_events、quality_reviews、eval_runs、event-bus 和 task-costs。",
+    "提出了以一次 agent 执行为主线，把工具调用、成本、审查、安全事件和评估结果作为附着片段聚合的方向，符合“不是普通日志表”的需求。",
+    "能说明查询性、追踪性、评估性、外部访问性等技术效果，并识别了 mcp_call_log 缺少 task_id 等关联断裂风险。"
+  ],
+  "weaknesses": [
+    "把 spawn_history 直接作为统一 run 主干，但当前表没有 task_id，recordSpawnStart/recordSpawnFinish 也没有接入 task-dispatch 自动派发路径，难以支撑稳定的 task-session-spawn 统一 run 生命周期。",
+    "缺少明确的结构化 provenance/lineage 数据结构和生成流程，只是用 task_id、session_id、agent_name 等关联键描述来源，不能完整回答 run 从哪里来、输入输出摘要和可校验 lineage。",
+    "评估附着没有形成 run 级契约。当前 eval_runs 实际按 agent/layer 写入，方案却描述为可通过 task_id 绑定到 spawn；也缺少 eval attach/update API、benchmark 元数据和 run 级事件。",
+    "外部工具能力主要停留在 REST API、导出和事件订阅的设想，没有给出 MCP 工具层的 run list/detail、provenance、eval attach、leaderboard 等具体接口。",
+    "leaderboard/排行聚合基本缺失，只描述漂移评估和成本查询，未形成基于 run eval、成功率、成本的统计视图。",
+    "部分关键源码事实不准确，导致可实施性明显下降，尤其是字段名、事件类型、API 和模块函数能力的描述与当前项目不匹配。"
+  ],
+  "missing_key_mechanisms": [
+    "独立或等价的一等 RunRecord/AgentRun 对象，包含 run_id、spawn_id、task_id、session_id、agent_id、workspace_id、状态、输入输出摘要、artifact refs、错误、token/cost 和元数据。",
+    "spawn 创建、完成、失败、取消路径的自动桥接，并明确接入当前 task-dispatch/gateway/session spawn 的实际代码边界。",
+    "结构化 provenance/lineage 字段和生成流程，用于记录 sourceType、triggeredBy、关联对象、输入摘要、输出摘要和可审计 lineage。",
+    "run 级 eval attach/update 契约，包括 score、pass/fail、说明、指标、benchmark/golden set 标识、评估版本和附着事件。",
+    "MCP 工具层和 API 层的具体 run 查询、provenance 查询、评估附着、leaderboard 聚合接口。",
+    "将 mcp_call_log、security_events、token_usage 等增量事件稳定关联到具体 run_id 的采集或降级策略，而不是主要依赖 agent_name/workspace_id/时间窗口。"
+  ],
+  "unsupported_claims": [
+    "方案称 spawn_history 以 task_id、session_id、agent_name、workspace_id 为四维主关联键并在 spawn 开始时写入 task_id；当前 spawn_history 表和 recordSpawnStart 输入均没有 task_id，task-dispatch 也没有调用 recordSpawnStart/recordSpawnFinish。",
+    "方案称事件总线有 task.dispatched、task.completed、task.failed、agent.spawned、agent.completed 等事件；当前 event-bus 类型中没有这些 agent/run 生命周期事件，task-dispatch 主要广播 task.status_changed 和 task.updated。",
+    "方案称 eval_runs 通过 agent_name + task_id 绑定单次运行，并包含 evaluated_at、evaluator_version、details 等字段；当前 eval_runs 没有 task_id、evaluated_at、evaluator_version，字段为 detail、created_at、golden_dataset_id 等。",
+    "方案称 Layer 2 从 eval_traces 读取推理链并分析逻辑跳跃、重复推理和收敛步数；当前 agent-evals 的 trace 评估实际基于 mcp_call_log 的工具调用数量与唯一工具数。",
+    "方案称 quality_reviews 字段包括 reviewer_agent、decision、feedback、retry_count；当前表和 API 使用 reviewer、status、notes，重试计数在 tasks.dispatch_attempts。",
+    "方案称 security_events 通过 agent_name + session_id 关联且记录 trust_score_impact；当前 security_events 没有 session_id 或 trust_score_impact，信任分更新函数也不是 logSecurityEvent 的自动内联更新。",
+    "方案称 task-costs.ts 导出 getCostsByTask、getCostsByAgent、getCostTimeline 并结合 spawn_history.duration_ms 计算时间成本；当前模块主要提供 buildTaskCostReport/calculateStats，成本来自 token 使用计算，未结合 spawn_history duration。",
+    "方案称 exports 目录可导出运行记录、评估结果和成本统计；当前只有 /api/export 支持 audit/tasks/activities/pipelines，不支持 runs/evals/cost 聚合导出。"
+  ],
+  "score_rationale": "该方案方向正确，属于可用但不完整的统一运行记录思路：它认识到不能新增普通日志表，并尝试复用现有 task、session、spawn、cost、eval、event 等分散能力形成可查询视图。但它没有给出真正的一等 run/provenance 模型，eval 也没有 run 级 attach/update 契约，MCP 工具和 leaderboard 关键机制缺失。同时，多个核心论证依赖当前源码中不存在的字段、事件和接入路径，尤其是 spawn_history 缺少 task_id 且没有自动桥接派发路径、eval_runs 不按 task/run 绑定。根据 rubric，上述核心源码事实不成立使总分通常不得高于 75 分；本答案机制较完整但工程边界和源码准确性不足，因此给 74 分。"
+}

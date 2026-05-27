@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 13,
+    "technical_mechanism": 14,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 7,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "能结合当前项目已有 runtime detection、/api/sessions 聚合、Claude/Codex/Hermes 本地会话扫描、continue 接口、FrameworkAdapter 和 local-agent-sync 机制来设计 OpenCode 接入。",
+    "较好遵守“不假设 OpenCode 本地格式/继续命令已实现”的约束，提出 OPENCODE_* 配置、解析器链、命令模板、不可用能力提示和 fixture/命令替身思路。",
+    "会话列表归一化路径较具体，说明了 OpenCode 会话如何映射到现有 Session 字段并并入已有排序/去重流程。",
+    "技术构思能抽象为异构本地 agent runtime 的状态发现、适配、归一化和能力边界控制，具备一定专利表达价值。"
+  ],
+  "weaknesses": [
+    "缺少 OpenCode transcript API/parser 的核心设计。当前项目已有 /api/sessions/transcript 独立读取 Claude/Codex/Hermes 历史消息，方案只输出 SessionStats，没有说明 OpenCode 历史消息如何归一化为 role、timestamp、text、tool_use/tool_result 或不可解析占位。",
+    "没有明确 terminal/PTY attach capability gating。当前项目只允许 claude-code 和 codex-cli 走 tmux/PTY，方案仅提到 OpenClaw 网关控制项不可用，未覆盖 OpenCode 在终端视图/attach API 中应被禁用或返回 unsupported。",
+    "缺少 OpenAPI/API index/schema 契约同步和前端能力字段传播设计，容易造成接口文档、UI gating 与后端行为不一致。",
+    "continue 设计有命令模板和不可用错误，但缺少对 binary missing、provider/model missing、session missing、命令退出失败等诊断性失败返回的结构化处理。",
+    "测试验证不足。虽然提到 fixture 和命令替身，但没有形成 session list、transcript、continue、PTY unsupported、API contract 的可复现测试矩阵。",
+    "本地会话去重继续使用 local:{sessionId}，可能使 OpenCode 与 Claude/Codex 同 ID 会话互相覆盖；方案风险段承认该问题，但主流程仍把它作为默认机制。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript 读取适配器和统一消息结构归一化。",
+    "/api/sessions/transcript 对 kind=opencode 的路由、错误返回和不可解析载荷降级。",
+    "OpenCode 在 terminal view、/api/pty/attach、split-pane/chat workspace 中的 canAttachTerminal=false 或 unsupported_kind gating。",
+    "OpenAPI、API index、前端 SessionKind/能力字段对 opencode 的同步更新。",
+    "基于真实结构 fixture 的 session list/transcript 测试、OpenCode binary stub 的 continue 测试，以及 PTY unsupported 测试。",
+    "continue 命令失败的诊断性错误分类或至少透传本地命令 stderr/exit 信息。"
+  ],
+  "unsupported_claims": [
+    "声称 RuntimeId 新增 opencode 后会“自动获得安装作业支持”和 generateDockerSidecar('opencode') 会生成对应模板；当前 startInstall 需要显式 INSTALL_FNS 分支，generateDockerSidecar 对非 openclaw 默认返回 Hermes sidecar。",
+    "声称 detectOpenCode 可检查 OPENCODE_API_KEY 或 ~/.opencode/auth.json；当前项目没有 OpenCode 配置依据，且需求明确不能假设 OpenCode 本地状态/认证文件已知。",
+    "声称 OpenCode 代理定义位于 ~/.opencode/agents/ 且存在 soul.md/identity.md 等可双向同步；可作为可配置候选，但当前项目和需求没有证明这是 OpenCode 真实目录或文件契约。",
+    "声称 OpenCodeAdapter 将代理元数据写入系统数据库；当前 FrameworkAdapter 示例主要广播 eventBus，数据库写入并非该接口的既有保证。"
+  ],
+  "score_rationale": "该方案属于方向正确但关键工程边界不完整的答案。它对现有 runtime/session 聚合和本地会话扫描体系理解较好，也提出了可配置发现、解析器链、会话归一化和继续命令模板，整体可作为 OpenCode 接入的后端雏形。但按照 rubric，高分必须覆盖 transcript、continue、conversation/chat workspace、settings/onboarding、terminal capability gating、API 契约和可复现测试。该方案缺失 transcript 解析与消息归一化，未明确 PTY/terminal 禁用，未同步 OpenAPI/API index/schema，且测试矩阵不足；同时存在若干当前源码不支持的“自动获得安装/sidecar”类断言。因此适用“缺失三个或更多关键机制时总分不得高于 72 分”的上限，给 72 分。"
+}

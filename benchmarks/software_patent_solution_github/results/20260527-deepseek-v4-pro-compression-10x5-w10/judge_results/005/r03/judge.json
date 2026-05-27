@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 8,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 6,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别外部 webhook/RPC/Worker 调用方需要快速 accepted、后台执行、后续查询和安全重试。",
+    "提出持久任务表、幂等键、任务状态机、条件领取、状态查询、取消、清理和回调通知等较完整的生命周期机制。",
+    "能把方案放在 Think 的 Session、TurnQueue、AbortRegistry、ResumableStream、runFiber 等现有边界内，整体不是另建一套推理系统。",
+    "对取消与迟到完成、clearMessages 联动、幂等键保留窗口等竞态有一定考虑。"
+  ],
+  "weaknesses": [
+    "核心缺陷是接收请求时立即把用户消息写入 Session，并把任务记录作为同事务附属记录；这不是参考要求的“提交记录先持久化、领取执行时再应用消息”的安全应用边界。PENDING 任务已经污染会话，取消或执行前失败会留下已应用用户消息。",
+    "缺少等价于 messagesAppliedAt/applied checkpoint 的状态字段，无法清晰区分写入前崩溃、写入后但未运行、运行中崩溃这几类恢复路径。",
+    "后台执行唤醒/drain 机制描述不足，只给了条件 UPDATE 领取，没有说明 accepted 返回后如何可靠触发 keepAlive/schedule/alarm drain。",
+    "EXECUTING 恢复规则偏乐观，依赖“检查是否存在完整 assistant 回复”或“根据 parent_id 判断”重新推理，缺少 requestId、streamId、fiber/recovery 证据绑定和无法安全恢复时标错的规则。",
+    "清理操作提出删除关联会话消息，可能破坏已应用的普通会话历史；应把 submission 删除与 Session 消息删除分成显式不同语义。",
+    "缺少 submission 生命周期 observability events，只用回调通知替代，不满足高分锚点。"
+  ],
+  "missing_key_mechanisms": [
+    "独立 durable submission ledger 保存待应用 messages，而不是 accepted 时直接写入 Session。",
+    "messagesAppliedAt、applied version、message id set 或等价 durable apply boundary。",
+    "accepted 后可靠唤醒后台 drain 的具体机制，以及 pending -> running 与 requestId/turnId 绑定。",
+    "恢复时对未应用、已应用但无恢复证据、已应用且有 chat recovery 证据三类情况的安全判定。",
+    "所有终态更新的条件写入规则，覆盖 cancelled、skipped、error、deleted 后迟到完成或迟到错误。",
+    "submission lifecycle observability events。"
+  ],
+  "unsupported_claims": [
+    "“onRPC 入口”不是当前 Think 的明确生命周期钩子；当前更接近公开 RPC callable 方法或 Agent onRequest。",
+    "“Session.appendMessage 与 think_tasks 插入在同一 SQLite 事务中完成”缺少当前源码依据；appendMessage 是 Session provider 方法，内部还写 FTS，方案没有说明如何包入同一 Durable Object transaction。",
+    "“ResumableStream 在 DO 恢复后让推理继续”表述过强；当前 ResumableStream 主要持久化并重放流式 chunk，聊天恢复由 runFiber/onChatRecovery/continueLastTurn 决定。",
+    "“TurnQueue 的 generation tracking 确保恢复任务不会与 WebSocket 推理冲突”依据不足；TurnQueue 负责串行化和 reset 失效，不是 submission 级恢复冲突协议。",
+    "“通过 SessionManager 的 list 机制列出异步任务”依据不足；SessionManager list 面向 session，不是新增 think_tasks 记录。"
+  ],
+  "score_rationale": "该方案属于方向正确但有关键工程边界缺口的可用方案。它覆盖了持久任务表、幂等、状态查询、取消、清理、条件领取和部分恢复竞态，技术细节明显多于普通异步队列方案。但它把用户消息在提交 accepted 阶段就写入 Session，没有独立保存待应用消息并在领取执行时记录应用边界，因此不满足 rubric 中“持久消息应用边界”的核心要求；按分数上限规则，总分通常不得高于 75。恢复、drain 唤醒、终态条件更新和 observability 也不完整，所以给 75 分而不是更高。"
+}

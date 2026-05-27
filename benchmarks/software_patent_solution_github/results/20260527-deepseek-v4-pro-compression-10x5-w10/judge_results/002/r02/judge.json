@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 13,
+    "technical_mechanism": 12,
+    "essential_features": 6,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "能结合当前项目识别 tasks、spawn_history、token_usage、quality_reviews、activities、audit_log、ServerEventBus、/api/sessions、task-dispatch、task-costs、agent-evals 等分散执行数据来源。",
+    "技术问题判断基本准确：现有执行信息分散，缺少统一可查询、可追踪、可评估的执行记录契约。",
+    "提出 Task -> Session -> Spawn 的分层关联、spawn_history 增加 task_id、token_usage 成本归因、质量审查和事件摘要增强，具备一定工程落地性。",
+    "强调不废弃现有表和调度体系，通过增量字段、聚合查询和事件增强实现兼容演进，符合需求中复用 Mission Control 基础的方向。"
+  ],
+  "weaknesses": [
+    "没有形成明确的 run 级对象或等价 run id，整体以 task 为主轴聚合，难以稳定表达“每一次 agent 执行”这个独立运行单元。",
+    "缺少结构化 provenance/lineage 字段和生成流程，不能清晰证明一次执行由哪个外部调用、任务、会话、输入摘要和输出摘要派生。",
+    "评估部分主要复用 quality_reviews 和 agent-evals，缺少 run 级 eval attach/update 契约，也没有评分、pass/fail、benchmark、指标元数据与具体 run 的绑定方式。",
+    "没有说明 MCP 工具层如何查询 run、读取 provenance、附着 eval 或生成 leaderboard；外部访问只停留在 SSE/webhook/聚合接口概念。",
+    "leaderboard 或长期质量排行聚合机制基本缺失，不满足后续质量评测和排行榜扩展的关键锚点。",
+    "部分源码事实表述不够准确，降低了方案作为当前项目交底依据的可信度。"
+  ],
+  "missing_key_mechanisms": [
+    "统一 AgentRun/ExecutionRun 类运行记录对象或等价的 runId 契约。",
+    "provenance/lineage 的结构、生成时机和可校验关联链。",
+    "run 生命周期完整桥接：创建、running、completed、failed、cancelled/terminated 的条件更新和终态保护。",
+    "run 级 eval attach/update API，包含 score、pass/fail、评估说明、指标或 benchmark 元数据。",
+    "基于 run/eval/cost/success 的 leaderboard 或统计视图。",
+    "MCP 工具或外部工具接口：run list/detail、provenance 查询、eval 附着、leaderboard 查询。"
+  ],
+  "unsupported_claims": [
+    "方案称 /api/sessions 已统一 Gateway、Claude Code 和 Hermes 三源；当前源码中的 sessions API 合并的是 OpenClaw gateway、Claude local 和 Codex local，Hermes scanner 存在但未接入该 API。",
+    "方案举例 task.assigned、task.in_progress、task.completed 作为现有 ServerEventBus 任务事件；当前事件类型主要是 task.created、task.updated、task.deleted、task.status_changed。",
+    "方案将 agent-evals 描述为可通过 Agent -> Spawn -> Task 路径关联到任务上下文；当前 eval_runs 主要按 agent_name/workspace_id 存储，spawn_history 当前也没有 task_id 字段，因此该链路是拟议增强而非已有能力。",
+    "方案称每次模型调用记录都会携带 taskId；当前只有部分入口支持或写入 task_id，task-dispatch 里的 direct Claude token_usage 插入未写 task_id。",
+    "方案描述 task-dispatch 在 dispatch 成功时触发 recordSpawnStart；当前源码中 recordSpawnStart/recordSpawnFinish 未被其他模块调用。"
+  ],
+  "score_rationale": "该方案不是普通日志表方案，且对当前项目分散数据源的阅读较充分，能提出一套 Task -> Session -> Spawn 的聚合契约和增量接入路径，因此高于弱答案档。但它没有明确 run 级对象/runId，也缺失 provenance/lineage、run 级 eval attach/update、MCP 工具访问和 leaderboard 聚合等评分锚点；这些是本题判断“结构化运行记录契约”的关键机制。按 rubric 的上限规则，同时缺失 provenance、eval attach、MCP/leaderboard 等多个关键机制时不宜超过 72 分。方案中还有若干源码事实不准确或把拟议增强表述得接近现状，因此可实施性和环境理解也需扣分。"
+}

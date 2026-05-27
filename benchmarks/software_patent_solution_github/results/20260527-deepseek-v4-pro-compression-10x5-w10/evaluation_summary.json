@@ -1,0 +1,372 @@
+[
+  {
+    "case_id": "001",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      72.0,
+      72.0,
+      72.0,
+      72.0,
+      77.0
+    ],
+    "average_score": 73.0,
+    "min_score": 72.0,
+    "max_score": 77.0,
+    "score_stddev": 2.0,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "FrameworkAdapter/eventBus 段落更像通用 agent 框架适配，不足以替代 Mission Control 本地 session runtime 的发现、transcript 和 continue 链路。",
+      "continue 方案只有命令模板和输出捕获，缺少 binary missing、provider/model missing、session missing、命令失败透传等诊断性失败处理。",
+      "continue 机制仍偏假设性，直接写出 opencode continue --session --prompt，但没有规定本地命令失败时如何透传或分类为 binary missing、session missing、provider/model/auth missing 等可诊断错误。",
+      "continue 机制只说调用原生命令或 stub，不足以说明本地命令失败、provider/model/auth/session 缺失时如何返回可诊断错误。",
+      "continue 能力只被声明为未知或通过环境变量开启，没有 OpenCode 专属 continue 路由、命令构造、命令替身验证或本地失败的诊断性错误返回。"
+    ],
+    "top_missing_key_mechanisms": [
+      "/api/sessions/continue 对 opencode 的专属命令构造、可配置 binary、命令替身测试和失败分类。",
+      "/api/sessions/transcript 对 kind=opencode 的路由、错误返回和不可解析载荷降级。",
+      "/api/sessions/transcript 对 runtime kind=opencode 的路由接入。",
+      "OpenAPI/API index/schema 与前端会话能力字段的契约同步。",
+      "OpenAPI/API index/schema/type union/前端能力字段传播的契约同步。"
+    ]
+  },
+  {
+    "case_id": "002",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      84.0,
+      72.0,
+      78.0,
+      74.0,
+      74.0
+    ],
+    "average_score": 76.4,
+    "min_score": 72.0,
+    "max_score": 84.0,
+    "score_stddev": 4.2708313008125245,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "AgentRun 被定义为关系聚合视图，但没有给出清晰的 canonical run 持久化位置，CREATED/DISPATCHED/IN_FLIGHT/ARCHIVED 等状态缺少可靠落盘字段和终态保护机制。",
+      "eval 仍主要按 agent/layer 描述，缺少可信的 run 级 attach/update 契约、benchmark 元数据和与单次执行的稳定绑定。",
+      "eval 附着机制偏向执行完成后内部评估写入，缺少外部评测系统或人工评审对指定 run 附着、更新、标注 benchmark 元数据的契约。",
+      "leaderboard 只作为后续效果被提到，没有给出基于 run 级 eval、成功率、成本的聚合模型或接口。",
+      "leaderboard 或长期质量排行聚合机制基本缺失，不满足后续质量评测和排行榜扩展的关键锚点。"
+    ],
+    "top_missing_key_mechanisms": [
+      "MCP server 层的 run 查询、provenance 查询、eval attach/update、leaderboard 工具。",
+      "MCP 工具层和 API 层的具体 run 查询、provenance 查询、评估附着、leaderboard 聚合接口。",
+      "MCP 工具层的 run list、run detail、provenance、eval attach、leaderboard 能力。",
+      "MCP 工具层的运行记录查询、溯源查询、评估附着和排行榜接口。",
+      "MCP 工具或外部工具接口：run list/detail、provenance 查询、eval 附着、leaderboard 查询。"
+    ]
+  },
+  {
+    "case_id": "003",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      79.0,
+      84.0,
+      84.0,
+      84.0,
+      80.0
+    ],
+    "average_score": 82.2,
+    "min_score": 79.0,
+    "max_score": 84.0,
+    "score_stddev": 2.227105745132009,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "UI 可见性只提到 conflict/failed 图标，缺少同步状态、最近同步时间、任务数量、手动同步按钮等管理反馈。",
+      "任务看板或管理 UI 的可见反馈不够完整，只提到同步状态标记和外部修改提示，没有任务数量、最近同步时间、错误详情、手动同步按钮等闭环。",
+      "冲突处理采用数据库覆盖远端的描述较粗，且 git pull --rebase 与本地提交/覆盖顺序容易产生破坏性覆盖风险，需要更明确的非破坏性策略或人工介入状态。",
+      "初始化流程不够完整：只提到首次启用 clone 和初始全量同步风险，没有定义 uninitialized/ready/syncing/error 等状态模型、目录初始化、版本文件或远端检查流程。",
+      "双向同步和最后写入者胜出策略较激进，可能覆盖用户或 agent 的有效修改，缺少非破坏性冲突记录、人工介入或字段级合并说明。"
+    ],
+    "top_missing_key_mechanisms": [
+      "仓库初始化 API、状态查询 API、手动同步/重试 API。",
+      "仓库初始化流程：创建目录结构、版本文件、agent 描述文件、初始 commit、远端/分支检查。",
+      "任务看板或管理 UI 中的同步可见反馈。",
+      "任务看板或管理 UI 的同步状态反馈：enabled/disabled、syncing/error、lastSyncAt、lastError、任务数量或待重试数量。",
+      "任务看板或管理 UI 的外部同步状态反馈。"
+    ]
+  },
+  {
+    "case_id": "004",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      93.0,
+      80.0,
+      88.0,
+      82.0,
+      82.0
+    ],
+    "average_score": 85.0,
+    "min_score": 80.0,
+    "max_score": 93.0,
+    "score_stddev": 4.8166378315169185,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "SignalStore 最小接口不完整。文中接口只有 getByPath、save、deleteByPath、migrateFromMarkdown，缺少 getMany、batchUpdate、update(updater)、list/scan 等对批量检索融合、批量访问回写和孤儿记录修复很关键的能力。",
+      "dream/consolidate/prune/synthesize 的接入只间接出现，未像 search、curate、archive 一样展开流程。",
+      "sidecar store 的接口边界不够完整，只概括为加载、查询、更新、删除和批量刷盘，未明确 getMany、batchUpdate、list/scan 等最小接口能力。",
+      "失败隔离主要写了默认值回退和 fail-open，但缺少 sidecar 读写失败日志、诊断指标或后续 repair 机制。",
+      "字段分层中把 createdAt、updatedAt 全部迁出 Markdown，和稳定语义 frontmatter 可保留内容创建/更新时间的参考边界不完全一致；当前源码中这些字段在 scoring 中，但专利方案应更清楚地区分内容时间与运行时信号时间。"
+    ],
+    "top_missing_key_mechanisms": [
+      "SearchKnowledgeService/buildFreshIndex、memory-symbol-tree、dream consolidate/prune/synthesize、archive candidate 判断等路径如何统一改为融合对象的更具体接入细节。",
+      "dream、prune、synthesize、consolidate 等自动整理路径中哪些操作只更新 sidecar、哪些操作更新 Markdown 的更细流程边界。",
+      "sidecar failure logging 和可观测性设计。",
+      "sidecar list/scan/orphan repair 能力，用于清理 Markdown 删除、重命名、归档失败后残留的孤儿信号。",
+      "sidecar 孤儿记录扫描、重命名追踪或定期一致性修复机制。"
+    ]
+  },
+  {
+    "case_id": "005",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      74.0,
+      82.0,
+      75.0,
+      68.0,
+      75.0
+    ],
+    "average_score": 74.8,
+    "min_score": 68.0,
+    "max_score": 82.0,
+    "score_stddev": 4.445222154178573,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "EXECUTING 恢复规则偏乐观，依赖“检查是否存在完整 assistant 回复”或“根据 parent_id 判断”重新推理，缺少 requestId、streamId、fiber/recovery 证据绑定和无法安全恢复时标错的规则。",
+      "reset/clear conversation 与外部任务 ledger 的同步处理不足，只泛泛提到 queued turn stale，没有说明 pending/running 提交在 reset 后应如何标记 skipped/aborted/error 并防止恢复重放。",
+      "取消 pending 任务的语义不够具体；通过 requestId/AbortRegistry 更适合 running turn，但 received/pending 尚未生成有效 requestId 时如何阻止后续执行说明不足。",
+      "取消机制依赖 requestId/AbortRegistry，但没有说明 requestId 在任务表中的生成、持久化和 received/queued 尚未真正开始执行时如何取消。",
+      "只对 received -> running 提到条件 UPDATE，未要求 completed/failed/aborted 等终态条件更新，迟到的完成或错误路径可能覆盖已取消、清理或 reset 后的终态。"
+    ],
+    "top_missing_key_mechanisms": [
+      "accepted 后可靠唤醒后台 drain 的具体机制，以及 pending -> running 与 requestId/turnId 绑定。",
+      "completed/error/aborted/skipped 的条件终态更新，避免迟到结果覆盖已取消或已跳过任务。",
+      "durable messagesAppliedAt、applied version、applied message ids 或等价的会话应用 checkpoint。",
+      "list/delete/cleanup API、幂等键保留窗口和 submission 生命周期观测事件。",
+      "messagesAppliedAt、applied checkpoint、applied message id set 或事务版本等 durable apply boundary。"
+    ]
+  },
+  {
+    "case_id": "006",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      78.0,
+      89.0,
+      78.0,
+      80.0,
+      86.0
+    ],
+    "average_score": 82.2,
+    "min_score": 78.0,
+    "max_score": 89.0,
+    "score_stddev": 4.48998886412873,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "request-lifetime 模式中标签页关闭或组件卸载发送取消的可靠性没有展开，容易受 WebSocket 关闭时机限制。",
+      "request-lifetime 模式把组件 cleanup/WebSocket 断开映射为客户端自动发送取消，但浏览器刷新或断网时客户端发送 cancel 的可靠性和服务端 close-side 策略没有展开。",
+      "turnOwnership 配置、ownership 上下文、connectionId 取消字段等是合理设计扩展，但没有精确定义如何落到现有 WebSocketChatTransport/useAgentChat API 和协议类型。",
+      "“连接已断开后重连补发 cancel”缺少可实施的数据结构、持久化策略和浏览器刷新/关闭后的触发路径。",
+      "可配置策略没有落到真正的 abort policy。方案把 resume=false 称为 request-lifetime 模式，但这只是不恢复流，不等价于普通 client abort/disconnect 自动取消服务端 turn。"
+    ],
+    "top_missing_key_mechanisms": [
+      "active request id 在 local detach、explicit cancel、done/replayComplete、late chunk 场景下的保留与清理规则。",
+      "fallback/observed server turn 的 active id 注册、取消入口和多标签权限/竞态处理。",
+      "observed/fallback stream 的取消登记机制，以及跨标签场景下某一标签关闭不影响其他观察者的精确规则。",
+      "request-lifetime 模式下断开取消的可靠触发点，尤其是刷新、网络断开和 close event 不能保证客户端发帧的情况。",
+      "从现有 WebSocketChatTransport onAbort 中拆分本地 detach cleanup 与 server cancel frame 的具体改造点。"
+    ]
+  },
+  {
+    "case_id": "007",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      80.0,
+      82.0,
+      87.0,
+      78.5,
+      80.0
+    ],
+    "average_score": 81.5,
+    "min_score": 78.5,
+    "max_score": 87.0,
+    "score_stddev": 2.9664793948382653,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "Think 与 AIChatAgent 的适配边界说明不够严谨：一方面声称四种组合均可用，另一方面又说 AIChatAgent 后续补齐，缺少分别的执行、恢复、取消差异。",
+      "基本只按 Think/HelperAgent 路径展开，未分别说明 AIChatAgent 的执行、恢复、取消、流式 chunk 读取与适配边界，也没有说明混合 Think/AIChatAgent 组合。",
+      "完全缺失 headless 子 agent 中浏览器 client tools 不可用、降级或父侧中介执行策略，触发 rubric 上限。",
+      "客户端聚合层主要停留在事件应用和渲染描述，缺少明确的 raw message subscription/reducer/hook API 边界。",
+      "客户端聚合层只停留在样式和来源字段描述，没有形成类似 useAgentToolEvents/applyChunkToParts 的可实现 hook/协议边界。"
+    ],
+    "top_missing_key_mechanisms": [
+      "AIChatAgent 与 Think 分别作为父/子时的具体适配差异、阶段边界和恢复/取消语义。",
+      "AIChatAgent 子运行的输入消息、流式输出、保存消息、恢复和取消适配细节。",
+      "AIChatAgent 适配方案，包括其 onChatMessage/saveMessages、流存储和取消恢复如何接入 retained child run。",
+      "AIChatAgent 适配路径和 Think 适配路径的差异化恢复、取消、消息持久化机制。",
+      "Think agent 子运行的步骤流、恢复和中断处理适配细节。"
+    ]
+  },
+  {
+    "case_id": "008",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      82.0,
+      88.5,
+      82.0,
+      82.0,
+      87.0
+    ],
+    "average_score": 84.3,
+    "min_score": 82.0,
+    "max_score": 88.5,
+    "score_stddev": 2.85657137141714,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "CSP 与代码注入表述存在张力：一方面说禁止 eval，另一方面又说 new Function；还提到 iframe 中 importScripts，普通 iframe window 并不支持该 API。",
+      "pending tool calls 的终止语义不够完整：超时或 iframe 销毁时如何 reject 未完成的 tool_call Promise、移除 listener、清空 pending call map 没有展开。",
+      "与 agent chat/client tool 的协作还不够闭环：现有 createCodeTool 的 execute 语义偏服务端执行，浏览器侧 executor 如何通过 onToolCall/addToolOutput 或专门 client-side code tool 回传结果没有具体到可接入流程。",
+      "与当前 codemode 的 ToolProvider/ResolvedProvider 多 provider 路由模型对接不够精确，协议中 ToolCallRequest 只有 toolName，没有独立 provider 字段，依赖点分名前缀容易与现有 provider.namespace 模型不完全一致。",
+      "与现有 client tool/useAgentChat/onToolCall 工具回传链路的落点不够具体，更多停留在 AIChatAgent/ClientToolSchema 层面。"
+    ],
+    "top_missing_key_mechanisms": [
+      "execution-result 中 result、error、logs 的统一结构，以及 iframe 内 console.log/warn/error 捕获。",
+      "provider 与 tool name 在消息协议中的分离传递，或与现有 ToolProvider/ResolvedProvider 完全一致的路由结构。",
+      "主页面侧强制终止执行实例的路径，用于处理同步阻塞或 sandbox 未能主动返回的情况。",
+      "主页面接收消息时的 contentWindow/source 或等价来源校验机制。",
+      "基于 iframe.contentWindow、MessageChannel token 或等价能力的强消息来源校验。"
+    ]
+  },
+  {
+    "case_id": "009",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      78.0,
+      84.0,
+      84.0,
+      72.0,
+      76.0
+    ],
+    "average_score": 78.8,
+    "min_score": 72.0,
+    "max_score": 84.0,
+    "score_stddev": 4.664761515876241,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "MAX_READABLE_SIZE 默认 10 MB、MAX_IMAGE_SIZE 默认 20 MB 的顺序存在逻辑含混；若先检查总上限，图片专项上限实际不会生效。",
+      "PDF 只返回结构化描述并预留扩展，没有把 PDF 字节转换为模型可消费的 file 内容块，未满足图片/PDF 都应尽量传入模型的需求。",
+      "PDF 处理中提到页数、首页光栅化和原始 PDF 内容块，但缺少当前项目可落地的转换失败路径、依赖边界和能力探测细节。",
+      "PDF 被设计为 unsupported_format 结构化拒绝，没有转换为模型可消费的 file-data 或等价文件内容块，未满足需求中“图片和 PDF 等可被模型消费的文件应传递内容”的关键点。",
+      "全局 MAX_FILE_SIZE=1MB 套用于所有类型会与 IMAGE_MAX_SIZE=20MB 矛盾，也可能过早拒绝可传入模型的小型 PDF/图片；模型文件字节限制应独立于 grep 的普通搜索限制。"
+    ],
+    "top_missing_key_mechanisms": [
+      "AI SDK tool toModelOutput 或等价模型输出转换层：text -> model text，image -> image-data，PDF/file -> file-data，binary/error -> 结构化文本。",
+      "PDF 或其他可传递文件的 file-data 内容块生成机制，而不只是 PDF 元信息摘要。",
+      "PDF/可传递文件到模型 file-data 内容块的转换路径。",
+      "WorkspaceLike/readOperations 扩展的精确类型兼容方案，包括不支持 readFileBytes 后端的能力探测。",
+      "不支持二进制的 structured unsupported 结果，而不是直接返回完整 base64。"
+    ]
+  },
+  {
+    "case_id": "010",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      80.0,
+      82.0,
+      82.0,
+      80.0,
+      78.0
+    ],
+    "average_score": 80.4,
+    "min_score": 78.0,
+    "max_score": 82.0,
+    "score_stddev": 1.4966629547095767,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "MCP 代理偏向单个通用 mcp_proxy 工具，未明确每轮从父级获取可序列化 tool descriptors，并在子侧构造逐工具 AI SDK wrapper 后由父级 callTool 执行。",
+      "MCP 工具代理没有清楚说明可序列化 tool descriptor、子侧 wrapper、父侧 callTool 的边界，只是笼统说返回工具定义并 invoke。",
+      "MCP 工具获取流程称父级直接返回 AI SDK ToolSet 给子会话并注入 streamText，缺少可序列化 tool descriptor、子侧 wrapper、父侧 callTool 的明确边界，存在跨 Durable Object RPC 传递 execute 闭包的实现风险。",
+      "MCP 执行接口被描述为 UserAgent 暴露的 callable executeMcpTool，但没有清楚区分浏览器可调用 RPC 与父子内部 RPC，存在前端绕过 agent 工具生命周期直接触发 raw MCP invocation 的风险。",
+      "Workspace 代理只列出 read/write/edit/list/find/grep/delete，未覆盖当前 Workspace、Think tools 与 codemode state backend 所需的完整文件接口，因此触发 rubric 中 workspace proxy 分数上限。"
+    ],
+    "top_missing_key_mechanisms": [
+      "MCP 可序列化工具描述、子侧逐工具 wrapper、父侧 callTool 的清晰边界。",
+      "MCP 工具描述的序列化 schema、子侧 AI SDK wrapper 构造方式、父侧 callTool 执行和错误返回规范。",
+      "MCP 工具的可序列化描述边界：父级返回 descriptor，子级构造 wrapper，实际 execute 再走父级 callTool。",
+      "Worker 层认证路由绑定：由认证主体选择父目录 Agent，拒绝 URL 中伪造的 parent/user name。",
+      "codemode state backend、Think built-in workspace tools 与共享 workspace proxy 的统一适配链。"
+    ]
+  }
+]

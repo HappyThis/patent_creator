@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 13,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 9,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别出问题本质：共享 Markdown 语义知识与本机高频运行时信号混写，造成版本控制噪声、协作冲突，同时这些信号又仍需参与检索排序和自动整理。",
+    "结合当前源码环境较充分，命中了 MarkdownWriter、FrontmatterScoring、memory-scoring、SearchKnowledgeService/SearchExecutor、curate、archive、manifest、dream/prune、FileContextTreeMerger 等实际消费路径。",
+    "提出了清晰的字段分层、相对路径映射 sidecar JSON 存储、读时融合、写时隔离、默认信号回退、旧 frontmatter 惰性迁移和失败隔离。",
+    "覆盖了归档、恢复、合并、剪枝、manifest 构建等生命周期清理一致性，避免只改 Markdown writer 的常见弱方案。",
+    "技术效果闭环明确：减少 Git diff 和合并冲突，同时保留 importance、recency、maturity、accessCount 等对排序和整理有用的动态信号。"
+  ],
+  "weaknesses": [
+    "并发更新机制不达强答案标准。方案明确采用 last-write-wins，虽然提到检索执行器批量累积 accessCount，但没有给出 read-modify-write、CAS、版本号、文件锁、单写队列或等价 updater，因此累加类信号仍可能在并发写入时丢失。",
+    "SignalStore 最小接口不完整。文中接口只有 getByPath、save、deleteByPath、migrateFromMarkdown，缺少 getMany、batchUpdate、update(updater)、list/scan 等对批量检索融合、批量访问回写和孤儿记录修复很关键的能力。",
+    "惰性迁移在普通读取旧 Markdown 时会重写 Markdown 去除评分字段，可能产生一次性工作区脏改动；方案没有说明显式迁移、限流、自愈队列或避免大规模读触发改写的策略。",
+    "字段分层中把 createdAt、updatedAt 全部迁出 Markdown，和稳定语义 frontmatter 可保留内容创建/更新时间的参考边界不完全一致；当前源码中这些字段在 scoring 中，但专利方案应更清楚地区分内容时间与运行时信号时间。",
+    "失败隔离主要写了默认值回退和 fail-open，但缺少 sidecar 读写失败日志、诊断指标或后续 repair 机制。"
+  ],
+  "missing_key_mechanisms": [
+    "严格的 sidecar 原子 read-modify-write 机制，例如 update(path, updater)、CAS/version 字段、文件锁、单写队列或事务型 KV。",
+    "批量读取和批量更新接口，例如 getMany(paths)、batchUpdate(patches)，用于搜索候选集融合和访问命中批量回写。",
+    "sidecar list/scan/orphan repair 能力，用于清理 Markdown 删除、重命名、归档失败后残留的孤儿信号。",
+    "迁移期对旧 Markdown 的非扰动读取策略或显式迁移流程，避免普通查询触发大量 Markdown 改写。",
+    "sidecar failure logging 和可观测性设计。"
+  ],
+  "unsupported_claims": [
+    "方案称动态信号在每次知识检索命中时都会被重写；当前源码中 SearchKnowledgeService 使用 pendingAccessHits 批量累积，并在 flushAccessHits 时统一更新 frontmatter，因此该表述有一定简化。",
+    "方案说 QueryExecutor 与 SearchExecutor 无需大改且通过注入 SignalStore 获取评分；当前实际评分消费主要分布在 SearchKnowledgeService、manifest、memory-symbol-tree、dream/prune/archive 等路径，仅改 executor 或只在 executor 注入不足以覆盖全链路。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”档位的高段，而不是 90 分以上强答案。它准确覆盖了字段分层、sidecar、路径映射、读取融合、写入剥离、迁移兼容、失败隔离和清理一致性，且与当前源码消费路径高度相关。但 rubric 明确要求强答案具备批量接口和并发 RMW/CAS/单写队列等原子更新机制；本方案只有原子文件写入和 last-write-wins，没有真正避免并发累加丢失，因此触发“无并发 read-modify-write 通常不高于 82”的上限倾向。综合其他机制较完整，给 82 分。"
+}

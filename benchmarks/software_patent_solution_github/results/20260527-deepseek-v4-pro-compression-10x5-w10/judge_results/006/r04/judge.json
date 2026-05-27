@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 80,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 15,
+    "technical_mechanism": 15,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 6,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住问题本质：客户端本地生命周期清理不应等同于服务端 durable turn 取消，同时用户停止需要显式传到服务端。",
+    "覆盖了 active request id、取消帧、keepId 防迟到 chunk/done 污染、resume handshake、SQLite chunk replay、工具 continuation 和多标签观察等大量关键边界。",
+    "技术效果闭环较清楚，能说明误杀长任务、恢复能力、资源浪费和 UI 状态污染之间的因果关系。"
+  ],
+  "weaknesses": [
+    "可配置策略没有落到真正的 abort policy。方案把 resume=false 称为 request-lifetime 模式，但这只是不恢复流，不等价于普通 client abort/disconnect 自动取消服务端 turn。",
+    "没有给出独立于 AI SDK stop()/AbortSignal 的显式 cancelActiveServerTurn 类入口，也没有清楚说明如何区分用户点击 stop 触发的 AbortSignal 与组件卸载、reader.cancel 等本地清理触发的 abort。",
+    "对跨标签页 observed/fallback turn 的取消能力只在风险中提到需要额外机制，没有形成完整技术特征。",
+    "部分源码事实写得过于确定，且与当前快照不一致，影响可实施性判断。"
+  ],
+  "missing_key_mechanisms": [
+    "缺少类似 cancelOnClientAbort 的配置入口和行为矩阵：默认 durable=false cancel、request-lifetime opt-in=true cancel、显式 stop 始终 cancel。",
+    "缺少明确的 transport 层拆分：本地 detach/stream cleanup 函数与服务端 cancel frame/API 分离，而不是复用同一个 onAbort。",
+    "缺少 observed turn 或非当前 stream 持有 turn 的统一登记与显式取消机制。",
+    "缺少 request-lifetime 模式下普通 abort、WebSocket close、reader.cancel、组件卸载分别如何触发或不触发服务端 cancel 的工程级状态流转。"
+  ],
+  "unsupported_claims": [
+    "方案称 ReadableStream reader.cancel() 非 AbortSignal 路径仅释放本地 reader、不调用 onAbort；当前 WebSocketChatTransport 的 cancel() 调用 onAbort，并发送 CF_AGENT_CHAT_REQUEST_CANCEL，测试也验证 stream.cancel() sends cancel。",
+    "方案把 useAgentChat 的 resume=false 描述为请求生命周期模式；当前源码和文档中 resume 只控制自动 stream resume，不提供客户端断开即取消服务端 turn 的策略。",
+    "方案称 runFiber 在 SQLite 中维护 running/suspended/completed 纤程状态；当前 cf_agents_runs 机制是运行时插入 row、stash 更新 snapshot、完成后删除 row，未见该状态字段模型。"
+  ],
+  "score_rationale": "整体属于可用但不完整的强中档方案。它对项目里的 useAgentChat、WebSocketChatTransport、取消帧、activeRequestIds、ResumableStream、ContinuationState 和多标签处理理解较深，问题识别和多数边界机制都到位。但补充约束中的 request-lifetime 可配置语义没有真正实现，只用 resume=false/chatRecovery 代替 abort 策略；同时对 reader.cancel 当前行为和 runFiber 状态表存在无依据或错误源码断言。按 rubric，缺少真实可配置 abort policy 与完整行为矩阵通常不应超过 80 分，因此总分压在 80。"
+}

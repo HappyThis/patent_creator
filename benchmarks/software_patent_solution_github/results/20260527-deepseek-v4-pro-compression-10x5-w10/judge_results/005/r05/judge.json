@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 14,
+    "essential_features": 7,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 8,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "识别了外部调用方需要快速 accepted、后台执行、幂等重试、状态查询与取消控制的核心问题。",
+    "能落到当前 Think 的主要基础设施：Session/saveMessages、TurnQueue、AbortRegistry、ResumableStream、chat recovery 和 clear/cancel 语义，整体没有重写普通聊天路径。",
+    "提出了持久 task_records、idempotency_key+session_id 唯一约束、received/queued/executing/terminal 状态机、查询和取消接口，机制粒度明显高于普通异步队列。",
+    "对重复提交、启动扫描恢复、普通聊天路径兼容、清理时同步任务终态等都有覆盖，形成了基本问题-手段-效果闭环。"
+  ],
+  "weaknesses": [
+    "缺少持久的消息应用边界字段或等价 checkpoint。方案依赖消息 ID 去重和 saveMessages，但不能可靠区分写入前崩溃、写入后崩溃、部分多消息写入和恢复重放。",
+    "后台执行领取机制不够严谨。方案主要依赖内存 TurnQueue 和启动扫描，没有给出 pending/queued 到 executing 的数据库条件 claim 或事务化 drain，难以防止恢复、重试或多次唤醒下的竞态。",
+    "终态不可覆盖只是状态机声明，没有说明 completed/failed/cancelled/deleted 的条件更新规则，迟到完成或异常处理仍可能覆盖已取消或清理的任务。",
+    "恢复逻辑把 executing 任务交给 ResumableStream/continueLastTurn 判断，但没有保存 request/turn/recovery 证据与消息应用状态的组合判定，安全性不足。",
+    "管理面不完整：有 getTaskStatus/cancelTask 和清理描述，但缺少 list/inspect/delete 的清晰接口语义、幂等键保留窗口和可观察事件。"
+  ],
+  "missing_key_mechanisms": [
+    "messagesAppliedAt、applied checkpoint、applied message id set 或事务版本等 durable apply boundary。",
+    "pending/received 任务的后台 drain/唤醒机制，以及 pending -> running 的条件领取事务。",
+    "终态条件更新机制，例如所有完成、失败、取消、删除更新都必须带 status 非终态谓词。",
+    "写入前崩溃、写入后崩溃、部分消息写入、hibernation 后 orphaned stream 的分支恢复策略。",
+    "list/delete/cleanup API、幂等键保留窗口和 submission 生命周期观测事件。"
+  ],
+  "unsupported_claims": [
+    "将 AbortRegistry 描述为具有 abort(request_id) 方法；当前源码中的核心方法是 cancel(id)，并通过 protected abortRequest 包装。",
+    "将 _handleClear 描述为 _handleClear(session_id)；当前 Think 源码中该方法接受的是可选 connection，并清理当前会话状态。",
+    "声称外部触发任务的流式输出默认不通过 WebSocket 推送；当前 saveMessages/_streamResult 路径会复用广播流式输出语义，若要隔离需要额外设计。",
+    "声称通过 ResumableStream 状态即可判定 executing 任务 completed/failed 并安全 continueLastTurn；当前流元数据只能提供流状态证据，不能替代提交消息是否已应用的持久边界。"
+  ],
+  "score_rationale": "该方案属于可用但不完整档位。它抓住了 durable ledger、幂等接收、快速返回、任务状态、查询/取消和复用 Think 现有执行链路这些主要方向，也使用了当前项目中真实存在的 TurnQueue、Session、ResumableStream、AbortRegistry 等概念。但关键工程边界不足：没有 durable 消息应用边界，缺少条件 claim/drain，终态更新只声明不可转换而没有竞态防护，恢复策略无法安全覆盖写入前后崩溃和部分写入。按 rubric 中“无持久消息应用边界通常不高于 75 分”的上限校准，给 75 分；未进一步压到不合格档，是因为方案并非泛泛异步队列，仍覆盖了多数核心生命周期和兼容约束。"
+}

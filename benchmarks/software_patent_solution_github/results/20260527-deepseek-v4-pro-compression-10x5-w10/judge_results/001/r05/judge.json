@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 77,
+  "dimension_scores": {
+    "environment_understanding": 10,
+    "technical_problem": 13,
+    "technical_mechanism": 16,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了 OpenCode 作为异构本地 agent runtime 接入 Mission Control 的核心问题，而不是只增加 UI 选项。",
+    "提出了可配置会话发现、兼容式解析、统一会话模型、能力声明、降级响应和 fixture 验证，方向符合需求约束。",
+    "明确避免假设 OpenCode 当前已完整支持继续命令或固定本地状态格式，并在 UI/API 上声明 supported/partial/unsupported 能力边界。",
+    "方案强调不破坏现有 Claude、Codex、Hermes runtime，具备较好的扩展性和专利化抽象。"
+  ],
+  "weaknesses": [
+    "环境贴合度不足：当前项目里 runtime/session 逻辑是固定 RuntimeId、检测器、session 聚合、transcript 和 continue API 等具体路径，方案没有说明如何落到这些既有代码边界。",
+    "缺少明确的 terminal/PTY attach gating，未说明 OpenCode 会话在终端视图或 /api/pty/attach 中应禁用或返回 unsupported。",
+    "缺少 OpenAPI、API index、schema 和前端能力字段同步机制，可能导致实现、文档和测试契约不一致。",
+    "continue 机制只说调用原生命令或 stub，不足以说明本地命令失败、provider/model/auth/session 缺失时如何返回可诊断错误。",
+    "测试方案偏适配器自检，没有覆盖 session list、transcript、continue、PTY unsupported、API/E2E 和 binary stub 的完整可复现验证链路。"
+  ],
+  "missing_key_mechanisms": [
+    "将 opencode 纳入实际 RuntimeId/检测配置/settings/onboarding 的注册路径。",
+    "将 OpenCode 会话接入现有 /api/sessions 聚合、/api/sessions/transcript 和 /api/sessions/continue 路由。",
+    "OpenCode 专属 transcript parser 对不可解析载荷的占位降级和上层消息结构输出。",
+    "PTY/terminal attach capability gating，尤其是对当前未支持终端附着的禁用或 unsupported 返回。",
+    "OpenAPI/API index/schema 与前端会话能力字段的契约同步。",
+    "真实结构 fixture、OpenCode binary/continue 命令替身，以及 session list/transcript/continue/PTY unsupported 的自动化测试。"
+  ],
+  "unsupported_claims": [
+    "方案声称存在 Runtime Registry、ClaudeAdapter、CodexAdapter、HermesAdapter 等统一适配器实例，但当前源码显示是固定 RuntimeId、RUNTIME_META、DETECTORS 以及各 session scanner/API 的直接集成，未见这些 adapter 类或注册中心。",
+    "方案称新增 OpenCodeAdapter 后无需修改 Mission Control 核心逻辑；按当前项目结构，至少需要修改 runtime 类型、检测器、session 聚合、transcript/continue API、UI kind/branding 和契约文件。",
+    "方案较确定地描述 OpenCode 会话以本地结构化文件扫描得到；需求允许本地状态适配，但当前项目快照中没有 OpenCode 本地状态目录或消息文件格式依据，需保持为可配置外部事实。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”档位。它的总体方向正确，能形成 adapter、发现、解析、统一会话、能力边界和验证的工程机制，也遵守了不要假设固定 OpenCode 格式的约束。但它没有充分结合当前项目的实际 runtime/session/transcript/continue/PTY/OpenAPI 集成点，并且缺少 PTY gating 与 API 契约同步两个关键工程边界，因此不能进入 85 分以上。考虑到方案已有 transcript/continue 的抽象路径和 fixture/stub 思路，未按三项缺失的更低上限处理；最终按上限约 78 分附近并因无依据 Registry/Adapter 源码事实扣至 77 分。"
+}

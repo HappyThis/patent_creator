@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 知识与本机高频动态信号混写导致 VC 噪声、合并冲突和排序信号保留之间的矛盾。",
+    "提出了 Markdown 主轨 + sidecar 动态信号轨的总体机制，覆盖路径键、读取融合、CAS 原子更新、fail-open、归档/剪枝/合并清理等关键方向。",
+    "保持 Markdown 作为可审阅、可版本控制的知识载体，没有把全部知识迁移到不可审阅数据库，也没有简单丢弃动态信号。",
+    "能结合当前项目中的 context tree、CoGit 同步、isExcludedFromSync、FileContextTreeWriterService、FileContextTreeMerger、FileContextTreeSnapshotService、QueryExecutor、.stub.md 等真实结构展开。"
+  ],
+  "weaknesses": [
+    "字段分层没有贴准当前源码的核心动态字段：现有 FrontmatterScoring 包含 accessCount、importance、maturity、recency、updateCount、createdAt、updatedAt，方案却主要使用 query_hit_count、usage_frequency、ranking_weight、maturity_label，且没有说明旧字段如何迁入或融合。",
+    "读取融合的源码接入点不够完整，主要写到 QueryExecutor 和 ContextTreeStore，缺少对 SearchKnowledgeService、memory-scoring、MarkdownWriter/updateScoringInContent、curate-tool、memory-symbol-tree、manifest、dream consolidate/synthesize/prune 等实际消费路径的逐点改造。",
+    "没有给出清晰的 sidecar store 最小接口边界，例如 get、getMany、update、batchUpdate、delete、list 以及批量候选读取如何服务排序和 minMaturity 过滤。",
+    "迁移策略存在信息丢失风险：启动时为旧文件创建零值 .signals.json，但没有明确从旧 Markdown frontmatter 中懒迁移 accessCount/importance/recency/updateCount/maturity，可能削弱既有排序和归档判断。",
+    "部分实现细节依赖当前项目中并不存在或语义不匹配的能力，降低了可实施性。"
+  ],
+  "missing_key_mechanisms": [
+    "旧 Markdown frontmatter 动态字段的兼容读取、懒迁移或按需自愈机制，尤其是 accessCount、importance、recency、updateCount、maturity。",
+    "明确的 RuntimeSignalStore/IRuntimeSignalStore 接口和批量读取路径，用于搜索候选、排序、知识树展示和 dream 流程。",
+    "对 SearchKnowledgeService.flushAccessHits、compoundScore、parseFrontmatterScoring、updateScoringInContent、CurateTool 的具体写入剥离和读取融合方案。",
+    "对 archive/manifest/dream consolidate/prune/synthesize 全链路中 maturity/importance 读取和 sidecar 清理的源码级挂接说明。",
+    "重命名场景下 sidecar 路径键迁移或 stale 标记策略。"
+  ],
+  "unsupported_claims": [
+    "称 ContextTreeStore 的异步 compact 路径可批量执行 usage_frequency 衰减缺少当前源码依据；ContextTreeStore.compact 主要是 agent map 的内存条目摘要压缩，不是 context tree 运行时信号生命周期管理器。",
+    "称 .signals.json 可类似 .stub.md 保留在搜索索引读取范围内缺少当前源码依据；当前 search knowledge 索引主要扫描 Markdown 文件，.stub.md 是 Markdown archive stub，JSON sidecar 需要额外融合读取而非天然 BM25 索引。",
+    "称 Merger 的 context-tree-backup 仅备份共享知识文件并排除 isExcludedFromSync 与当前实现不符；FileContextTreeMerger 目前对整个 context tree 目录做 copyDir 备份。",
+    "maturity_label 的 stable/deprecated 取值与当前 maturity 的 core/draft/validated 模型不一致。",
+    "旧客户端不受 .signals.json 影响且其已被 .gitignore 排除不是当前源码事实，需要新增排除规则或 gitignore/CoGit 过滤支持。"
+  ],
+  "score_rationale": "该方案属于方向正确、机制较完整但工程边界不够贴合源码的可用答案。它覆盖了 sidecar 分层、路径键、CAS、fail-open、读取融合和清理一致性，已经超过泛泛设计；但没有明确 RuntimeSignalStore 接口和批量读取边界，且没有把当前源码中真正的动态字段与 SearchKnowledgeService、memory-scoring、curate、dream、manifest 等消费路径逐一落地。总分给 82 是因为方案并非完全没有读取融合或清理机制，已覆盖 QueryExecutor、归档、剪枝、合并等部分路径，所以不按“完全缺失源码消费路径”的 80 分上限硬压；同时因旧 frontmatter 迁移、实际字段映射和若干无依据源码事实存在明显缺口，不进入 85 分以上档位。"
+}

@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 88,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 15,
+    "technical_mechanism": 17,
+    "essential_features": 8,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 8,
+    "feasibility": 8,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 语义内容与本机高频动态信号混写的核心矛盾。",
+    "提出了相对完整的 sidecar 分层机制：相对路径键、运行时信号 JSON、读取融合、写入剥离、原子替换、并发重试、批量写入和 fail-open。",
+    "覆盖了迁移兼容、默认值兜底、curate/search 命中更新、manifest 排序、归档恢复删除合并等生命周期清理。",
+    "技术效果闭环清楚，能说明减少 VC 噪声和合并冲突，同时保留检索排序、成熟度判断和自动整理能力。"
+  ],
+  "weaknesses": [
+    "没有明确抽象出 RuntimeSignalStore 的最小接口边界，如 get/getMany/update/batchUpdate/delete/list/schemaVersion，工程落地性略弱于强答案。",
+    "读取融合的源码接入说明偏集中在 manifest，对 SearchKnowledgeService、memory-symbol-tree、dream consolidate/prune/synthesize、curate merge/update 等实际消费路径缺少逐点改造方案。",
+    "首次启动迁移会遍历并回写 Markdown 删除 scoring 字段，这本身会制造一次大规模版本变更；更稳妥的是旧文件兼容加新写入剥离、懒迁移或自愈。",
+    "字段分层中把部分正文语义结构称为 frontmatter 字段，并把 createdAt/updatedAt 全部归入动态信号，边界表述不够严谨。"
+  ],
+  "missing_key_mechanisms": [
+    "独立 sidecar store 的明确接口、批量读取 API、schemaVersion 和列表/扫描能力。",
+    "SearchKnowledgeService/buildFreshIndex、memory-symbol-tree、dream consolidate/prune/synthesize、archive candidate 判断等路径如何统一改为融合对象的更具体接入细节。",
+    "旧 Markdown 动态字段懒初始化到 sidecar 或自愈写入的细化流程，避免一次性全量回写污染版本控制。",
+    "sidecar 孤儿记录扫描、重命名追踪或定期一致性修复机制。"
+  ],
+  "unsupported_claims": [
+    "facts、narrative、rawConcept、snippets、reason 被描述为 YAML frontmatter 字段，但当前 MarkdownWriter 中这些主要是 Markdown 正文段落，不是 frontmatter。",
+    ".signals.json 被表述为与现有 derived artifact exclusion 同类且由 .gitignore 排除；当前 isDerivedArtifact/isExcludedFromSync 未包含该文件，需要新增规则。",
+    "高频 accessCount 增量由 ContextTreeStore 累积这一说法缺少当前源码依据；当前可见的 pendingAccessHits 批量写入逻辑在 SearchKnowledgeService.flushAccessHits 中。",
+    "SignalFusionService、SignalLifecycleHook、.signals.json 归档字段等是合理新增机制，但不是当前源码已存在能力，方案应明确为新增实现而非现状。"
+  ],
+  "score_rationale": "该方案属于接近强答案的可实施方案：核心方向正确，覆盖字段分层、sidecar、本机路径键、读取融合、并发更新、fail-open、迁移兼容和生命周期清理，且能形成问题-手段-效果闭环。未给 90 分以上的原因是仍有几个工程边界不够扎实：缺少明确 store 接口和 getMany/batchUpdate/delete/list 等能力定义，读取融合对 search、memory symbol tree、dream/prune/synthesize 等真实消费路径说明不够逐点，首次全量迁移会反向制造 Markdown churn，且存在少量源码事实表述不准。这些问题不会推翻方案，但使其低于强答案档。"
+}

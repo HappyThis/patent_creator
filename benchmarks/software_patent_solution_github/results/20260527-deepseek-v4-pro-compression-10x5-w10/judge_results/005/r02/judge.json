@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 9,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住外部调用方需要快速 accepted、后台执行、后续查询/取消/清理和幂等重试的核心问题。",
+    "提出了持久任务表、idempotency_key 唯一约束、received/dispatching/running/terminal 状态机、条件领取、状态查询、取消、删除和列表接口，机制较完整。",
+    "明确强调在消息写入 Session 后复用现有 saveMessages、TurnQueue、AbortRegistry、ResumableStream/Fiber 等能力，符合不重写普通聊天路径的要求。",
+    "能识别写入 Session 前后崩溃恢复的关键风险，并在风险段指出需要 request_id 或应用证据避免重复 saveMessages。"
+  ],
+  "weaknesses": [
+    "最关键的持久消息应用边界没有作为正式方案落地。正文先声称 dispatching 恢复会重新调用 saveMessages，后面才在风险中承认这会重复写入，需要 request_id 检查；这不等价于完整的 messagesAppliedAt/applied checkpoint。",
+    "终态条件更新机制不足。方案说 onChatResponse 写回 completed/aborted/error，但没有要求使用条件更新防止迟到完成覆盖已取消、clear/reset 后 skipped 或 delete 状态。",
+    "恢复判定过于乐观，依赖 runFiber/Fiber 快照和 onStart 扫描，但缺少写入前、写入后、running 且有/无 recovery 证据的分支判定；对不可安全恢复场景没有正式标 error 的规则。",
+    "对 reset/clear 的同步处理只在风险与建议中出现，未纳入主流程；状态 skipped 也未进入主状态模型。",
+    "可观察事件、metadata、调用方 trace 等专利参考中的 inspect/observability 边界基本缺失。",
+    "若按 rubric 高分锚点，缺少应用边界和条件终态更新两个关键机制，因此不能进入 90 分档。"
+  ],
+  "missing_key_mechanisms": [
+    "durable messagesAppliedAt、applied version、applied message ids 或等价的会话应用 checkpoint。",
+    "写入后崩溃时基于 requestId/turnId/recoveryId/stream recovery 证据继续等待或标错的恢复判定。",
+    "completed/error/aborted/skipped 的条件终态更新，避免迟到结果覆盖已取消或已跳过任务。",
+    "reset/clear conversation 与 submission ledger 的正式同步流程，含 pending/running/skipped/aborted 处理。",
+    "submission lifecycle observability events 和更完整的 metadata/trace 管理。"
+  ],
+  "unsupported_claims": [
+    "声称 Think 现有存在 TurnQueue、AbortRegistry、ResumableStream、Fiber、onChatResponse、linkExternal、cf_ai_chat_stream_metadata、cf_ai_chat_stream_chunks 等具体类/表/钩子，但被评估文本没有给出当前源码依据；其中部分可能真实存在，但作为具体源码事实支撑不足。",
+    "声称 ResumableStream 已有 CLEANUP_INTERVAL_MS 默认 10 分钟定时清理并可统一回收 external tasks，当前方案未证明该清理机制适用于新增表。",
+    "声称 saveMessages 返回 status: skipped 且可由 TurnQueue 代际失效触发，以及 WebSocket clear 会使外部任务一并失效，这些细节在方案中没有源码证据支撑。"
+  ],
+  "score_rationale": "该方案整体属于“可用但不完整”上段：持久 ledger、幂等、快速确认、后台条件领取、查询/取消/删除/list、与现有会话执行路径兼容等主要方向齐全，问题-手段-效果闭环也比较清楚。但 rubric 的强答案要求必须有持久消息应用边界、三类崩溃恢复判定、条件终态更新和 reset/clear 同步。该方案把消息应用边界的缺口放在风险段才承认，并未把 request_id 检查或 applied checkpoint 设计成正式机制；同时终态条件更新和 reset 同步也不完整。按分数上限，缺持久消息应用边界通常不高于 75，但这里方案已经显式识别该风险并提出 request_id 避免重复执行的补救方向，且其他关键 API 和 claim/drain 机制较完整，因此略高于严格上限倾向；仍不能超过 85。"
+}

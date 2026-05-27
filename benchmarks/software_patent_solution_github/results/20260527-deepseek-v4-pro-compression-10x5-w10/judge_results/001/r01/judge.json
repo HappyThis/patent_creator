@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 13,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "能识别 Mission Control 已有 openclaw、hermes、claude、codex runtime 检测与本地会话扫描体系，并把 OpenCode 设计为独立 runtime，而不是伪装成 Claude/Codex。",
+    "较好遵守补充约束：没有声称已知 OpenCode 真实状态格式，提出可配置状态目录、适配器合约、兼容式解析和 fixture 验证。",
+    "能力边界意识较强，对 continue、terminate、cost tracking 等不确定能力给出未知/禁用展示，避免直接承诺全部可用。",
+    "方案有一定工程可实施性，包含 RuntimeId 注册、detectOpenCode、scanOpencodeSessions、数据库 upsert、GET/POST 会话接口和 UI gating 等模块化流程。"
+  ],
+  "weaknesses": [
+    "关键缺口是没有设计 transcript API/parser 接入和消息级归一化，无法满足“真实会话详情/历史消息展示”的核心链路。",
+    "continue 能力只被声明为未知或通过环境变量开启，没有 OpenCode 专属 continue 路由、命令构造、命令替身验证或本地失败的诊断性错误返回。",
+    "没有明确 terminal/PTY attach capability gating；当前项目存在 PTY attach 路径，OpenCode 接入需要明确禁用或探测，方案未覆盖。",
+    "没有说明 OpenAPI、API index/schema、前端会话 kind/capability 字段如何同步，容易出现接口契约与 UI 行为不一致。",
+    "验证路径不完整：只提 parser fixture，没有 binary stub，也没有 session list、transcript、continue、PTY unsupported 的 API/E2E 可复现测试。",
+    "会话接入更偏单独 /api/opencode/sessions，未充分说明如何进入现有 /api/sessions 聚合、conversation list、chat workspace、settings/onboarding 等既有路径。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript 读取器：将历史消息归一化为统一 role、timestamp、text、tool_use、tool_result 或不可解析占位结构。",
+    "/api/sessions/transcript 对 runtime kind=opencode 的路由接入。",
+    "/api/sessions/continue 对 opencode 的专属命令构造、可配置 binary、命令替身测试和失败分类。",
+    "PTY/terminal attach 的 canAttachTerminal 或 unsupported_kind gating，以及对应 UI 禁用/隐藏逻辑。",
+    "OpenAPI、API index、类型 schema 与前端 capability 字段传播。",
+    "覆盖 OpenCode runtime detection、session list、transcript、continue 失败、PTY unsupported 的可复现测试矩阵。"
+  ],
+  "unsupported_claims": [
+    "“每种 runtime 通过独立检测器、会话扫描器和任务扫描器接入”与当前源码不完全吻合；Claude/Codex 主要是会话扫描，未见对应 task scanner。",
+    "“会话扫描层将本地状态文件解析后写入 MC SQLite 数据库”不是所有现有 runtime 的事实；当前 Claude 写入 claude_sessions，Codex 直接扫描文件，Hermes 读取自身 SQLite。",
+    "默认 OPENCODE_STATE_DIR=~/.opencode、sessions 子目录和默认 jsonl 格式缺少当前项目或需求依据，虽可配置但仍带有未验证默认假设。",
+    "detectOpenCode 固定尝试 opencode --version 的输出格式也属于未确认外部能力，方案只在风险中提示，未给出可配置 binary/替身验证机制。"
+  ],
+  "score_rationale": "该方案方向正确，能把 OpenCode 作为异构本地 runtime 处理，并覆盖可配置发现、适配器、兼容式解析、能力边界和基础会话列表，明显优于只加 UI 选项的弱方案。但按 rubric 的档位锚点，它缺少 transcript、continue 诊断失败、PTY gating、API 契约同步和完整可复现测试中的多个关键机制。根据“缺失三个或更多关键机制总分不得高于 72”的上限规则，本方案即使在运行时发现和 session list 方面较完整，也不应超过 72 分。"
+}

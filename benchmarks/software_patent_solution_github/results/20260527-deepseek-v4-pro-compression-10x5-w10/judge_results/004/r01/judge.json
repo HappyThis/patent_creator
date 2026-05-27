@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 93,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 18,
+    "essential_features": 9,
+    "problem_mechanism_effect": 15,
+    "constraint_adherence": 10,
+    "feasibility": 8,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 知识内容与本机高频动态信号混写的核心矛盾，并保留 Markdown 作为可审阅、可版本控制的知识载体。",
+    "字段分层、sidecar 存储、路径键映射、读时融合、写时分离、迁移兼容、失败隔离和生命周期清理都有较完整的机制描述。",
+    "覆盖检索命中、curate、manifest、archive/delete/merge 等关键路径，并说明动态信号继续参与排序、归档候选和整理判断。",
+    "技术效果闭环清楚：减少 Git 噪声和合并冲突，同时保留运行时信号价值，并通过 fail-open 保护知识文件操作。"
+  ],
+  "weaknesses": [
+    "sidecar store 的接口边界不够完整，只概括为加载、查询、更新、删除和批量刷盘，未明确 getMany、batchUpdate、list/scan 等最小接口能力。",
+    "并发更新机制偏笼统，主要依赖单线程事件循环和批量刷盘描述，没有明确单路径 read-modify-write、CAS、锁或版本化更新语义。",
+    "把 createdAt、updatedAt 全部归为动态运行时信号略有偏差，未区分知识内容时间与本机运行时更新时间。",
+    "dream/consolidate/prune/synthesize 的接入只间接出现，未像 search、curate、archive 一样展开流程。"
+  ],
+  "missing_key_mechanisms": [
+    "明确的 RuntimeSignalStore/ScoringStore 最小接口：get、getMany、set/update(updater)、batchUpdate、delete、list/scan。",
+    "单记录原子更新或跨进程写入保护机制，避免 accessCount 等累计信号在并发查询或多个 agent 子进程场景下丢失。",
+    "dream、prune、synthesize、consolidate 等自动整理路径中哪些操作只更新 sidecar、哪些操作更新 Markdown 的更细流程边界。",
+    "稳定语义时间字段与运行时访问/更新时间字段的拆分规则。"
+  ],
+  "unsupported_claims": [
+    "MarkdownWriter.parseContent、MarkdownWriter.generateContext、updateScoringInContent、search-knowledge-service.flushAccessHits、curate-tool.recordCurateUpdate、archiveEntry、FileContextTreeWriterService、FileContextTreeMerger 等具体源码名和函数名未在方案内给出证据支撑，属于边缘源码事实风险。",
+    "称 pendingAccessHits 和 flushAccessHits 由 search-knowledge-service 内部事件循环串行执行、curate scoring 更新在写入 .md 文件事务内同步更新 scoringMap，属于实现级假设。"
+  ],
+  "score_rationale": "该方案属于强答案。它没有删除动态信号，也没有把知识整体迁入私有数据库，而是形成了“共享 Markdown 稳定语义字段 + 本机 sidecar 动态信号 + 读时融合”的可实施机制，覆盖了需求中特别要求的字段分类、读取融合、迁移兼容、并发更新、失败隔离、归档/剪枝/合并清理一致性。扣分主要来自工程边界仍不够硬：store 接口没有完整列出，原子更新更像单线程批处理假设而非明确 RMW/CAS 机制，dream/prune/synthesize 接入不够展开，并且 createdAt/updatedAt 的分类可能混淆共享语义时间与运行时更新时间。总体没有触发 82/80 分上限，因为旁路存储、读时融合、迁移兼容、失败隔离和清理一致性均已实质覆盖；并发原子性虽不完美但有等价的串行化思路，因此不适用低分上限。"
+}

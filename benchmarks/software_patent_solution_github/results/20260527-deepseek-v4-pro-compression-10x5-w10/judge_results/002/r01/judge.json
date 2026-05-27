@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 84,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 16.5,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 4.5
+  },
+  "strengths": [
+    "准确抓住了核心问题：agent 执行过程分散在 task、session、spawn history、token/cost、quality review、eval、MCP 调用记录中，缺少统一 run 契约。",
+    "提出了统一 run_id、聚合视图、生命周期状态、成本统计、质量审查、评测结果、事件流和查询接口，整体机制较具体。",
+    "能结合当前项目中的实际模块和路径，例如 dispatchAssignedTasks、callClaudeDirectly、runOpenClaw、runAegisReviews、recordSpawnStart、EventBus、quality_reviews、eval_runs、mcp_call_log、token_usage、pipeline_runs。",
+    "考虑了向后兼容、未归因数据、索引和大规模查询性能等工程风险。"
+  ],
+  "weaknesses": [
+    "AgentRun 被定义为关系聚合视图，但没有给出清晰的 canonical run 持久化位置，CREATED/DISPATCHED/IN_FLIGHT/ARCHIVED 等状态缺少可靠落盘字段和终态保护机制。",
+    "provenance/lineage 只体现为触发类型、触发者和关联对象，缺少结构化 provenance 对象、输入/输出摘要、artifact refs、lineage 生成和可审计校验机制。",
+    "spawn 自动桥接主要描述了创建和 happy path，未充分覆盖 /api/spawn、任务派发、pipeline step、失败、取消、超时、recordSpawnFinish 等路径的一致更新。",
+    "评估附着偏向把 run_id 写入 eval_runs，没有定义 run 级 eval attach/update API、benchmark 元数据、评估版本或外部评测工具写入契约。",
+    "外部访问主要是 REST/SSE/webhook，缺少 MCP server 层面的 run 查询、provenance 查询、eval 附着和 leaderboard 工具说明。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 字段及其在 run 创建时的生成流程。",
+    "覆盖 spawn 创建、完成、失败、取消、超时的自动桥接流程。",
+    "run 级 eval attach/update 契约，包括 pass/fail、说明、指标或 benchmark 元数据。",
+    "MCP 工具层的 run list、run detail、provenance、eval attach、leaderboard 能力。",
+    "持久化 AgentRun 状态与状态转换的存储边界、幂等键和终态保护机制。"
+  ],
+  "unsupported_claims": [
+    "当前快照中 recordSpawnStart 存在于 src/lib/spawn-history.ts，但没有被 dispatchAssignedTasks 或 /api/spawn 实际调用；方案把它作为自然传播点仍需要新增接入。",
+    "当前 eventBus 的 EventType 和 webhook EVENT_MAP 未包含 run.updated 或 run.status_changed；方案所说的 run 事件推送需要扩展现有类型和 webhook 映射。",
+    "当前 MCP server 暴露了 tasks、sessions、tokens/costs 等工具，但未见 run 查询、provenance 查询、eval attach 或 leaderboard 工具。",
+    "未在当前快照中确认存在标准化的 OpenClaw JSON run 导出格式；项目有 OpenClaw gateway/session JSON 和 transcript 解析，但 run export contract 仍属方案新增。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的较强答案。它不是普通日志表方案，能形成统一 run_id 契约，并把 task、agent、session、spawn history、cost、quality review、eval、MCP call log、event bus 和查询接口串成较完整的技术闭环。扣分主要来自几个高分锚点缺口：provenance/lineage 不够结构化，spawn 生命周期自动桥接没有覆盖失败/取消/完成全路径，eval 附着没有成为明确的 run 级 attach/update 契约，MCP 工具层和 leaderboard 能力也没有充分展开。因此适用 rubric 中“无 MCP 工具层通常不高于 85 分”的上限倾向；由于方案仍有统一 run 对象、跨表关联、状态机、事件和 API 设计，未触发 75 分以下的核心机制缺失上限。"
+}

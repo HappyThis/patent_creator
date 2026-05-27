@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 80,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 8,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "对当前项目的 Durable Object facet/subAgent、Think 流式输出、SQLite 注册表、父 WebSocket 转发和 onBeforeSubAgent 门禁理解较深，不是泛泛的多 agent 概念方案。",
+    "提出了父侧 retained run registry、子 agent 独立执行上下文、helper-event 信封、sequence 去重、display_order 并行排序、replay 标记等具体机制。",
+    "覆盖了刷新重连重放、并行 fan-out、drill-in 访问校验、保留后清理、父侧崩溃后 interrupted 标记和 AbortSignal 取消传播等主要运行约束。",
+    "能解释 stream_id 固定重放、最终 assistant 文本提取、错误降级读取和取消竞态窗口等机制如何解决具体一致性问题，技术闭环较完整。"
+  ],
+  "weaknesses": [
+    "方案更像 examples/agents-as-tools 的原型总结，未提升为框架级 agentTool/runAgentTool、AgentToolChildAdapter、useAgentToolEvents/纯 reducer、clearAgentToolRuns 等公共接入面；这限制了“应用开发者无需重写框架”的落地性。",
+    "基本只按 Think/HelperAgent 路径展开，未分别说明 AIChatAgent 的执行、恢复、取消、流式 chunk 读取与适配边界，也没有说明混合 Think/AIChatAgent 组合。",
+    "没有处理 headless 子 agent 中浏览器 client tools 不可用或需父侧中介/降级的问题，是 rubric 明确要求的工程边界。",
+    "父模型工具调用的最终返回契约不完整，尤其是 error/aborted/interrupted 应如何结构化返回给父 LLM、父回合中断时如何避免空结果或幻觉总结。",
+    "幂等与后台运行设计不足：没有稳定的调用方 runId 作为幂等键，文中无父工具调用的后台运行和 unboundRuns 展示没有与所列 _runHelperTurn/表结构形成严密对应。",
+    "状态机缺少独立 aborted/cancelled 状态，取消在原型中更接近 error；与需求中的完成、失败、取消等状态区分不够清晰。"
+  ],
+  "missing_key_mechanisms": [
+    "框架级 `agentTool()` 工具包装入口和命令式 `runAgentTool()` API，以及二者共享的稳定 runId/idempotency 契约。",
+    "Think 与 AIChatAgent 的内部 adapter 边界，包括 start/inspect/cancel/get chunks、requestId/streamId 映射恢复和混合父子 agent 支持。",
+    "headless 子 agent 对浏览器 client tools 的不可用说明、父侧中介执行或降级策略。",
+    "父模型最终 tool result 契约：completed summary/output、error/aborted/interrupted 的结构化失败返回和父聊天恢复语义。",
+    "通用客户端聚合层或 hook，负责 raw message 订阅、live/replay 去重、按 toolCallId 分组、unboundRuns、resetLocalState 和 drill-in 元数据输出。",
+    "真正可重复请求安全的 child-side run mapping 与 idempotent start，而不是每次生成新 helperId 的私有 helper 调用。"
+  ],
+  "unsupported_claims": [
+    "`subAgent()` 初始化被描述为通过 set-name fetch 触发 Server 初始化；当前源码使用 `_cf_initAsFacet` RPC 初始化 facet，不是该 fetch 路径。",
+    "文中称子 agent 端维护 `cf_agent_tool_child_runs` 映射表，但当前可见实现中 examples/agents-as-tools 的 HelperAgent 并未创建该表；该表只出现在 RFC 设计文档中。",
+    "文中称同一 runId 的并发 `_runHelperTurn` 会幂等返回已有运行状态，但原型 `_runHelperTurn` 每次生成新的 helperId，且没有 runId 参数；HelperAgent 只有同实例并发保护，不等价于 runId 幂等。",
+    "文中称不传 parentToolCallId 可形成后台子运行并由 unboundRuns 渲染，但 examples/agents-as-tools 的 `_runHelperTurn`、协议和注册表按必需的 parent_tool_call_id 字符串组织，未实现该无父工具调用路径。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”的较强答案：核心方向正确，且对子运行注册表、独立 DO 上下文、父连接事件转发、重放去重、并行、取消、清理和 drill-in 门禁都有较具体机制，明显高于泛泛架构描述。但它主要复用/总结示例级 HelperAgent + _runHelperTurn 方案，没有完整落到参考 rubric 要求的框架级 agentTool/runAgentTool、AIChatAgent 适配、headless client tools 边界、通用客户端 hook 和严格 runId 幂等契约。根据 rubric，上述至少两个关键工程边界缺失时不应超过 80 分；虽然方案细节充分，但这些缺口会阻碍成为完整框架级专利技术方案，因此给 80 分。"
+}

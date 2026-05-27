@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 68,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 11,
+    "essential_features": 8,
+    "problem_mechanism_effect": 8,
+    "constraint_adherence": 7,
+    "feasibility": 4,
+    "patent_value": 3
+  },
+  "strengths": [
+    "准确识别了外部 webhook/RPC/Worker 调用方需要快速获得 accepted、后台执行、后续查询和取消控制，而不是同步等待模型完成。",
+    "能结合当前 Think 环境中的 saveMessages、TurnQueue、ResumableStream、AbortRegistry、runFiber/chatRecovery、requestId、agent-tool run inspection/chunks 等上下文设计扩展。",
+    "提出了持久任务表、幂等键唯一索引、任务状态模型、查询/取消/删除/列表接口、chunk 回放和崩溃补偿等具体机制。",
+    "明确强调普通聊天路径继续直接使用 saveMessages，外部提交路径作为并行扩展，不整体重写 Session、streaming 或 cancellation。"
+  ],
+  "weaknesses": [
+    "缺少持久的消息应用边界。方案用 received/queued/executing 状态替代 messagesAppliedAt 或等价 checkpoint，但没有可靠记录提交消息是否已经实际追加到 Session，无法安全区分写入前崩溃与写入后崩溃。",
+    "后台执行机制不够安全。方案主要是返回后直接调用 saveMessages 的 write-after-forget，没有清晰的 durable drain/wakeup，也没有 pending/received -> running/executing 的条件 claim 事务。",
+    "对 saveMessages 的时序理解有偏差：当前源码中 saveMessages 先进入 TurnQueue，消息是在队列函数执行时 append 到 Session，并非调用 saveMessages 时就同时表示“消息已写入且已排队”。",
+    "没有终态条件更新机制。completed/failed 等迟到结果如何避免覆盖 cancelled/cleaned/skipped/error 没有说明。",
+    "reset/clear conversation 与外部任务 ledger 的同步处理不足，只泛泛提到 queued turn stale，没有说明 pending/running 提交在 reset 后应如何标记 skipped/aborted/error 并防止恢复重放。",
+    "取消机制依赖 requestId/AbortRegistry，但没有说明 requestId 在任务表中的生成、持久化和 received/queued 尚未真正开始执行时如何取消。"
+  ],
+  "missing_key_mechanisms": [
+    "messagesAppliedAt、applied message ids、事务版本或其他持久 Session 应用 checkpoint。",
+    "后台 drain/唤醒机制，以及用条件更新原子领取最早 pending/received submission 的 claim 过程。",
+    "终态条件更新，防止迟到完成、错误或恢复逻辑覆盖已经取消、清理或 reset 后的状态。",
+    "reset/clear conversation 与 submission/task ledger 的完整同步规则。",
+    "恢复时对 queued 但消息未应用、running 但无恢复证据、消息可能部分应用但无法证明安全的分支判定。",
+    "任务级 observability lifecycle events 与现有 observability 的明确集成。"
+  ],
+  "unsupported_claims": [
+    "“saveMessages() 被调用时，任务状态更新为 queued，表示消息已写入会话并已进入 TurnQueue 排队”与当前实现不符；源码中消息是在 TurnQueue 执行回调内 append。",
+    "“TurnQueue 因 resetTurnState() 或新代际丢弃排队中的 turn，任务保持 queued 并等待下一次排队机会”缺少源码依据；现有 saveMessages 在 generation 变化时会返回 skipped，不会自动重新排队同一 turn。",
+    "“SubmitConcurrencyController 的 debounce 策略可用于合并短时间内的重复提交”不能替代外部幂等键去重，且方案未证明当前外部任务可安全复用该策略。",
+    "“runFiber/_checkRunFibers 自动恢复未完成执行并从最后一个检查点继续”表述过强；当前 Think recovery 主要基于 chatRecovery、stream chunks、onChatRecovery 和 continuation 语义，不等同于任意任务从检查点原地继续。",
+    "“现有中间件体系”用于鉴权限流未在方案中给出当前项目依据。"
+  ],
+  "score_rationale": "方案方向正确且环境贴合度较高，明显优于普通异步接口方案；它覆盖了持久任务记录、幂等重试、状态查询、取消、清理和复用 Think 现有 turn/stream/cancel 语义。但 rubric 的强制锚点中，持久消息应用边界、后台条件 claim/drain、条件终态更新、reset/clear 同步是核心安全机制。该方案至少缺失前三项，reset 同步也不完整，因此按上限规则不能进入 75 分以上档位；三项以上关键机制缺失时通常不得高于 68 分。本次给 68 分，主要是因为其问题识别、项目上下文和接口/状态覆盖较好，但核心恢复去重机制仍可能导致重复追加消息或错误覆盖取消状态。"
+}

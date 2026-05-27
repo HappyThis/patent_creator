@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 13.5,
+    "essential_features": 7,
+    "problem_mechanism_effect": 11.5,
+    "constraint_adherence": 8.5,
+    "feasibility": 6.5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了核心问题：任务、会话、spawn history、成本、工具调用和评估数据分散，缺少统一运行级关联契约。",
+    "提出 Run ID 贯穿 task metadata、spawn_history、session、token_usage、mcp_call_log、eval_runs、pipeline_runs 的机制，符合“不是普通日志表”的需求。",
+    "给出了较清晰的生命周期状态、聚合查询流程、RunRecord 查询视图、REST 查询接口、SSE 事件和历史兼容风险。",
+    "能结合当前项目中的 dispatchAssignedTasks、callClaudeDirectly、spawn_history、claude_sessions、token_usage、mcp_call_log、eval_runs、pipeline_runs、eventBus 等实际对象展开设计。"
+  ],
+  "weaknesses": [
+    "缺少结构化 provenance/lineage 数据结构和生成流程；只靠 run_id、task_id、session_id、spawn_type 关联，不能完整表达运行来源、触发者、输入输出摘要、外部调用链和可校验溯源。",
+    "外部访问主要是 GET 查询和统计接口，缺少 MCP 工具层的 run list/detail、provenance 查询、eval attach/update 和 leaderboard 工具能力。",
+    "leaderboard 只作为后续效果被提到，没有给出基于 run 级 eval、成功率、成本的聚合模型或接口。",
+    "没有独立或明确持久化的 run 对象，生命周期状态主要依赖分散表推断；pending、cancelled、终态保护、重试 run 边界和部分写入失败后的恢复机制不够扎实。",
+    "eval 附着机制偏向执行完成后内部评估写入，缺少外部评测系统或人工评审对指定 run 附着、更新、标注 benchmark 元数据的契约。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 字段及其生成、查询和校验流程。",
+    "MCP server 层的 run 查询、provenance 查询、eval attach/update、leaderboard 工具。",
+    "run 级 leaderboard 聚合机制和 API。",
+    "明确的 AgentRun/RunRecord 持久化边界或等价状态源，包含版本、终态保护、取消/失败自动桥接和数据完整性标记。",
+    "外部系统主动创建或更新 run、附着评估结果的写入接口。"
+  ],
+  "unsupported_claims": [
+    "方案把 recordSpawnStart/recordSpawnFinish 描述为任务派发完整流程中的接入点，但当前源码中这两个函数只在 src/lib/spawn-history.ts 定义，未被 dispatchAssignedTasks 或 /api/spawn 实际调用。",
+    "方案默认工具调用审计系统会记录每次 MCP 工具调用，但当前源码中 logMcpCall 只有定义，未发现实际调用点；因此“每次工具调用均可按 run_id 归属”仍是待实现能力。",
+    "方案提到 token_usage 可稳定承载 total_tokens/cost 级运行归属，但当前迁移中核心 token_usage 表主要是 model、session_id、input_tokens、output_tokens，后续为 cost_usd、agent_name、task_id；对 total_tokens/cost 字段的现状依赖依据不足。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的较强答案。它没有停留在日志表或前端历史页，而是提出了贯穿现有 task、session、spawn history、成本、工具审计、eval 和 pipeline 的 Run ID 契约，并给出了聚合视图、状态流转、查询接口、事件和兼容处理，环境理解和问题识别都较好。主要扣分在两个高分锚点缺失：没有显式 provenance/lineage 模型与生成流程，也没有 MCP 工具层和 leaderboard 的具体 run 级能力；同时 eval attach 外部写入契约、取消/失败桥接、持久 run 状态源仍不够完整。根据 rubric 的上限规则，同时缺失 provenance/lineage 与 MCP/leaderboard 关键机制时总分不得高于 78，因此即使其他部分较具体，也按 78 分封顶。"
+}

@@ -1,0 +1,47 @@
+{
+  "status": "scored",
+  "total_score": 74,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 7,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确把问题抽象为单次 agent 执行粒度的统一 RunRecord，而不是普通文本日志。",
+    "识别了项目中真实存在的 spawn_history、token_usage、mcp_call_log、eval_runs、quality_reviews、audit_log、event-bus、SSE 和 /api/agents/evals 等基础能力。",
+    "给出了较完整的生命周期分段、成本归因、工具调用归集、评估附着和外部访问思路。",
+    "技术效果能够围绕可追踪、可评估、实时观察、外部消费和成本归因形成较清晰闭环。"
+  ],
+  "weaknesses": [
+    "核心关联机制过度依赖“run_id 贯穿多表”，但当前多张表并没有 run_id，方案没有给出必要的 schema 扩展或写入传播机制。",
+    "缺少结构化 provenance/lineage 字段和生成流程，只用 spawn_type、task_context 等上下文替代，无法完整说明运行来源和可校验链路。",
+    "没有覆盖 MCP 工具层的 run list、run detail、provenance 查询、eval attach 或 leaderboard 能力，仅提到模块函数和已有 REST/export。",
+    "leaderboard 聚合机制缺失，未说明如何基于 run 级 eval、成功率、成本等形成排行或质量统计视图。",
+    "eval 仍主要按 agent/layer 描述，缺少可信的 run 级 attach/update 契约、benchmark 元数据和与单次执行的稳定绑定。",
+    "通过 agent_name、session_id 和时间窗口归集工具调用、审计和成本，稳定性不足，容易把同一 agent 的并发或相邻执行混淆。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 对象及其在 spawn、task、session、外部调用之间的生成和校验流程。",
+    "run_id 或等价标识在 token_usage、mcp_call_log、eval_runs/评估结果中的稳定传播机制。",
+    "MCP 工具层的运行记录查询、溯源查询、评估附着和排行榜接口。",
+    "run 级 leaderboard/统计聚合机制。",
+    "新的 run 查询接口边界，例如 run list、run detail、run eval attach、run stream，而不是复用 agent 级 eval 或普通 export。",
+    "并发执行、失败、取消、超时和终态后只允许附着评估的条件更新规则。"
+  ],
+  "unsupported_claims": [
+    "当前 spawn_history 表主键是 id，不存在名为 run_id 的字段；其他表也没有可直接按 run_id 关联的列。",
+    "当前 task-dispatch.ts 未调用 recordSpawnStart/recordSpawnFinish，spawn-history.ts 并未在任务派发创建和完成路径中自动桥接。",
+    "event-bus 类型中没有 agent.spawned 事件，当前也未发现 spawn-history 写入时广播 agent.spawned 或 run 生命周期事件。",
+    "mcp_call_log 表没有 session_id 或 run_id 字段，不能按 session_id/run_id 稳定提取单次执行工具调用序列。",
+    "eval_runs 表没有 run_id、eval_run_id 或 eval_type 字段，也没有 agent_name + run_id + eval_type 联合索引；当前 /api/agents/evals 是 agent/layer 维度。",
+    "/api/export 当前支持 audit、tasks、activities、pipelines，不支持导出 RunRecord 或组合 spawn_history/token_usage/mcp_call_log/eval_results。",
+    "方案中的 getSpawnHistoryByAgent、getTaskCosts、getCostReport、getEvalRunsByAgent 等函数名未在当前源码中找到。",
+    "quality_reviews 当前主要是 task_id、reviewer、status、notes、created_at，方案中的 review_summary、reviewed_at、re-dispatch/failed 审查结果字段没有源码依据。"
+  ],
+  "score_rationale": "该方案方向正确，能把需求提升为统一运行记录契约，并且读到了不少真实项目部件；但它把现有分散表描述成已经能由 run_id 稳定归集，和当前源码事实不符。缺少 provenance/lineage、MCP run 工具、leaderboard 以及可靠的 run_id 传播和 run 级 eval attach，是关键机制缺口。根据 rubric，缺少 provenance 且缺少 MCP/leaderboard 时总分通常不应超过 78；同时核心论证依赖当前源码不存在的字段、事件和接口，因此适用 75 分上限，最终评为 74 分。"
+}
