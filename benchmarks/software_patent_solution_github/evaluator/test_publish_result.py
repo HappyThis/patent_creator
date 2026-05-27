@@ -30,6 +30,41 @@ def test_publish_batch_run_writes_sanitized_result_snapshot(tmp_path: Path) -> N
             }
         ],
     )
+    write_json(
+        runs_dir / "batch-1" / "run_manifest.json",
+        {
+            "schema_version": 1,
+            "run_id": "batch-1",
+            "model_config": {
+                "schema_version": 1,
+                "subject": {
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-pro",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "thinking": "enabled",
+                    "reasoning_effort": "high",
+                    "max_completion_tokens": 8192,
+                    "api_key_configured": True,
+                    "api_key_env_var": "OPENAI_COMPAT_API_KEY",
+                },
+                "runtime": {"llm_timeout": 45.0, "llm_max_retries": 2},
+                "context_compression": {
+                    "max_tokens": 128000,
+                    "compress_threshold_ratio": 0.8,
+                    "reserved_output_tokens": 8000,
+                    "token_char_coefficient": 0.5,
+                    "compression_timeout": 180.0,
+                },
+            },
+            "run_config": {
+                "repeats": 1,
+                "workers": 1,
+                "round_timeout_seconds": 900,
+                "judge_timeout_seconds": 900,
+                "skip_judge": False,
+            },
+        },
+    )
 
     result_dir, manifest = publish_run(
         source_run_id="batch-1",
@@ -41,6 +76,10 @@ def test_publish_batch_run_writes_sanitized_result_snapshot(tmp_path: Path) -> N
 
     assert result_dir == results_dir / "published-batch"
     assert manifest["metadata"] == {"subject_model": "mimo-v2.5-pro", "judge_model": "codex"}
+    assert manifest["model_config"]["source"] == "source_run_manifest"
+    assert manifest["model_config"]["subject"]["model"] == "deepseek-v4-pro"
+    assert manifest["run_config"]["source"] == "source_run_manifest"
+    assert manifest["run_config"]["round_timeout_seconds"] == 900
     assert (result_dir / "manifest.json").exists()
     assert (result_dir / "evaluation_summary.json").exists()
     assert (result_dir / "evaluation_report.md").exists()
@@ -50,6 +89,9 @@ def test_publish_batch_run_writes_sanitized_result_snapshot(tmp_path: Path) -> N
 
     case_records_text = (result_dir / "case_results.jsonl").read_text(encoding="utf-8")
     assert str(tmp_path) not in case_records_text
+    result_snapshot_text = (result_dir / "manifest.json").read_text(encoding="utf-8")
+    assert "OPENAI_COMPAT_API_KEY" in result_snapshot_text
+    assert "sk-" not in result_snapshot_text
     case_record = json.loads(case_records_text)
     assert case_record["artifact_path"] == "artifacts/001/r01/technical_solution.md"
     assert case_record["judge_result_path"] == "judge_results/001/r01/judge.json"

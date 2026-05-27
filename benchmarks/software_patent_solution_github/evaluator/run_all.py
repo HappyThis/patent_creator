@@ -21,8 +21,10 @@ if str(EVALUATOR_DIR) not in sys.path:
 
 try:
     from .process_utils import terminate_process_group  # type: ignore[import-not-found]
+    from .run_metadata import build_run_manifest  # type: ignore[import-not-found]
 except ImportError:
     from process_utils import terminate_process_group  # type: ignore[no-redef]
+    from run_metadata import build_run_manifest  # type: ignore[no-redef]
 
 
 def main() -> None:
@@ -42,15 +44,35 @@ def main() -> None:
         for repeat in range(1, args.repeats + 1)
         for case_id in normalized_case_ids
     ]
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    run_manifest = build_run_manifest(
+        run_id=batch_id,
+        run_kind="batch",
+        run_config={
+            "cases": normalized_case_ids,
+            "repeats": args.repeats,
+            "workers": args.workers,
+            "round_timeout_seconds": args.round_timeout,
+            "judge_timeout_seconds": args.judge_timeout,
+            "skip_judge": bool(args.skip_judge),
+        },
+        case_ids=normalized_case_ids,
+    )
+    write_json(batch_dir / "run_manifest.json", run_manifest)
     results = run_jobs(jobs, args=args, runs_dir=runs_dir)
 
-    batch_dir.mkdir(parents=True, exist_ok=True)
     summary_path = batch_dir / "run_summary.json"
-    summary_path.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json(summary_path, results)
     aggregate = aggregate_results(results, case_ids=normalized_case_ids)
     aggregate_path = batch_dir / "evaluation_summary.json"
-    aggregate_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    report = render_report(batch_id=batch_id, aggregate=aggregate, repeats=args.repeats)
+    write_json(aggregate_path, aggregate)
+    report = render_report(
+        batch_id=batch_id,
+        aggregate=aggregate,
+        repeats=args.repeats,
+        model_config=run_manifest["model_config"],
+        run_config=run_manifest["run_config"],
+    )
     report_path = batch_dir / "evaluation_report.md"
     report_path.write_text(report, encoding="utf-8")
     (BENCHMARK_DIR / "latest_run_report.md").write_text(report, encoding="utf-8")
@@ -177,6 +199,11 @@ def write_text_if_present(path: Path, text: str) -> Path | None:
     return path
 
 
+def write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def stream_pipe(pipe: Any, chunks: list[str], target: Any, prefix: str) -> None:
     if pipe is None:
         return
@@ -264,18 +291,66 @@ def top_text_items(scored: list[dict[str, Any]], key: str, *, limit: int = 5) ->
     return [text for text, _count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[:limit]]
 
 
-def render_report(*, batch_id: str, aggregate: list[dict[str, Any]], repeats: int) -> str:
+def render_report(
+    *,
+    batch_id: str,
+    aggregate: list[dict[str, Any]],
+    repeats: int,
+    model_config: dict[str, Any] | None = None,
+    run_config: dict[str, Any] | None = None,
+) -> str:
     lines = [
         "# 软件专利技术方案 benchmark 批量评估报告",
         "",
         f"- 批次：`{batch_id}`",
         f"- 重复次数：`{repeats}`",
-        "",
-        "## 汇总表",
-        "",
-        "| Case | 运行次数 | 产物成功 | 已评分 | 平均分 | 最低分 | 最高分 | 标准差 | 状态分布 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
+    subject = model_config.get("subject", {}) if isinstance(model_config, dict) else {}
+    context = model_config.get("context_compression", {}) if isinstance(model_config, dict) else {}
+    runtime = model_config.get("runtime", {}) if isinstance(model_config, dict) else {}
+    if subject:
+        lines.extend(
+            [
+                f"- Subject 模型：`{subject.get('provider', '-')}` / `{subject.get('model', '-')}`",
+                f"- Base URL：`{subject.get('base_url', '-')}`",
+                f"- Thinking：`{subject.get('thinking', '-')}`；reasoning_effort：`{subject.get('reasoning_effort', '-')}`；max_completion_tokens：`{subject.get('max_completion_tokens', '-')}`",
+            ]
+        )
+    if context:
+        lines.append(
+            "- 压缩配置：max_tokens=`{max_tokens}`，threshold_ratio=`{ratio}`，reserved_output=`{reserved}`，token_char_coefficient=`{coef}`".format(
+                max_tokens=context.get("max_tokens", "-"),
+                ratio=context.get("compress_threshold_ratio", "-"),
+                reserved=context.get("reserved_output_tokens", "-"),
+                coef=context.get("token_char_coefficient", "-"),
+            )
+        )
+    if runtime:
+        lines.append(
+            "- Runtime：llm_timeout=`{timeout}`，llm_max_retries=`{retries}`，compression_timeout=`{compression_timeout}`".format(
+                timeout=runtime.get("llm_timeout", "-"),
+                retries=runtime.get("llm_max_retries", "-"),
+                compression_timeout=context.get("compression_timeout", "-") if context else "-",
+            )
+        )
+    if run_config:
+        lines.append(
+            "- 运行参数：workers=`{workers}`，round_timeout=`{round_timeout}`，judge_timeout=`{judge_timeout}`，skip_judge=`{skip_judge}`".format(
+                workers=run_config.get("workers", "-"),
+                round_timeout=run_config.get("round_timeout_seconds", "-"),
+                judge_timeout=run_config.get("judge_timeout_seconds", "-"),
+                skip_judge=run_config.get("skip_judge", "-"),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## 汇总表",
+            "",
+            "| Case | 运行次数 | 产物成功 | 已评分 | 平均分 | 最低分 | 最高分 | 标准差 | 状态分布 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
     for row in aggregate:
         lines.append(
             "| {case_id} | {runs} | {artifact_success_runs} ({artifact_success_rate:.0%}) | {scored_runs} | {avg} | {min_score} | {max_score} | {stddev} | {status_counts} |".format(

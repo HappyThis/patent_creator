@@ -19,6 +19,7 @@ if str(EVALUATOR_DIR) not in sys.path:
 from artifact import extract_technical_solution, has_effective_solution, write_artifact  # noqa: E402
 from codex_judge import run_codex_judge  # noqa: E402
 from prepare_env import prepare_project_checkout  # noqa: E402
+from run_metadata import build_run_manifest  # noqa: E402
 
 
 def main() -> None:
@@ -74,6 +75,22 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path = case_run_dir / "input_manifest.json"
 
     case_run_dir.mkdir(parents=True, exist_ok=True)
+    run_config = {
+        "case_id": case_id,
+        "skip_judge": bool(args.skip_judge),
+        "skip_subject": bool(args.skip_subject),
+        "round_timeout_seconds": args.round_timeout,
+        "judge_timeout_seconds": args.judge_timeout,
+        "max_refinement_rounds": max_refinements,
+        "codex_bin": args.codex_bin,
+    }
+    run_manifest = build_run_manifest(
+        run_id=run_id,
+        run_kind="single_case",
+        run_config=run_config,
+        case_ids=[case_id],
+    )
+    write_json(run_dir / "run_manifest.json", run_manifest)
     progress = case_progress_writer(case_run_dir=case_run_dir, case_id=case_id, run_id=run_id)
     progress("prepare", "case run directory initialized")
     request_md = (case_dir / "request.md").read_text(encoding="utf-8")
@@ -131,6 +148,8 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         "subject_status": subject_status,
         "subject_reused": subject_reused,
         "max_refinement_rounds": max_refinements,
+        "model_config": run_manifest["model_config"],
+        "run_config": run_config,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_json(case_run_dir / "diagnostics.json", diagnostics)

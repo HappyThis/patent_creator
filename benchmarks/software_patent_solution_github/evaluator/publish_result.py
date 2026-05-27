@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +16,7 @@ if str(EVALUATOR_DIR) not in sys.path:
     sys.path.insert(0, str(EVALUATOR_DIR))
 
 from run_all import aggregate_results, render_report  # noqa: E402
+from run_metadata import capture_model_config, compact_dict, git_metadata  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -84,10 +84,18 @@ def publish_run(
         [{"case_id": item.case_id, "repeat": item.repeat, "result": item.result} for item in case_runs],
         case_ids=sorted({item.case_id for item in case_runs}),
     )
+    model_config = resolve_model_config(source_run_dir=source_run_dir, case_runs=case_runs)
+    run_config = resolve_run_config(source_run_dir=source_run_dir, case_runs=case_runs)
     write_json(result_dir / "evaluation_summary.json", summary)
     repeats = max((item.repeat for item in case_runs), default=1)
     (result_dir / "evaluation_report.md").write_text(
-        render_report(batch_id=normalized_result_id, aggregate=summary, repeats=repeats),
+        render_report(
+            batch_id=normalized_result_id,
+            aggregate=summary,
+            repeats=repeats,
+            model_config=model_config,
+            run_config=run_config,
+        ),
         encoding="utf-8",
     )
     write_jsonl(result_dir / "case_results.jsonl", case_records)
@@ -100,6 +108,8 @@ def publish_run(
         case_runs=case_runs,
         case_records=case_records,
         metadata=metadata or {},
+        model_config=model_config,
+        run_config=run_config,
     )
     write_json(result_dir / "manifest.json", manifest)
     upsert_index(results_dir / "index.jsonl", manifest)
@@ -240,6 +250,8 @@ def build_manifest(
     case_runs: list[CaseRun],
     case_records: list[dict[str, Any]],
     metadata: dict[str, Any],
+    model_config: dict[str, Any],
+    run_config: dict[str, Any],
 ) -> dict[str, Any]:
     scored_runs = [record for record in case_records if record.get("status") == "scored"]
     artifact_runs = [record for record in case_records if record.get("artifact_extracted") is True]
@@ -251,6 +263,8 @@ def build_manifest(
         "published_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "benchmark_git": git_metadata(BENCHMARK_DIR),
         "metadata": compact_dict(metadata),
+        "model_config": model_config,
+        "run_config": run_config,
         "case_ids": sorted({item.case_id for item in case_runs}),
         "runs": len(case_runs),
         "scored_runs": len(scored_runs),
@@ -271,6 +285,7 @@ def build_manifest(
             "run_case_stderr.txt",
             "subject/disclosure.json",
             "absolute local paths",
+            "provider API keys",
         ],
     }
 
@@ -295,33 +310,37 @@ def upsert_index(index_path: Path, manifest: dict[str, Any]) -> None:
             "scored_runs": manifest["scored_runs"],
             "artifact_success_runs": manifest["artifact_success_runs"],
             "metadata": manifest["metadata"],
+            "model_config": manifest["model_config"],
+            "run_config": manifest["run_config"],
         }
     )
     write_jsonl(index_path, entries)
 
 
-def git_metadata(cwd: Path) -> dict[str, Any]:
-    commit = run_git(["rev-parse", "HEAD"], cwd=cwd)
-    status = run_git(["status", "--short"], cwd=cwd)
-    return {
-        "commit": commit,
-        "dirty": bool(status),
-    }
+def resolve_model_config(*, source_run_dir: Path, case_runs: list[CaseRun]) -> dict[str, Any]:
+    source_manifest = read_json_dict(source_run_dir / "run_manifest.json")
+    if isinstance(source_manifest, dict) and isinstance(source_manifest.get("model_config"), dict):
+        return {"source": "source_run_manifest", **source_manifest["model_config"]}
+
+    for case_run in case_runs:
+        input_manifest = read_json_dict(case_run.case_run_dir / "input_manifest.json")
+        if isinstance(input_manifest, dict) and isinstance(input_manifest.get("model_config"), dict):
+            return {"source": "case_input_manifest", **input_manifest["model_config"]}
+
+    return {"source": "current_environment_fallback", **capture_model_config()}
 
 
-def run_git(args: list[str], *, cwd: Path) -> str | None:
-    try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return completed.stdout.strip() or None
+def resolve_run_config(*, source_run_dir: Path, case_runs: list[CaseRun]) -> dict[str, Any]:
+    source_manifest = read_json_dict(source_run_dir / "run_manifest.json")
+    if isinstance(source_manifest, dict) and isinstance(source_manifest.get("run_config"), dict):
+        return {"source": "source_run_manifest", **source_manifest["run_config"]}
+
+    for case_run in case_runs:
+        input_manifest = read_json_dict(case_run.case_run_dir / "input_manifest.json")
+        if isinstance(input_manifest, dict) and isinstance(input_manifest.get("run_config"), dict):
+            return {"source": "case_input_manifest", **input_manifest["run_config"]}
+
+    return {"source": "publish_result_inferred"}
 
 
 def read_json_dict(path: Path) -> dict[str, Any] | None:
@@ -341,10 +360,6 @@ def write_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for value in values:
             handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
-
-
-def compact_dict(value: dict[str, Any]) -> dict[str, Any]:
-    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
 
 
 def sanitize_result_id(value: str) -> str:
