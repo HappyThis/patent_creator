@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 80,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 3
+  },
+  "strengths": [
+    "准确把问题抽象为异构本地 agent runtime 接入，而不是只增加 UI 选项或外部工具链接。",
+    "提出了可配置发现、适配器合约、解析器链、规范化消息模型、能力集声明和 UI/API gating，方向符合需求约束。",
+    "对 OpenCode 本地格式和 continue 能力保持谨慎，使用 unknown/partial 能力状态和 fixture 验证避免误导性承诺。",
+    "保留未知字段、不可解析消息占位和 degraded 初始化状态，具备一定容错和渐进接入思路。"
+  ],
+  "weaknesses": [
+    "与当前项目既有代码边界结合不够具体，未点明现有 session 聚合 API、transcript API、continue API、runtime setup/settings、conversation list、terminal view 等实际接入位置。",
+    "缺少明确的 RuntimeKind/opencode 注册、会话对象字段如何进入现有 session list/transcript 响应结构的设计细节。",
+    "没有明确处理 terminal/PTY attach 能力，容易遗漏当前项目中 claude-code/codex-cli 才有终端入口的 gating 规则。",
+    "API 契约同步不足，未说明 OpenAPI、API index/schema、前端类型或测试夹具如何同步新增 opencode 能力字段。",
+    "可复现验证只覆盖 continue 命令 fixture，未覆盖 session list、transcript 解析、continue 失败、PTY unsupported、API/E2E 等关键路径。",
+    "continue 失败处理较粗，主要返回能力不可用，缺少 binary missing、provider/model/session missing 或本地命令错误透传等诊断性分类。"
+  ],
+  "missing_key_mechanisms": [
+    "在既有 RuntimeId/RuntimeKind、runtime detection、settings/onboarding 中新增 opencode 的具体注册路径。",
+    "OpenCode 会话归一化对象进入现有 /api/sessions 聚合列表的字段映射，包括 runtime kind、title、updatedAt、workspace/project、canContinue/canAttachTerminal/sourcePath 等。",
+    "transcript API 针对 runtime kind 路由到 OpenCode parser，并输出当前前端 SessionMessage 可消费的消息结构。",
+    "continue API 的 opencode 专属路由、命令构造、错误透传和结构化失败类别。",
+    "terminal/PTY attach 的显式 unsupported gating，避免 OpenCode 会话显示终端附着入口。",
+    "OpenAPI/API index/schema 与前端类型的同步更新。",
+    "真实结构本地状态 fixture、OpenCode binary stub，以及 session list/transcript/continue/PTY unsupported 的可复现测试。"
+  ],
+  "unsupported_claims": [
+    "声称 OpenCode 会话数据存储在本地文件系统状态目录中，当前项目快照没有实现或证据证明该具体存储事实。",
+    "列举 session_*.jsonl、*.opencode.json、role/timestamp/content 等文件模式和字段，只能作为候选兼容解析策略，不能作为当前已知 OpenCode 格式事实。",
+    "使用 opencode continue --session <id> --input <user_message> 作为命令示例，但当前项目中没有该命令接口已存在的依据；方案虽声明需验证，仍应标为待确认。",
+    "提出直接状态写入继续会话，这在当前环境和需求约束下没有依据，且已被方案标记为待确认扩展。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”档位。它抓住了本地 OpenCode runtime 接入的核心问题，并提出了适配器、发现、解析、归一化、能力边界和 fixture 验证等合理机制，明显优于泛泛的 CLI 调用方案。但它没有充分落到当前 Mission Control 的真实源码边界：现有 /api/sessions 聚合、/api/sessions/transcript、/api/sessions/continue、settings/onboarding、chat workspace、terminal/PTY 和 OpenAPI 契约没有被明确串起来。按 rubric，上限主要受三点影响：未明确 terminal/PTY gating，未说明 OpenAPI/API index/schema 同步，测试验证不完整且未覆盖 session list/transcript/PTY unsupported；continue 失败分类也偏弱。因此不宜超过 80 分左右。"
+}

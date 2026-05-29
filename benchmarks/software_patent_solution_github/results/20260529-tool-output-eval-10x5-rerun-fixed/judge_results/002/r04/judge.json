@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 74,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 13,
+    "technical_mechanism": 13,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了现有 spawn_history、token_usage、tasks、eval_runs、mcp_call_log、activities、audit_log 等信息分散的问题，并尝试用统一契约而非普通日志表来组织。",
+    "能把成本统计、任务 outcome、评估、活动流、审计和 SSE 查询等现有能力纳入同一运行记录视角，方向与需求一致。",
+    "说明了 dispatch、spawn、token、outcome、eval 的生命周期时序，以及可查询、可追踪、可评估、外部可访问的技术效果。"
+  ],
+  "weaknesses": [
+    "缺少真正稳定的 run 对象或 runId。仅用 session_id、task_id、agent_name 做映射，难以唯一表示一次 agent 执行，也难以稳定附着评估、产物、错误、成本和 provenance。",
+    "没有结构化 provenance/lineage 字段和生成流程，不能充分回答某次 agent 工作从哪个任务、会话、外部调用或 spawn 入口产生。",
+    "评估机制仍是 agent 层或聚合层 eval_runs，未形成 run 级 eval attach/update 契约，也缺少 benchmark、pass/fail、说明、维度元数据与具体 run 的绑定。",
+    "没有提出 MCP 工具层的 run 查询、provenance 查询、eval 附着和 leaderboard 聚合能力，只列出现有 REST/SSE 片段。",
+    "多个关键源码事实被说成已存在或已自动接入，但当前快照中缺少对应表、字段、事件或调用路径，削弱了可实施性。"
+  ],
+  "missing_key_mechanisms": [
+    "AgentRun/RunRecord 等等价的统一运行对象，至少包含 runId、agentId、taskId、sessionId、spawnId、状态、时间、结果、错误、成本、tokenUsage、metadata。",
+    "运行来源 provenance/lineage 的结构化生成与查询接口。",
+    "spawn 创建、完成、失败、取消路径到 run 生命周期的自动桥接，并处理终态保护或幂等更新。",
+    "run 级评估附着与更新接口，以及基于 run/eval/cost/success rate 的 leaderboard 聚合。",
+    "/api/v1/runs、run detail、run provenance、run eval attach、run stream 等稳定 API，及对应 MCP server 工具。",
+    "外部系统主动创建或更新 run 的入口，与内部自动采集路径保持同一契约。"
+  ],
+  "unsupported_claims": [
+    "“每张表均含 workspace_id”不准确，audit_log 当前 schema 没有 workspace_id。",
+    "“eval_runs 含 correctness_score、convergence_score、tool_reliability”等字段无依据；当前 eval_runs 主要是 agent_name、eval_layer、score、passed、detail、golden_dataset_id。",
+    "“migration 045 创建 task_dispatch_attempts 表并记录模型选择理由和路由耗时”无依据；当前迁移 045 只给 tasks 增加 dispatch_attempts 字段和 stale in_progress 索引。",
+    "“recordSpawnStart/recordSpawnFinish 在 Agent 进程启动和结束时自动写入/更新”缺少当前调用路径依据；这些函数存在但未被 spawn/dispatch 路径引用，/api/spawn GET 仍读取日志。",
+    "“MCP 工具调用经 command 子进程封装后自动写入 mcp_call_log”缺少调用点依据；logMcpCall 当前未被其他源码引用。",
+    "“/api/events 可实时观察 spawn 状态、token 消耗趋势、评估结果”依据不足；event-bus 当前未定义 run/spawn/token/eval 事件，SSE 只能转发现有被广播事件。",
+    "“spawn_history 通过 getSpawnHistory/getSpawnStats 暴露给外部工具”不完整；当前只是库函数，未看到稳定 API 或 MCP 工具直接暴露该契约。"
+  ],
+  "score_rationale": "该方案总体方向正确，能把现有分散的任务、spawn、成本、评估、活动和审计信息抽象成统一运行记录契约，且没有退化为普通日志表。但它没有形成可唯一查询和附着评估的结构化 run 对象，也缺少 provenance/lineage、run 级 eval attach、MCP 工具与 leaderboard 等关键机制。更重要的是，核心论证依赖若干当前源码中不存在或未接入的表、字段、事件和自动调用路径，因此触发“核心机制依赖无依据源码事实时总分通常不得高于 75”的上限；给 74 分是因为概念方向和部分现有组件识别较好，但工程边界与关键机制缺口明显。"
+}

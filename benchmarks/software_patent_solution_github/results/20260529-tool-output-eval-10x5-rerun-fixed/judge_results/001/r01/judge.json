@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 12,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 5
+  },
+  "strengths": [
+    "能识别当前项目已有 RuntimeId、DETECTORS、INSTALL_FNS、sessions 聚合、continue 接口、local-agent-sync 等关键路径，环境依据较充分。",
+    "核心方向正确：把 OpenCode 作为独立 runtime，通过可配置发现、专属适配器、统一 session 对象和 capability gating 接入，而不是伪装成 Claude/Codex。",
+    "对未知 OpenCode 本地目录、消息格式和继续命令保持可配置与验证态度，提出 schema hint、兼容式解析、fixture 和命令替身验证。",
+    "强调存量 Claude、Codex、Hermes、OpenClaw 兼容，通过 legacy adapter 或渐进迁移降低回归风险。"
+  ],
+  "weaknesses": [
+    "缺少明确的 transcript API/parser 接入方案，没有说明 OpenCode 历史消息如何归一化为现有 transcript 消息结构、工具片段和不可解析载荷占位。",
+    "没有覆盖 terminal/PTY attach capability gating；当前项目已有 PTY attach 仅支持 claude-code/codex-cli，方案未明确 OpenCode 应禁用或返回 unsupported_kind。",
+    "没有说明 OpenAPI、API index、schema 和前端类型契约同步，容易造成实现和文档不一致。",
+    "continue 方案主要是命令模板和 capability_not_available，缺少对 binary missing、session missing、provider/model/auth 缺失、命令失败等诊断性失败返回的细分。",
+    "直接模板替换 shell 命令未说明 argv 构造、prompt 转义和注入防护，工程安全边界不足。",
+    "UI 集成主要停留在会话列表品牌和按钮，未充分落到 conversation list/chat workspace/session detail 的完整路径。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript parser and GET /api/sessions/transcript routing with role/tool/message normalization.",
+    "Terminal/PTX attach gating field or route behavior such as canAttachTerminal=false and unsupported UI state.",
+    "OpenAPI/API index/schema/type contract synchronization and parity tests.",
+    "Session detail/chat workspace integration beyond the list view.",
+    "API/E2E tests covering session list, transcript, continue success/failure, and PTY unsupported behavior with real fixtures and binary stub.",
+    "Structured continue failure taxonomy and secure command argument construction."
+  ],
+  "unsupported_claims": [
+    "OPENCODE_STATE_DIR defaulting to ~/.opencode, OPENCODE_SESSION_GLOB defaulting to {sessions,history}/**/*.jsonl, and OPENCODE_CONTINUE_ARGS_TEMPLATE defaulting to --resume {sessionId} {prompt} are not supported by the current project snapshot or supplied OpenCode facts.",
+    "detectOpenCode checking config.json or version.txt under the OpenCode state directory is an arbitrary assumption rather than a project-backed fact.",
+    "Extending the existing FrameworkAdapter for runtime detection/session scanning conflates two current concepts: the existing adapter contract is for framework registration, heartbeat, reporting and assignments, not local runtime session management.",
+    "Scanning ~/.opencode/agents with AGENT.md, soul.md or config.json markers is not evidenced by current project code or known OpenCode local state semantics.",
+    "Defaulting canShowTokens=true for OpenCode is not justified when token fields may be absent or unparseable."
+  ],
+  "score_rationale": "This is a useful but incomplete方案. It correctly frames OpenCode as an independent heterogeneous local runtime and gives concrete discovery, adapter, session normalization, capability gating and fixture ideas. However, rubric key mechanisms are missing: transcript parser/API integration, PTY/terminal gating, API/OpenAPI contract sync, and complete reproducible tests for transcript/continue/PTY unsupported paths. Under the rubric cap for missing three or more critical mechanisms, the total should not exceed 72 despite the otherwise solid runtime/session-list design."
+}

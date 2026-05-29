@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 84,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住了本地生命周期清理与服务端 durable turn 取消语义需要解耦这一核心问题。",
+    "提出了 durable 默认模式与 request-lifetime 可选模式，并明确 stop() 应始终表达服务端取消意图。",
+    "覆盖了 requestId 级取消帧、AbortRegistry、ResumableStream 恢复、工具 continuation、多标签观察和迟到消息过滤等关键方向。",
+    "能把技术效果落到避免误杀长运行 turn、保留恢复能力、减少资源浪费和提供应用级策略选择。"
+  ],
+  "weaknesses": [
+    "关键实现落点偏向 useAgentChat effect cleanup 和服务端 onClose，未充分指出当前 WebSocketChatTransport 的 abortSignal 与 ReadableStream.cancel 都会走同一 onAbort 并发送取消帧，必须在 transport 层拆分本地 detach 与 server cancel。",
+    "显式 stop 仍被描述为依赖现有 onAbort 路径，但若普通 abort 改为本地清理，需要独立的 cancelActiveServerTurn 或等价 API，否则 stop 与普通 abort 仍难以区分。",
+    "request-lifetime 的服务端 onClose 取消依赖连接到请求的映射，但方案只在风险中补充建议，未给出完整的数据结构、登记和清理时机。",
+    "对显式取消后的 active request id 保留、server_cancel_requested 状态和 late done/chunk 处理说明不够完整，容易只停留在 localRequestIdsRef 过滤。",
+    "对 observed/fallback turn 的“观察”和“显示”讲得较多，但没有充分说明无 attached stream 时如何通过统一取消入口取消该服务端 turn。"
+  ],
+  "missing_key_mechanisms": [
+    "transport 层的 cancelOnClientAbort 或等价策略，明确控制 caller abort、stream.cancel 是否发送服务端取消帧。",
+    "独立显式服务端取消入口，例如 cancelActiveServerTurn，供 stop() 使用，而不是继续复用普通 AbortSignal 路径。",
+    "attached local stream cleanup 与 active server turn id 的分离登记，支持本地 reader/listener 释放但保留服务端 turn。",
+    "显式取消后的 active id 保留状态机，直到服务端终态帧或迟到消息被 requestId 过滤处理。",
+    "request-lifetime 模式下连接到活跃 requestId 的具体映射、宽限期或重连竞态处理。",
+    "observed turn 或 resume fallback turn 在非当前 transport 持有时的登记与显式取消路径。"
+  ],
+  "unsupported_claims": [
+    "方案称浏览器刷新、组件卸载、reader cancel、网络断开等 cleanup 路径当前仅做本地状态重置且不发送取消消息；当前源码中 WebSocketChatTransport 的 abortSignal 和 ReadableStream.cancel 会发送 CF_AGENT_CHAT_REQUEST_CANCEL，至少 reader cancel/caller abort 部分与源码不符。",
+    "方案假定 AIChatAgent 可在 onClose 中遍历该连接关联的所有活跃请求 ID；当前源码仅清理 pending resume/continuation connection 状态，没有现成的 connection-to-request 映射。",
+    "方案称不改变现有 WebSocket 协议，同时又建议在连接建立或首次 sendMessages 时发送 turnLifetime 元数据；这至少需要新增请求元数据约定，不能算完全无协议/API变化。"
+  ],
+  "score_rationale": "该方案属于方向正确且机制较丰富的可用方案，明显命中了 durable 默认、request-lifetime opt-in、显式取消帧、active requestId、resume、tool continuation 和多标签观察等多数评分锚点。但它没有把当前最核心的源码耦合点讲透：WebSocketChatTransport 里 caller abort 与 stream.cancel 当前共用 onAbort 并发送服务端取消帧。方案主要在 hook cleanup 和服务端 onClose 上加策略，导致 reader cancel、AI SDK abortSignal、stop() 的语义拆分仍不够可实施。由于缺少独立显式 cancel API、attached stream cleanup 与 active turn id 的完整状态机，以及 request-lifetime 的连接映射细节，未达到 90 分强答案；但关键方向和大部分边界均有覆盖，因此给 84 分。"
+}

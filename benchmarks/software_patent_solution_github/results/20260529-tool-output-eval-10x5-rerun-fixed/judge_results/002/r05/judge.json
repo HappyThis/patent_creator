@@ -1,0 +1,47 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 10,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了现有 spawn history、token/cost、eval、activities、tasks 分散，缺少统一运行记录契约的问题。",
+    "提出了以 spawn/session/task 为主线聚合运行元数据、成本、任务结果、活动流和评估结果的统一视图，方向符合需求中“不是普通日志表”的约束。",
+    "给出了列表和详情查询接口、过滤维度、成本聚合和活动裁剪等较具体的可实施设计。",
+    "风险部分能意识到 session_id、时间窗口匹配和 activities 间接关联的不稳定性。"
+  ],
+  "weaknesses": [
+    "缺少结构化 provenance/lineage 字段与生成流程，不能充分回答一次运行的来源证明、输入输出摘要和可校验 lineage。",
+    "没有给出 MCP 工具层的 run 查询、provenance 查询、eval attach 或 leaderboard 能力，外部 agent/评测工具复用能力不足。",
+    "eval 附着主要依赖 agent_name + workspace_id + 时间窗口，缺少 run 级 eval attach/update 契约、pass/fail/benchmark 元数据与稳定 run_id 绑定，方案自己也承认时间窗口可能不准。",
+    "事件机制主要复用 activity/SSE，没有说明 run.created、run.updated、run.completed、run.eval_attached 等 run 生命周期事件如何进入 event bus。",
+    "没有 leaderboard 或按 run/eval 聚合的排行榜机制，弱化了后续质量评测和横向比较扩展。",
+    "方案大量声称现有源码路径和字段已经具备某些能力，但当前快照中部分并不存在或未接入，影响可实施性和环境可信度。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 对象，包括 sourceType、triggeredBy、关联对象摘要、input/output summary、artifact refs 或可校验 lineage。",
+    "稳定的 run 级 eval attach/update 接口和数据契约，而不是仅用 agent 名称和时间窗口推断。",
+    "MCP server 中面向 run list/detail/provenance/eval attach/leaderboard 的工具入口。",
+    "基于 run 生命周期的事件发布与订阅能力。",
+    "leaderboard 或统计视图，按 eval、成功率、成本和 agent 维度聚合。",
+    "对 spawn-history 创建、完成、失败、取消路径的真实自动桥接接入点和失败处理。"
+  ],
+  "unsupported_claims": [
+    "声称 api/spawn/route.ts 在 spawn 启动时调用 recordSpawnStart、结束时调用 recordSpawnFinish；当前快照中 recordSpawnStart/recordSpawnFinish 只在 src/lib/spawn-history.ts 定义，未被 /api/spawn 调用。",
+    "声称 GET /api/spawn 基于 DB spawn_history；当前 /api/spawn GET 仍有日志扫描逻辑注释和实现。",
+    "声称 spawn_history 初始 status 为 running、终态包含 cancelled；实际 recordSpawnStart 写入 started，recordSpawnFinish 只接受 completed/failed/terminated。",
+    "声称 eval_runs 有 status='completed' 字段和 eval_type 字段；当前 eval_runs 表字段为 eval_layer、score、passed、detail、golden_dataset_id、workspace_id、created_at，没有 status/eval_type。",
+    "声称存在 lib/db/spawn-history.ts、lib/db/task-costs.ts、lib/db/activities.ts；当前相关文件为 src/lib/spawn-history.ts、src/lib/task-costs.ts，activities 逻辑在 src/lib/db.ts 和 API route 中。",
+    "声称 task-dispatch.ts 的 dispatchToAgent/dispatchDirect 写入 token_usage 的 session_id、task_id、cost_usd、agent_name、workspace_id；当前直接 Claude 路径写入字段与描述不一致，gateway dispatch 主要保存 dispatch_session_id 到 task metadata，并非方案描述的同步 token_usage 写入。",
+    "声称 activities 中有与工具调用相关事件可直接用于 component eval；当前 component/trace eval 主要查询 mcp_call_log，不是 activities。",
+    "声称 sessions.ts 的 GatewaySession 可通过 sessionId 与 spawn_history.session_id 对应；当前方案未证明两者同源，源码中该对应关系也没有稳定桥接实现。"
+  ],
+  "score_rationale": "该方案的问题识别和聚合视图设计较强，能形成一个以 spawn 为锚点的统一运行记录视图，明显优于普通日志表。但它没有完整命中高分锚点：缺少 provenance/lineage、MCP 工具访问、leaderboard、run 生命周期事件和稳定的 run 级 eval attach/update 契约。更严重的是，记录生成链路依赖多处当前源码并不存在或未接入的调用路径和字段，例如 /api/spawn 并未调用 spawn-history 持久化函数，eval_runs 也没有 status 字段。因此适用“核心机制依赖无依据源码事实总分通常不高于 75”的上限；同时缺失多个关键机制，不能进入 75-85 的可用但不完整高位档。综合给 72 分。"
+}

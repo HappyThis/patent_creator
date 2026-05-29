@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 13,
+    "technical_mechanism": 14,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "明确把 OpenCode 作为新增原生 runtime，而不是伪装成 Claude/Codex 或要求用户手工导入。",
+    "覆盖了 RuntimeId/DETECTORS/VALID_RUNTIMES、可配置本地状态目录、会话扫描模块、统一 session list 映射和 continue API 分支等核心后端接入思路。",
+    "注意到 OpenCode 本地目录、文件格式和继续命令未确认，提出可配置发现、兼容式解析、capabilities gating 和命令替身验证，基本符合补充约束。",
+    "强调新增路径应 additive 集成，避免破坏 Claude、Codex、Hermes、OpenClaw 现有行为。",
+    "问题、手段、效果之间有较清晰闭环，具备一定专利化抽象。"
+  ],
+  "weaknesses": [
+    "缺少 OpenCode transcript API/parser 的明确接入方案，没有说明会话详情如何读取历史消息并归一化为现有 transcript message/parts 结构。",
+    "没有明确处理 terminal/PTY attach capability gating；当前项目已有 /api/pty/attach 和 chat workspace terminal toggle，OpenCode 接入若不声明 unsupported 可能误导用户。",
+    "未说明 OpenAPI、API index、前端类型/schema 和契约一致性测试如何同步。",
+    "测试方案偏窄，主要讲 continue 命令 fixture，没有覆盖 session list、transcript、continue 成功/失败、PTY unsupported 的可复现夹具组合。",
+    "continue 失败处理只说通用错误处理，缺少 binary missing、provider/auth/model/session missing 等可诊断失败边界。",
+    "把 adapters/FrameworkAdapter 注册表纳入 OpenCode runtime 调度存在架构混淆；当前该 registry 更像 agent framework adapter，不是 Claude/Codex/Hermes 本地 runtime session 接入路径。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript API 分支、消息载荷解析、tool_use/tool_result/不可解析 payload 占位降级。",
+    "conversation list、session-kind branding、chat workspace 中对 opencode sessionKind 的完整传播。",
+    "/api/pty/attach、TerminalView/chat workspace 对 OpenCode PTY/terminal 不支持的显式禁用或错误返回。",
+    "OpenAPI、/api/index、前端 RuntimeStatus/session 类型和 contract parity 测试更新。",
+    "真实结构本地状态 fixture、OpenCode binary stub，以及覆盖 list/transcript/continue/PTY unsupported 的测试矩阵。",
+    "continue 命令执行前后的能力探测和诊断性失败分类。"
+  ],
+  "unsupported_claims": [
+    "“每种 runtime 均通过独立检测函数、会话扫描模块和继续命令实现统一对接”与当前源码不完全一致；/api/sessions/continue 只支持 claude-code 和 codex-cli，Hermes/OpenClaw 不是同一 continue 命令路径。",
+    "将 OpenCode 接入 src/lib/adapters 的 FrameworkAdapter registry 缺少当前架构依据；现有 Claude/Codex/Hermes 本地会话扫描并不走该 registry。",
+    "OPENCODE_STATE_DIR、OPENCODE_PROJECTS_DIR、OPENCODE_API_KEY、~/.opencode/projects、session-*.jsonl/conversation-*.json、opencode continue --session 等具体 OpenCode 外部事实在当前项目中没有实现依据；方案虽有部分未知能力声明，但这些不应被当作已知项目事实。",
+    "“OpenCode 配置缺失不会导致系统启动失败”等结论需要结合实际实现验证，当前项目没有 opencode 配置项。"
+  ],
+  "score_rationale": "该方案方向正确且比较具体，能落到当前项目已有的 runtime detection、session list、continue、settings 等多处扩展点，也遵守了不要把未知 OpenCode 能力直接展示为完整支持的主要约束。但按 rubric 的上限规则，方案缺少 transcript API/parser、缺少 terminal/PTY capability gating、缺少 OpenAPI/API index/schema 契约同步，测试夹具也未覆盖 transcript 和 PTY unsupported；这些是三个以上关键工程边界缺失，因此总分不能进入 75 分以上档位。另有少量当前源码依据不足的具体路径和架构判断，进一步影响环境理解和可实施性。"
+}

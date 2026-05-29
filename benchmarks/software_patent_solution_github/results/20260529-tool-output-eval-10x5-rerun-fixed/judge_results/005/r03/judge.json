@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 7,
+    "patent_value": 3
+  },
+  "strengths": [
+    "准确抓住外部 webhook/RPC 调用方需要快速 accepted、后续 status/cancel/cleanup、幂等重试和复用 Think 推理路径的问题。",
+    "提出了持久任务表、idempotency_key 唯一约束、任务状态机、查询与取消接口，并尝试覆盖提交后崩溃、运行中崩溃和取消竞态。",
+    "明确强调普通聊天、Session、TurnQueue、流式恢复和取消语义应复用，而不是另建一套完整推理系统。"
+  ],
+  "weaknesses": [
+    "最关键缺口是缺少可靠的会话消息应用边界：方案在提交事务中就把用户消息写入 Session，之后再异步触发 saveMessages，并在恢复时用空 messages 触发推理。这不能等价于 messagesAppliedAt/checkpoint，难以安全区分写入前崩溃、写入后崩溃和恢复重放，也可能与 saveMessages 的职责冲突。",
+    "没有明确后台 drain/claim 机制，也没有 pending/accepted 到 running 的条件领取事务。它依赖“返回后异步调用 saveMessages”和 onStart 扫描恢复，缺少可竞争安全的领取、唤醒和顺序 drain 机制。",
+    "终态更新没有条件约束。cancel 与 completed 的竞态只用 DO 单线程顺序解释，但未说明 completed/failed/cancelled/skipped 只能通过条件更新写入，因此迟到完成或恢复逻辑仍可能覆盖已取消/清理状态。",
+    "reset/clear conversation 与 submission ledger 的同步处理缺失；cleanup 还提出删除已写入 Session 的用户/助理消息，这与参考边界中“删除 submission 通常不应删除已写入 Session 消息，除非显式策略”存在风险。",
+    "管理面不完整：只有 status 和 DELETE，未覆盖 list/inspect；幂等键保留窗口仅作为待确认风险，不是完整机制；observability events 也未设计。",
+    "部分流程内部矛盾：既说通过 saveMessages 接入并复用消息保存路径，又说先直接 session.appendMessage 并后续用空 messages 调用 saveMessages 只触发推理。"
+  ],
+  "missing_key_mechanisms": [
+    "持久 messagesAppliedAt 或等价 durable apply boundary，用于记录提交消息是否已经安全应用到 Session。",
+    "后台 drain/唤醒与 pending->running 条件 claim，确保提交按序且只被一个执行者领取。",
+    "终态条件更新机制，防止迟到的完成、错误或恢复写入覆盖 cancelled/skipped/deleted 等终态。",
+    "reset/clear conversation 与 submission ledger、active turn、pending/running submission 的同步规则。",
+    "list/inspect 管理 API、submission lifecycle observability events、幂等键保留/清理窗口的完整设计。",
+    "写入后崩溃但缺少有效 recovery 证据时的安全判定，例如回滚到 pending、保持 running、或标记 error 的条件。"
+  ],
+  "unsupported_claims": [
+    "声称现有 saveMessages 会在 TurnQueue 中排队并等待推理完成才返回，且可用空 messages 参数仅触发推理；该能力在方案中没有给出当前源码依据，且与常见 saveMessages 消息注入语义不一致。",
+    "声称 onRequest 上可直接新增 POST /submit、GET /status/:task_id、DELETE /tasks/:task_id，并与 Think HTTP 表面一致；方案没有用当前项目中的真实路由/API 形态支撑。",
+    "声称存在 session.appendMessage、_persistAssistantMessage、TurnQueue.reset()、AbortRegistry.cancel(requestId)、_restoreClientTools、_restoreBody、_runFiberRecoveryOnStartup、runFiber/onChatRecovery 等具体类名或方法能力；这些源码事实未在方案中被项目证据支撑。",
+    "声称 queued 任务可通过 TurnQueue 代际失效机制跳过、running 可通过 AbortRegistry 中断且部分输出复用 onChatError 持久化路径；这是具体实现能力假设，方案未证明当前代码中存在相同接口和语义。"
+  ],
+  "score_rationale": "该方案属于“可用但不完整”的档位：方向与需求高度一致，有持久任务记录、幂等键、快速确认、状态查询、取消和部分恢复设计，也试图复用 Think 的 Session/TurnQueue/stream/recovery/cancel 语义。但它没有形成参考方案最强调的 durable submission ledger 到 Session 的安全应用边界，反而在提交阶段直接写 Session，并用空 saveMessages 恢复触发推理，这会带来重复写入、恢复不确定和与普通聊天路径耦合的问题。方案也缺少真正的后台 drain/条件 claim、条件终态更新、reset 同步、list/inspect/observability 等关键机制。按 rubric，上述同时缺失消息应用边界、claim/drain 和终态条件更新时总分通常不得高于 75；不过本方案对幂等、持久状态、接口、取消和故障场景有较完整的工程化展开，因此略高于弱答案，但不应进入 85+。综合给 78 分。"
+}

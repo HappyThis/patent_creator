@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 14,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别了本地生命周期清理与服务端 durable turn 取消语义需要解耦这一核心问题。",
+    "提出了显式取消帧链路，并能落到 useAgentChat、WebSocketChatTransport、AIChatAgent 和 AbortRegistry 等关键模块。",
+    "覆盖默认 durable 模式与可选 request-lifetime 模式，符合需求中对开发者可配置空间的要求。",
+    "考虑了 resume、工具 continuation、多标签页和迟到消息等关键边界，整体不是单纯 UI stop 按钮方案。"
+  ],
+  "weaknesses": [
+    "对当前源码的关键现状判断有误：当前 WebSocketChatTransport 的 sendMessages onAbort 和 stream.cancel 已经会发送 CF_AGENT_CHAT_REQUEST_CANCEL，方案却认为 stop 只做本地 reader cancel，导致没有明确提出要拆分现有 onAbort 的本地清理与服务端取消行为。",
+    "durabilityMode 主要描述 WebSocket close 和 beforeunload，但没有说明如何改造当前 reader.cancel、AI SDK stop abortSignal、stream.cancel 这些真正会触发取消帧的核心路径。",
+    "显式取消后的 active request id 保留与 late chunk/done 过滤机制不完整，主要停留在保留/清理的概念，没有形成清晰客户端状态机。",
+    "request-lifetime 模式下服务端心跳超时如何获取该模式配置、如何按连接或 turn 决策取消，协议和状态存储不清楚。",
+    "多标签页取消广播、取消终态写入 ResumableStream、工具 part 取消标记等部分表述超出当前源码已支持能力。"
+  ],
+  "missing_key_mechanisms": [
+    "将 WebSocketChatTransport.sendMessages 的 caller abort、ReadableStream.cancel 与显式 stop/server cancel 分离的具体改造。",
+    "默认 durable 模式下本地 detach 只清理 reader/listener/pending promise、不发送取消帧的行为矩阵。",
+    "显式取消后按 request id 保留 active id 并过滤迟到 chunk、done、replayComplete 的完整流程。",
+    "fallback/observed turn 的注册与取消入口，尤其是非当前 attached stream 但由 hook 观察到的服务端 turn。",
+    "request-lifetime 策略从客户端传到服务端并参与心跳超时取消的协议设计。"
+  ],
+  "unsupported_claims": [
+    "声称当前 useAgentChat 的 stop 仅执行本地 reader cancel 且未向服务端发送 CF_AGENT_CHAT_REQUEST_CANCEL；当前源码中 WebSocketChatTransport.sendMessages 的 onAbort 已发送该取消帧。",
+    "声称 message:cancel 事件会通过 DO 广播机制同步所有客户端；当前源码中取消处理只调用 _emit(\"message:cancel\")，未在该路径广播取消消息。",
+    "声称取消后 ResumableStream 会将已缓冲 chunk 标记为终态且包含取消标记；当前 ResumableStream 元数据只显示 streaming、completed、error 等状态机制，未见取消标记协议。",
+    "声称 setDurabilityMode 可基于 WebSocket close code 和 beforeunload 可靠发送取消；当前 transport 接口与浏览器 unload 语义都不足以支撑该可靠性。",
+    "声称 ContinuationState 的 pending.prerequisite 检查失败会跳过工具继续执行、tool-call part 会标记取消，这些具体行为没有在方案中用当前源码充分支撑。"
+  ],
+  "score_rationale": "该方案在专利构思层面较完整，能描述 durable 默认、request-lifetime opt-in、显式取消帧、active requestId、resume、工具 continuation 和多标签观察等主要方向。但它误读了当前项目最关键的源码事实：现有 transport 的 abort/stream.cancel 已经会发送服务端取消帧，而方案没有明确改造这一核心耦合点，因此对浏览器刷新、组件卸载或 reader cancel 不误杀 durable turn 的实现闭环不完整。按 rubric，这类缺口使其不应超过约 80 分；考虑其总体方向和多数机制仍可用，给 78 分。"
+}

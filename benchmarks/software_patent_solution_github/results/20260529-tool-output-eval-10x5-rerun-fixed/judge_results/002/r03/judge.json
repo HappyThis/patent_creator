@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住问题本质：现有 task、session、spawn_history、token_usage、quality_reviews、eval_runs、event bus 和 MCP/外部工具链之间缺少统一 run 抽象。",
+    "提出了统一 run_id、runs 轻量表、task/spawn/session/cost/eval 关联、parent_run_id 重试链、REST 查询和 SSE run.* 事件，整体方向符合需求。",
+    "生命周期描述较完整，覆盖派发、执行、审查、重试、评估附着和外部查询，能形成较清晰的问题-手段-效果闭环。",
+    "能体现不替换现有任务和会话系统，而是在既有 Mission Control 编排基础上增加统一运行记录契约。"
+  ],
+  "weaknesses": [
+    "缺少明确的结构化 provenance/lineage 对象和生成流程；trigger、task_id、session_id、parent_run_id 只能提供部分溯源，未覆盖输入摘要、输出摘要、artifact refs、来源证明或可校验 lineage。",
+    "MCP 工具层设计不足，只说 MCP 工具可通过 API key 访问，没有给出 run list/detail/provenance/eval attach/leaderboard 等 MCP 工具契约。",
+    "leaderboard 只是外部系统可基于 /api/runs 自行计算或通过 trust_score 间接联动，缺少 run 级聚合视图/API 和统计口径。",
+    "eval 附着设计存在边界不清：一处说 eval_results 查询时 JOIN 聚合，另一处说同步生成不可变快照；当前 eval_runs 也缺少 run_id，方案没有完整说明迁移、版本或 attach/update 语义。",
+    "对 mcp_call_log、security_events、token_usage 等表的 run_id 关联迁移和索引策略不够完整，尤其 mcp_call_log/security_events 当前没有 task_id/run_id。",
+    "可实施性受影响：没有细化取消/超时/终态保护、并发更新、历史数据回填失败、事件类型扩展到 TypeScript union/openapi/MCP server 的工程边界。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 字段和生成流程，包括 sourceType、triggeredBy、inputSummary、outputSummary、artifactRefs、lineage 校验或来源摘要。",
+    "MCP server 层的 run 查询、provenance 查询、eval attach/update 和 leaderboard 工具。",
+    "明确的 run 级 leaderboard 聚合 API 或统计视图。",
+    "eval_runs 与 run_id 的迁移、评估 attach/update 契约、benchmark/evaluator 元数据和快照一致性设计。",
+    "跨 spawn_history、token_usage、mcp_call_log、security_events 的 run_id 写入点、索引、历史兼容和回填策略。"
+  ],
+  "unsupported_claims": [
+    "方案称 mcp_call_log、security_events 可通过 run_id 或 task_id 与运行记录关联，但当前源码中的 mcp_call_log/security_events 表和写入 helper 只有 agent_name、workspace、时间等字段，未见 task_id/run_id；方案也未具体说明这两张表的迁移。",
+    "方案描述 POST /api/agents/evals 可传入 run_id 限定评估范围；当前接口 action=run 主要按 agent/layer 运行评估，未见 run_id 参数或 run 级评估范围。",
+    "方案给出 runs 表每条约 200 字节、百万级记录无存储压力、SQLite JOIN 可保证查询效率等精确性能/容量判断，但没有当前项目测量或索引设计支撑。",
+    "方案中 eval_results 同时被描述为 JOIN 派生字段和固化不可变快照，当前 eval_runs 表也没有 run_id 或快照版本字段，相关实现依据不足。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的强中档答案。它明显不是普通日志表方案，能基于当前项目已有 task、spawn_history、token_usage、quality_reviews、eval_runs、event bus、SSE 和 MCP server 外部工具入口提出统一运行记录契约，技术问题识别和主链路设计较好。但 rubric 的高分锚点要求结构化 provenance/lineage、spawn 自动桥接、run 级 eval attach、MCP 工具层访问和 leaderboard 聚合同时完整。该方案对 provenance 只有部分来源字段和 parent_run_id，不是完整 lineage；MCP/leaderboard 也偏概念化；部分表字段和接口能力与当前源码不一致或需要迁移却未说明。因此按上限规则不进入 90 分以上，并因 provenance 与 MCP/leaderboard 机制不完整压到 82 分。"
+}

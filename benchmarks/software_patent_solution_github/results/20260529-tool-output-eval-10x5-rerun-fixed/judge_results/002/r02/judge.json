@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 78,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 15,
+    "essential_features": 7,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了当前问题是任务、spawn、session、token、eval、quality review、MCP audit 等信息分散，缺少统一运行视图。",
+    "提出了 Agent Run Record 作为统一运行记录契约，并覆盖状态、成本、结果、评估、查询 API 和事件通知等主要方向。",
+    "整体上复用现有 Mission Control 的 task、agent、session、spawn_history、token_usage、eval_runs、quality_reviews、event bus，不是另建割裂日志系统。",
+    "能说明统一查询、审计、成本分析、质量评测和外部系统集成的技术效果，并主动指出 eval 仅按 agent_name 关联会失去 run 级快照。"
+  ],
+  "weaknesses": [
+    "结构化 provenance/lineage 机制不足，只说可回溯到 spawn、session、task，没有定义来源证明、输入输出摘要、lineage 生成和查询流程。",
+    "run_id 稳定性方案不够可实施：草稿称可复用 spawnId 且不新增字段，但当前 spawn_history 只有自增 id，没有 spawnId/run_id 字段，无法按所述方式形成稳定运行记录主键。",
+    "评估附着仍是按 agent_name 取最新 eval_runs，不是 run 级 eval attach/update 契约，难以回答某一次执行当时是否被评估、评估依据是什么。",
+    "缺少 MCP 工具层能力设计；只提供 HTTP 查询接口，没有 run list/detail/provenance/eval attach/leaderboard 等 MCP 工具访问边界。",
+    "leaderboard 仅作为扩展效果提及，没有给出基于 run/eval/cost/success-rate 的具体聚合模型或接口。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 字段与生成流程，包括 sourceType、triggeredBy、inputSummary、outputSummary、artifactRefs、关联对象摘要和可校验 lineage。",
+    "可持久、可查询的 run 主键和映射机制，需明确使用 spawn_history.id、补充 run_id 字段，或建立独立 run 记录，不能只依赖返回给客户端的 spawnId。",
+    "run 级评估附着与更新接口，至少包含 score、pass/fail、评估说明、指标或 benchmark 元数据，并与具体 run_id 绑定。",
+    "MCP 工具接口：查询 run、读取 provenance、附着 eval、读取 leaderboard 或统计视图。",
+    "具体 leaderboard 聚合机制和接口，例如按 agent 统计成功率、平均成本、评分、失败率和时间窗口。",
+    "更完整的生命周期状态流转，包括 queued/running/completed/failed/cancelled/timeout 及终态更新保护或幂等处理。"
+  ],
+  "unsupported_claims": [
+    "草稿称 run_id 可直接复用 spawn 阶段生成的 spawnId，且关联键均为现有表字段；当前源码中 /api/spawn 生成 spawnId 但未写入 spawn_history，spawn_history 表也没有 spawnId/run_id 字段。",
+    "草稿依赖 spawn_history 与 tasks JOIN 形成 run 生命周期视图，但当前 spawn_history 表没有 task_id，只有 agent_id、agent_name、session_id、trigger 等字段，无法直接稳定关联到某个 task。",
+    "草稿描述 POST /api/spawn 路径增加 recordSpawnStart/recordSpawnFinish 是合理改造方向，但当前 /api/spawn 实现没有导入或调用 src/lib/spawn-history.ts 的这些函数。",
+    "草稿称评估结果写入 eval_runs 和 eval_traces；当前 /api/agents/evals 只向 eval_runs 插入，源码中未发现 eval_traces 的写入路径。",
+    "草稿把 mcp_call_log 纳入单次 run detail，但当前 mcp_call_log 只有 agent_name、mcp_server、tool_name、success、duration、error、workspace_id、created_at，缺少 run_id、session_id 或 task_id，run 级精确归属依据不足。",
+    "草稿假定 token_usage 的 agent_name、cost_usd、task_id 可直接支撑 run 成本聚合；当前表迁移包含这些字段的一部分，但实际写入路径并不一致，agent_name 和 cost_usd 并非所有记录都会可靠填充。"
+  ],
+  "score_rationale": "该方案属于可用但不完整。它准确识别了统一 agent run 契约的必要性，能复用当前项目已有的任务、spawn_history、token_usage、eval、quality review、event bus 和 API 基础，并提出了较具体的查询和生命周期思路。但按照 rubric，上限受到三类关键缺口限制：一是没有真正的结构化 provenance/lineage；二是 run_id 与当前源码字段不匹配，导致“虚拟运行记录”缺少稳定主键；三是缺少 run 级 eval attach/update、MCP 工具层访问和具体 leaderboard 聚合。草稿中还存在若干当前源码无依据或过度乐观的字段/写入路径断言，因此不能进入 85 分以上强答案档。综合看，其方向和主体机制较好，但工程闭环和源码级可实施性不足，给 78 分。"
+}

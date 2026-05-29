@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 85,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 16,
+    "essential_features": 8.5,
+    "problem_mechanism_effect": 13.5,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别现有 codemode 主要是 Worker/服务端侧隔离执行，浏览器私有工具不宜搬到服务端，也不能在主页面直接执行生成代码。",
+    "提出了浏览器侧隔离容器、主页面工具宿主、Proxy 代理、postMessage/MessageChannel 调度、callId 配对、结果/错误回传的完整主链路。",
+    "覆盖了 namespace/provider、工具名规范化、保留名、schema/type 生成、非法工具调用、工具异常、日志收集、超时和 cleanup 等大部分关键机制。",
+    "能对接当前项目已有的 Executor/createCodeTool/generateTypes/sanitizeToolName/ToolProvider/useAgentChat/client tool 体系，整体工程边界较清楚。",
+    "问题、手段、效果闭环清楚，专利方案表达不是单纯产品说明。"
+  ],
+  "weaknesses": [
+    "浏览器 iframe 的外部资源控制不够落地：方案没有明确设置限制性 CSP、资源加载白名单或等价的可执行机制，却声称默认不暴露 fetch/XMLHttpRequest/WebSocket，这在 sandbox=\"allow-scripts\" iframe 中没有充分技术依据。",
+    "消息安全边界缺少关键细节：只提到 allowedOrigins 配置，没有明确主页面必须校验 event.source/contentWindow 或 MessagePort 归属；opaque origin iframe 场景下仅 origin 白名单并不足够。",
+    "超时机制的可实施性偏弱：Promise.race 不能中断同步死循环；iframe 与主页面同线程时还可能阻塞父页面定时器，方案虽提到 Worker.terminate 作为风险补充，但主路径没有硬终止机制。",
+    "生命周期描述较完整，但没有充分覆盖 iframe load failure / sandbox unavailable / 消息发送失败等终态错误。",
+    "同一 namespace 内重复工具名采用后注册覆盖并警告，弱于 rubric 中期望的重复名或保留名执行前拒绝策略。"
+  ],
+  "missing_key_mechanisms": [
+    "限制性 CSP 或明确的外部资源加载控制机制。",
+    "基于当前 iframe/contentWindow 或 MessagePort 的消息来源校验。",
+    "iframe 加载失败、ready 超时、消息发送失败的终态状态与清理流程。",
+    "同步死循环或高 CPU 代码的硬终止策略，尤其是在 iframe 主线程执行路径下。",
+    "对重复 provider/tool 名规范化后冲突的执行前拒绝机制。"
+  ],
+  "unsupported_claims": [
+    "“sandbox iframe 默认不暴露 fetch、XMLHttpRequest、WebSocket”等网络 API：当前项目源码只证明 DynamicWorkerExecutor 通过 WorkerLoader globalOutbound:null 阻断网络；浏览器 sandbox iframe 本身不能自动移除这些 API。",
+    "“useAgentChat 的 clientTools 参数定义浏览器侧工具”：当前文档和源码中动态客户端工具主要通过 useAgentChat 的 tools 选项提交，clientTools 更像线协议/请求体中的序列化字段。",
+    "BrowserSandboxExecutor、registerBrowserTool、generateBrowserTypes、toClientToolProvider、__lifecycle 等名称在当前源码中不存在；作为新增设计可以接受，但不能当作已有项目事实。",
+    "“主页面只能响应结果、不能主动调用隔离环境”与方案中的 ready/execute/timeout/cleanup 主页面主动消息存在表述上的不一致。"
+  ],
+  "score_rationale": "该方案属于可用但不完整的较强答案。它命中了浏览器侧隔离执行、主页面代理真实工具、namespace/provider 路由、工具名规范化、schema 类型描述、callId 消息协议、错误/日志/超时/清理以及 Executor/createCodeTool/useAgentChat 协作等核心锚点，因此明显高于一般 iframe+postMessage 方案。扣分主要来自安全资源控制和落地边界：没有明确 CSP 或可验证的等价机制，却声称 iframe 默认禁用网络 API；消息来源校验未落到 contentWindow/port 级别；iframe 主线程下 Promise.race 无法处理同步死循环。总分略高于“无 CSP 上限 82”的通常限制，是因为方案已提出默认禁用网络 API和主页面代理网络访问的等价控制意图，并非完全缺失资源控制；但该机制缺少可实施细节，所以没有进入 90 分以上强答案档。"
+}

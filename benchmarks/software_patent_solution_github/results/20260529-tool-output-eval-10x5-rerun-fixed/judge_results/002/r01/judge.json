@@ -1,0 +1,45 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 12,
+    "constraint_adherence": 7,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了需求核心：需要一个统一的结构化运行记录契约，而不是普通日志表。",
+    "能把 task、spawn history、token usage、eval、activities、quality review、event bus、REST/SSE/Webhook 等现有能力放入同一读模型中讨论。",
+    "提出了查询侧聚合、生命周期事件和外部访问通道，问题-手段-效果关系较清楚。",
+    "没有要求推翻现有任务、会话和 agent 编排系统，整体方向与需求约束相符。"
+  ],
+  "weaknesses": [
+    "缺少明确的 provenance/lineage 数据结构和生成流程，无法充分回答 run 从哪里来、输入输出摘要如何校验、跨 task/session/spawn 的来源链如何稳定追踪。",
+    "将 run_id 直接复用 task_id 会把一次任务下的多次 spawn、重试、不同 session 或不同 agent 执行聚合在一起，不能可靠表达“每一次 agent 执行”的独立运行记录。",
+    "eval_results 通过 agent_name 关联 eval_runs，属于 agent 级弱关联，不是 run 级 eval attach/update 契约，容易把无关评估结果附到本次运行上。",
+    "没有提供 MCP 工具层的 run 查询、provenance 查询、eval attach 或 leaderboard 能力；leaderboard 聚合也基本缺失。",
+    "方案声称只做读侧聚合，但又依赖 run.created、run.token_update 等生命周期事件，缺少在 spawn 创建、完成、失败、取消路径中自动创建/更新 run 状态的可实施桥接细节。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 provenance/lineage 字段与生成流程。",
+    "spawn 创建、完成、失败、取消等路径到 run 生命周期的自动桥接和状态保护。",
+    "run 级 eval attach/update 接口，包含 score、pass/fail、说明、指标或 benchmark 元数据。",
+    "MCP 工具层的 run list/detail、provenance、eval attach、leaderboard 查询能力。",
+    "基于 run 的 leaderboard 或统计聚合机制。",
+    "独立于 task_id 的稳定 run/spawn 标识，避免多次执行被折叠。"
+  ],
+  "unsupported_claims": [
+    "声称 migration 044 的 spawn_history 已包含 task_id；当前快照中的 spawn_history 表没有 task_id，只有 agent_id、agent_name、spawn_type、session_id、trigger、status、exit_code、error、duration_ms、workspace_id、created_at、finished_at。",
+    "声称 spawn_history 记录 started_at、completed_at 字段；当前字段是 created_at 和 finished_at。",
+    "声称 /api/events 支持 eventType=run.* 过滤；当前 SSE 路由只是转发 eventBus 的 server-event，没有实现 eventType 查询过滤。",
+    "声称现有 eventBus 可直接广播 run.created、run.token_update、run.spawn_completed 等 run.* 类型；当前 EventType 联合类型中没有 run.* 事件。",
+    "声称 quality_reviews 表包含重试历史；当前表主要是 task_id、reviewer、status、notes、created_at 等字段，重试信息不在该表中结构化保存。",
+    "声称 token_usage 可直接提供 context_tokens 和稳定 cost_usd 明细；当前 token_usage 没有 context_tokens，且主要 API 路径按模型实时计算成本，cost_usd 并非所有写入路径都会填充。",
+    "声称 /api/openapi.json 可自动发现 RunRecord schema；当前 openapi.json 未包含 /api/runs 或 RunRecord schema。"
+  ],
+  "score_rationale": "该方案属于方向正确但工程边界缺失较多的可用草稿。它形成了 RunRecord 统一读模型，并覆盖了任务、成本、评估、活动和外部访问的主要概念，因此不能按弱答案处理。但按 rubric 校准，方案缺少 provenance/lineage、run 级 eval attach、MCP/leaderboard，并且 spawn 生命周期桥接不完整；同时核心关联依赖当前源码中不存在的 spawn_history.task_id，导致可实施性和环境准确性明显受损。由于同时缺失多个关键机制并存在核心源码事实错误，总分按 72 分上限附近给分。"
+}

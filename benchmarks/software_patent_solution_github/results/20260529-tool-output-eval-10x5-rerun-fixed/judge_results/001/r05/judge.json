@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 11,
+    "technical_problem": 13,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 8,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "识别到当前项目已有 RuntimeStatus、DETECTORS、RUNTIME_META、VALID_RUNTIMES 和 /api/agent-runtimes 等运行时注册/检测路径，环境基础判断较准确。",
+    "准确抓住 OpenCode 本地状态目录、消息格式和 continue 命令未知这一核心约束，采用可配置 stateDir、glob、formatHints、fieldMapping，避免硬编码未知事实。",
+    "提出 RuntimeAdapter 合约、可配置会话发现、兼容式解析、能力声明和 null/false 能力边界，方向符合异构本地 runtime 原生接入。",
+    "强调追加 opencode 而不改动 Claude、Codex、Hermes、OpenClaw 现有行为，兼容性设计较清楚。",
+    "问题-手段-效果有基本闭环，能解释可扩展性、能力透明度和渐进启用的技术效果。"
+  ],
+  "weaknesses": [
+    "缺少明确接入现有 /api/sessions 聚合路径的工程细节，例如新增 getLocalOpenCodeSessions、mergeLocalSessions 参数、统一 session 对象中的 runtime kind/source/capability 字段如何传播到 conversation list/chat workspace。",
+    "没有设计 transcript API/parser 接入和消息归一化，只提到 transcript_view 能力标记，未说明 OpenCode 历史消息如何转为统一 transcript 消息结构。",
+    "continue 机制停留在命令模板/null 返回，未说明 /api/sessions/continue 如何按 opencode 路由，也缺少 binary missing、provider/model missing、session missing、命令失败等诊断性失败返回。",
+    "没有覆盖 terminal/PTY attach capability gating；当前项目 PTY 只支持 claude-code/codex-cli，方案未说明 OpenCode 应在 /api/pty/attach、TerminalView 或 UI 中禁用/隐藏。",
+    "没有说明 OpenAPI、API index/schema、前端类型或契约测试如何同步新增 runtime 和能力字段。",
+    "验证方案不足，只提到可配置 fixture 命令，缺少真实结构本地状态 fixture、binary stub，以及 session list/transcript/continue/PTY unsupported 的可复现测试路径。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript parser and /api/sessions/transcript routing with role/time/text/tool payload normalization and unknown payload placeholders.",
+    "OpenCode continue route integration with diagnostic command/provider/model/session failure handling instead of only a template string.",
+    "Terminal/PTY attach gating for OpenCode, including unsupported response and frontend hiding/disabled state.",
+    "API contract synchronization across OpenAPI/API index/schema and frontend session capability fields.",
+    "Reproducible fixtures and tests for OpenCode discovery, session list, transcript, continue, and PTY unsupported behavior."
+  ],
+  "unsupported_claims": [
+    "“/api/agent-runtimes GET/POST 端点可以查询和安装 OpenCode” lacks the required startInstall/install-script behavior for OpenCode; adding VALID_RUNTIMES alone would not make installation functional.",
+    "“每种 runtime 通过专属会话扫描器读取本地会话数据” is slightly overstated for OpenClaw, whose sessions are gateway-backed rather than a local session scanner like Claude/Codex/Hermes.",
+    "“AdapterConfig 可由 MC 配置面板设置” is proposed but not grounded in a currently identified adapter configuration UI/schema in the snapshot."
+  ],
+  "score_rationale": "该方案属于方向正确但关键工程边界不完整的答案。它较好理解了现有 runtime registry 和未知 OpenCode 本地状态的约束，并提出了可配置 adapter、兼容解析和能力声明，技术构思可用。但 rubric 要求的高分关键链路中，transcript API/parser、continue 路由与诊断失败、PTY capability gating、OpenAPI/API 契约同步、可复现 fixture/binary stub 测试均缺失或只停留在概念层面。根据分数上限规则，同时缺失三个以上关键机制，总分不得高于 72，因此即使通用 adapter 部分较完整，也不能进入 75 分以上档位。"
+}

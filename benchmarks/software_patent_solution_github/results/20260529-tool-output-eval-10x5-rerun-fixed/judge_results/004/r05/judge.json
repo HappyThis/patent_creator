@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 92,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 18,
+    "essential_features": 9,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 9,
+    "feasibility": 8,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 知识内容与高频运行时信号混写导致 Git diff 噪声、协作冲突和排序信号不能丢弃之间的核心矛盾。",
+    "方案覆盖字段分层、sidecar 路径键存储、读取融合、写入剥离、迁移兼容、批量更新、并发控制、失败隔离以及归档/剪枝/合并/删除清理，机制链条完整。",
+    "能结合当前源码中的 MarkdownWriter.generateContext、parseFrontmatterScoring、recordAccessHits、recordCurateUpdate、flushAccessHits、FileContextTreeManifestService、FileContextTreeArchiveService、dream prune/consolidate 等真实消费路径展开，不只是泛泛设计。",
+    "问题-手段-效果闭环清晰：Markdown 内容变化与运行时评分变化解耦，同时保留检索排序、manifest 分配和 archive/prune 判断能力。",
+    "没有违反核心约束：未删除动态信号，也未把全部知识迁入不可审阅数据库。"
+  ],
+  "weaknesses": [
+    "sidecar store 仍偏具体为单一 _scoring.json 文件，未抽象出完整最小接口边界，例如 getMany、update/updater、batchUpdate、delete、list/scan 的清晰 API 契约。",
+    "并发更新描述有文件锁和批量合并，但缺少更明确的单记录 read-modify-write、版本/CAS 或跨进程原子写入失败重试模型；对多进程 daemon/agent 并发的边界还不够硬。",
+    "迁移策略中的“_scoring.json 不存在则读写保持旧行为”会让系统在未显式创建 sidecar 前继续污染 Markdown，最好明确新版本初始化时创建 sidecar 并让新写入路径默认 sidecar 化。",
+    "失败隔离说明了 best-effort 和损坏恢复，但没有明确日志、告警或自愈重建的状态记录方式。",
+    "字段划分中将 narrative、rawConcept、facts、snippets 说成 YAML frontmatter 字段，与当前 MarkdownWriter 实现不符；这些当前主要是正文结构化章节。"
+  ],
+  "missing_key_mechanisms": [
+    "形式化 RuntimeSignalStore/IRuntimeSignalStore 接口及其 schemaVersion、缺省信号策略。",
+    "跨进程安全的原子 update/updater 或 CAS/版本号机制，以及写临时文件再 rename 的落盘协议。",
+    "service initializer 或启动迁移钩子，确保新版本一开始就创建 sidecar 并切换新写入路径。",
+    "sidecar 失败日志、重建任务状态和可观测性策略。",
+    "对 dream synthesize 等自动整理子流程的逐一接入说明仍可更明确。"
+  ],
+  "unsupported_claims": [
+    "“narrative、rawConcept、facts、snippets 统一写入 YAML frontmatter”缺少源码依据；当前 MarkdownWriter 将这些作为 Markdown 正文区块生成和解析。",
+    "“前端仍按原有格式解析”缺少当前源码依据；被核对到的主要解析消费路径在 search、curate、manifest、archive、dream 等服务/工具层。"
+  ],
+  "score_rationale": "该方案属于强答案。它不仅提出 sidecar 分离，还覆盖了读取融合、写入剥离、迁移兼容、并发批量更新、失败隔离和归档/剪枝/合并/删除清理，且大量接入点与当前项目真实源码路径一致。未触发“缺少读取融合/迁移/清理/失败隔离”等上限规则，因此总分可超过 90。扣分主要来自工程边界不够接口化、跨进程原子更新模型不够精确，以及少量源码事实表述不准确。"
+}

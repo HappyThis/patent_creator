@@ -1,0 +1,43 @@
+{
+  "status": "scored",
+  "total_score": 68,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 12,
+    "essential_features": 6,
+    "problem_mechanism_effect": 8,
+    "constraint_adherence": 7,
+    "feasibility": 5,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确识别了外部 webhook/RPC 调用方需要快速 accepted、后续查询/取消、幂等重试和后台执行，而不是同步等待模型完成。",
+    "能结合当前项目中的 Think、Session/assistant_messages、TurnQueue、AbortRegistry、chatRecovery/runFiber、resumable/stream accumulator 等真实机制展开方案。",
+    "提出了持久任务表、幂等键唯一索引、pending/running/terminal 状态、inspect/cancel/delete 管理接口和崩溃恢复场景，整体方向符合需求。",
+    "明确强调不重写普通聊天路径，并尝试复用现有会话消息、队列、取消和持久执行能力。"
+  ],
+  "weaknesses": [
+    "核心缺陷是提交阶段立即写入 Session，但没有保存待应用消息内容、messagesAppliedAt 或等价 durable apply checkpoint；任务记录写入成功但消息写入前崩溃时，重试会命中 pending 任务却无法安全补写消息。",
+    "没有真正的后台 drain/唤醒和 pending -> running 条件领取机制；仅说返回前 TurnQueue.enqueue 和 onStart 扫描，缺少防并发领取、按序领取和持久唤醒边界。",
+    "终态更新没有条件保护；取消、删除、clear/reset 后，迟到的 completed/failed 更新仍可能覆盖 cancelled/deleted/skipped 状态。",
+    "reset/clear conversation 与任务 ledger 的同步处理不足，只借 TurnQueue generation 描述跳过执行，但没有把未执行或运行中任务标记 skipped/aborted/error。",
+    "缺少 list API、观测事件和明确的自动 cleanup/保留窗口机制；幂等键保留只作为风险待确认。",
+    "没有充分沿用 saveMessages/waitUntilStable 的既有 programmatic turn 语义，而是倾向直接 appendMessage 后调用内部推理路径，工程边界偏脆弱。"
+  ],
+  "missing_key_mechanisms": [
+    "持久消息应用边界：messagesAppliedAt、applied checkpoint、消息内容 ledger 或事务性提交机制，用于区分写入前崩溃、写入后崩溃和恢复重放。",
+    "后台 drain/claim：由 alarm/queue/onStart 唤醒的持久 drain，使用条件更新将最早 pending 提交原子领取为 running。",
+    "条件终态更新：completed/failed/aborted 写入必须带当前状态条件，避免迟到结果覆盖 cancelled/skipped/deleted/error。",
+    "reset/clear conversation 同步：清空会话或 reset turn 时，应同步标记尚未应用或不可恢复的 submission。",
+    "可观察性和列表/清理能力：submission lifecycle events、listTask/listSubmissions、过期终态和幂等键保留清理策略。",
+    "恢复判定细化：任务存在但用户消息缺失、消息已应用但无恢复证据、chatRecovery 关闭且 running 过期等路径需要安全分流。"
+  ],
+  "unsupported_claims": [
+    "“TurnQueue 的 generation 检查会在任务到达队首时发现状态已非 pending 并跳过执行”没有当前源码依据；TurnQueue 只检查 generation，不读取任务状态。",
+    "“复用 _streamResult 但流式输出不发送到客户端连接，而是缓冲到 StreamAccumulator”与当前 _streamResult 实现不符；该方法会存 resumable chunk 并广播 CHAT_RESPONSE。",
+    "“Session.appendMessage 的按 ID 去重提供额外保护”在当前源码中成立，但不足以支持任务表写入成功、消息写入失败后的恢复，因为任务表未保存可重放消息内容。",
+    "“WebSocket _handleChatRequest 路径和 RPC chat()/saveMessages() 路径不做任何修改”作为实现断言过强；若要恢复 pending/running submission、reset 同步和取消状态，现有 onStart/reset/clear 路径至少需要集成。"
+  ],
+  "score_rationale": "该方案方向正确且项目环境命中较多，属于有用但关键工程边界不完整的答案。主要扣分来自：提交时直接写 Session 而没有 durable 消息应用边界；缺少持久 drain/条件 claim；缺少终态条件更新；缺少 reset/clear 与 submission 状态同步。根据 rubric，三项以上关键机制缺失时总分不得高于 68，因此即使问题识别和组件复用描述较强，也按上限给到 68。"
+}

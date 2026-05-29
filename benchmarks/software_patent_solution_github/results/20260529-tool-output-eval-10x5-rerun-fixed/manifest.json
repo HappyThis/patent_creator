@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "result_id": "20260529-tool-output-eval-10x5-rerun-fixed",
+  "source_run_id": "20260529-tool-output-eval-10x5-rerun-fixed",
+  "source_run_dir": "runs/20260529-tool-output-eval-10x5-rerun-fixed",
+  "published_at": "2026-05-29T18:26:48+08:00",
+  "benchmark_git": {
+    "commit": "563af108ab3f8e7b04dad5ab1fa58467d1e7d9b5",
+    "dirty": true
+  },
+  "metadata": {
+    "subject_model": "deepseek-v4-pro",
+    "judge_model": "codex",
+    "provider": "deepseek",
+    "notes": "Clean 10x5 tool-output/compression benchmark: 50/50 scored, round_failed=0, judge_failed=0, avg=80.74; +0.88 vs 20260527 baseline."
+  },
+  "model_config": {
+    "source": "source_run_manifest",
+    "schema_version": 1,
+    "subject": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "base_url": "https://api.deepseek.com/v1",
+      "thinking": "enabled",
+      "reasoning_effort": "high",
+      "max_completion_tokens": 8192,
+      "api_key_configured": true,
+      "api_key_env_var": "OPENAI_COMPAT_API_KEY"
+    },
+    "runtime": {
+      "llm_timeout": 45.0,
+      "llm_max_retries": 2
+    },
+    "context_compression": {
+      "max_tokens": 128000,
+      "compress_threshold_ratio": 0.8,
+      "reserved_output_tokens": 8000,
+      "token_char_coefficient": 0.5,
+      "compression_timeout": 180.0
+    }
+  },
+  "run_config": {
+    "source": "combined_from_completed_runs",
+    "cases": [
+      "001",
+      "002",
+      "003",
+      "004",
+      "005",
+      "006",
+      "007",
+      "008",
+      "009",
+      "010"
+    ],
+    "repeats": 5,
+    "workers": "mixed(original=10, rerun_batch=4, rerun_single=1)",
+    "round_timeout_seconds": 1800,
+    "judge_timeout_seconds": 900,
+    "skip_judge": false,
+    "source_runs": [
+      "20260529-tool-output-eval-5cases-3x-w10",
+      "20260529-tool-output-eval-5cases-extra2-w10",
+      "20260529-tool-output-eval-remaining5-5x-w10",
+      "20260529-rerun-interrupted-5a-w4",
+      "20260529-rerun-interrupted-5b-005"
+    ],
+    "replacement_count": 5
+  },
+  "case_ids": [
+    "001",
+    "002",
+    "003",
+    "004",
+    "005",
+    "006",
+    "007",
+    "008",
+    "009",
+    "010"
+  ],
+  "runs": 50,
+  "scored_runs": 50,
+  "artifact_success_runs": 50,
+  "included_files": [
+    "manifest.json",
+    "evaluation_summary.json",
+    "evaluation_report.md",
+    "case_results.jsonl",
+    "artifacts/",
+    "judge_results/"
+  ],
+  "excluded_from_publish": [
+    "prepared_repo/",
+    "subject/session_events.jsonl",
+    "judge/codex_judge_events.jsonl",
+    "run_case_stdout.txt",
+    "run_case_stderr.txt",
+    "subject/disclosure.json",
+    "absolute local paths",
+    "provider API keys"
+  ]
+}

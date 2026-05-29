@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 89,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 15,
+    "technical_mechanism": 16,
+    "essential_features": 8,
+    "problem_mechanism_effect": 14,
+    "constraint_adherence": 9,
+    "feasibility": 8,
+    "patent_value": 5
+  },
+  "strengths": [
+    "准确抓住 Markdown frontmatter 中稳定知识字段与高频运行时信号混写的问题，并对应到当前项目的 MarkdownWriter、memory-scoring、SearchKnowledgeService、curate、manifest、archive/dream 等消费路径。",
+    "方案明确保留 Markdown 作为可审阅、可版本控制的共享知识载体，同时用 sidecar 保存 accessCount、importance、recency、updateCount、maturity 等动态信号，没有走向删除信号或全量数据库迁移。",
+    "读取融合、检索排序、访问命中批量刷新、curate 更新、归档/剪枝/合并清理和失败降级均有较完整流程，问题-手段-效果闭环清晰。",
+    "迁移期兼容和默认信号回退考虑较充分，能解释旧 frontmatter 动态字段如何过渡到 sidecar。"
+  ],
+  "weaknesses": [
+    "sidecar 存储接口只明确到 readScoring/writeScoring，缺少清晰的 getMany、update/updater、batchUpdate、delete、list 等最小接口边界，虽然后文隐含了删除和遍历。",
+    "并发策略主要依赖 SearchKnowledgeService 的 pendingAccessHits 和构建锁，对 curate、dream、搜索 flush 同时读改写同一路径信号时的原子 RMW/CAS/事务保护说明不足，可能发生信号覆盖。",
+    "失败隔离写成静默吞没，缺少参考方案强调的日志记录和可观测性，排查 sidecar 损坏或长期写入失败会比较困难。",
+    "一次性迁移方案要求批量改写 Markdown 并通过备份或 git checkout 回滚，工程风险偏高，且可能误触未提交用户改动；更稳妥的懒初始化/按需迁入机制说明不足。"
+  ],
+  "missing_key_mechanisms": [
+    "通用 sidecar 原子更新接口，例如 update(path, updater)、CAS/version 或单写队列，用于避免并发动态信号覆盖。",
+    "批量读取和批量更新的正式接口契约，尤其是 search/build index 对候选路径批量取信号的性能边界。",
+    "sidecar 失败的日志、告警或 repair 记录机制，而不是完全静默 fail-open。"
+  ],
+  "unsupported_claims": [
+    "“Manifest 构建过程中从侧挂存储读取 importance 和 maturity 进行通道分配和通道内排序”中 maturity 参与 manifest 分配/排序的说法缺少当前源码依据；当前 manifest 主要按 importance 排序 contexts。",
+    "“每日数百次搜索场景下可消除 99% 以上的知识库 VCS 变更记录”是效果估算，当前材料没有提供可验证数据。",
+    "stripScoringFromContent、readScoring/writeScoring、_scoring.db/_scoring.json 等可作为新增设计命名，但若被理解为当前已有源码能力，则缺少现有项目依据。"
+  ],
+  "score_rationale": "该方案属于强可用答案，覆盖字段分层、sidecar、路径键、读取融合、写入剥离、迁移兼容、fail-open、生命周期清理和技术效果，且大量接入点与当前项目源码相符。未给 90 分以上的主要原因是 sidecar 最小接口和并发原子更新边界不够硬：高频访问命中有批量锁思路，但没有形成适用于 search/curate/dream/archive 的通用原子 RMW 或事务模型。通常“无原子更新”会触发更低上限；这里没有严格压到 82，是因为方案已提供 pendingAccessHits、buildingPromise 和按路径清理等部分等价控制，核心方向和链路覆盖仍明显强于 75-85 档。"
+}

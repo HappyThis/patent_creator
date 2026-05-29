@@ -1,0 +1,41 @@
+{
+  "status": "scored",
+  "total_score": 72,
+  "dimension_scores": {
+    "environment_understanding": 12,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 10,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 3
+  },
+  "strengths": [
+    "识别到 OpenCode 应作为独立 runtime kind 接入，而不是伪装成 Claude/Codex/gateway。",
+    "提出了可配置状态目录、session glob、自定义适配器模块、兼容式解析和 parseConfidence，用来应对 OpenCode 本地格式未知的问题。",
+    "能落到现有的 agent-runtimes、/api/sessions、/api/sessions/continue、/api/agent-runtimes 等项目边界，并考虑与 Claude、Codex、Hermes、OpenClaw 兼容。",
+    "提出 session/runtime/UI capabilities，用于避免把未经确认的 OpenCode 能力展示为已完整支持。"
+  ],
+  "weaknesses": [
+    "方案主要覆盖 session list 统计发现，缺少明确的 /api/sessions/transcript 接入、消息读取和 transcript 消息归一化机制。",
+    "continue 设计有命令模板和 help 探测，但缺少真实执行失败时的诊断性错误返回，如 binary missing、provider/model/auth missing、session missing 或本地命令失败。",
+    "没有明确处理 terminal/PTY attach capability gating，容易遗漏现有 chat workspace 中 terminal/transcript 切换对 session kind 的约束。",
+    "没有说明 OpenAPI、API index、schema/type 契约如何同步新增 opencode kind 和 capabilities 字段。",
+    "可复现验证不足，把“命令替身验证”描述成运行时 dry-run，未覆盖真实结构状态 fixture、binary stub、session list/transcript/continue/PTY unsupported 的 API/E2E 测试。"
+  ],
+  "missing_key_mechanisms": [
+    "OpenCode transcript API/parser 接入：读取历史消息并归一化 role、timestamp、text、tool_use、tool_result 和不可解析载荷占位。",
+    "chat workspace、conversation list、session branding 与 transcript/continue/terminal UI 的完整 kind 传播。",
+    "terminal/PTY attach 对 OpenCode 的显式禁用或探测式 capability 字段。",
+    "OpenAPI/API index/schema 与前端类型的契约同步。",
+    "OpenCode 本地状态 fixture、OpenCode binary stub、以及 session list/transcript/continue/PTY unsupported 的可复现测试。",
+    "continue 本地命令失败的诊断性错误分类和透传策略。"
+  ],
+  "unsupported_claims": [
+    "声称现有 OpenClaw Gateway、Claude Code、Codex CLI、Hermes Agent 都已有“条件式继续”能力不准确；当前 continue route 只支持 claude-code 和 codex-cli。",
+    "默认继续命令 opencode resume {sessionId} {prompt} 没有当前项目依据，也与需求中不得假设 OpenCode 继续命令已知的约束存在张力。",
+    "称新增扫描函数会沿用 codex-sessions.ts 和 hermes-sessions.ts 的 50MB 大文件上限缺少源码依据；当前 Codex/Hermes 扫描并未体现该统一 50MB 文件上限。"
+  ],
+  "score_rationale": "该方案方向正确，能把 OpenCode 作为异构本地 runtime 接入现有 session 聚合，并针对本地状态未知提出配置化发现和适配器机制，技术问题识别较强。但 rubric 的上限规则必须生效：方案缺少 transcript API/parser 和消息归一化，缺少 terminal/PTY gating，缺少 OpenAPI/API 契约同步，缺少真实 fixture/binary stub/API-E2E 测试，并且 continue 失败诊断不完整。由于同时缺失三个以上关键机制，总分不得高于 72；本方案在该上限内给到高端，是因为 session list、runtime registry、配置化适配和能力声明部分相对具体且基本符合现有架构。"
+}

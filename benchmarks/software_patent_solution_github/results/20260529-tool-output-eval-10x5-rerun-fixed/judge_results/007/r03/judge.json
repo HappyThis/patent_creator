@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "environment_understanding": 14,
+    "technical_problem": 14,
+    "technical_mechanism": 17,
+    "essential_features": 8,
+    "problem_mechanism_effect": 13,
+    "constraint_adherence": 6,
+    "feasibility": 6,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住了父 agent 单会话内调度可保留子 agent 的核心问题，不是把子 agent 简化成普通函数调用。",
+    "设计了父侧 retained run registry、子侧 runId/requestId/streamId 映射、状态机和 agent-tool-event 协议，能支撑实时展示、重放和去重。",
+    "覆盖了模型工具调用 agentTool、命令式 runAgentTool、无 parentToolCallId 后台运行、并行 fan-out、displayOrder、幂等 runId、取消和清理。",
+    "drill-in 访问控制思路明确，能通过父侧注册表门禁避免未知 runId 直接唤醒或创建子 facet。",
+    "客户端 headless reducer/hook、unboundRuns、按 toolCallId 分组展示等 UI 状态管理机制较完整。"
+  ],
+  "weaknesses": [
+    "没有明确处理 headless 子 agent 中浏览器 client tools 不可用的问题，也没有说明降级、父侧中介执行或禁止策略，触发 rubric 的 82 分上限。",
+    "对 Think 与 AIChatAgent 的适配边界表述有些不一致：前文说任意 Think 或 AIChatAgent 子类均可调度，后文又说混合适配仍在规划，缺少 AIChatAgent 具体执行、恢复、取消差异。",
+    "父 agent 重启后直接将 running 标记为 interrupted 的流程较保守，未充分展开如何利用子侧 inspection 区分已完成、失败、仍运行但不可 live-tail 的情况。",
+    "访问控制和清理后的访问响应主要描述为注册表门控和删除 facet，缺少 tombstone/deleted 或已清理 run 的一致响应语义。"
+  ],
+  "missing_key_mechanisms": [
+    "headless 子 agent 对浏览器 client tools 的禁用、降级或父侧中介机制。",
+    "AIChatAgent 适配器的具体协议接入点、恢复读取和取消传播细节。",
+    "父侧恢复时对子侧终态 inspection 的更细粒度 reconciliation。",
+    "已清理 retained run 的一致访问响应或 tombstone 策略。"
+  ],
+  "unsupported_claims": [
+    "“任何继承自 Think 或 AIChatAgent 的 chat-capable agent 均可作为 agent 工具被父 agent 调度”表述偏满；当前项目材料显示 Think 原型已验证，AIChatAgent 是后续 adapter 目标。",
+    "“框架默认安装严格的注册表门控”在现有 sub-agent 路由中不是默认行为；现有能力是 onBeforeSubAgent 可实现门禁，框架级默认门控属于拟议实现。",
+    "“父子 facet 运行在同一 Worker 进程中”比项目文档中的 colocated/same machine 表述更具体，当前材料未充分证明该进程级说法。"
+  ],
+  "score_rationale": "该方案整体属于强可用方案，几乎完整覆盖 retained streaming agent tools 的主体机制：父侧注册表、独立子执行上下文、runId/requestId/streamId 映射、父 WebSocket 事件复用、replay/live 去重、并行和无父工具调用后台运行、取消、清理、drill-in 门禁、双 API 和客户端聚合。扣分主要来自一个关键工程边界缺失：没有处理 headless 子 agent 中浏览器 client tools 的不可用或降级策略，rubric 明确规定此类缺失通常不得高于 82 分；同时 AIChatAgent 适配支持有轻微过度确定和恢复 reconciliation 细节不足。因此给 82 分，而不是 90 分以上。"
+}

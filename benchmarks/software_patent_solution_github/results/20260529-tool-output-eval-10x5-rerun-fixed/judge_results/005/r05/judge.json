@@ -1,0 +1,44 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "environment_understanding": 13,
+    "technical_problem": 14,
+    "technical_mechanism": 13,
+    "essential_features": 6,
+    "problem_mechanism_effect": 11,
+    "constraint_adherence": 7,
+    "feasibility": 7,
+    "patent_value": 4
+  },
+  "strengths": [
+    "准确抓住外部调用方需要快速 accepted、后台执行、状态查询、取消和幂等重试的核心问题。",
+    "方案能结合当前 Think 的 Session、assistant_messages、saveMessages、TurnQueue、chatRecovery/runFiber、AbortRegistry 等实际上下文，避免重写普通聊天路径。",
+    "提出了持久任务表、idempotency_key 唯一约束、状态机、get/cancel/delete 管理接口和条件状态更新，整体方向符合 durable submission ledger。",
+    "技术效果部分能把快速确认、重试去重、持久状态视图和现有架构兼容性形成基本闭环。"
+  ],
+  "weaknesses": [
+    "最关键缺口是缺少可靠的消息应用边界。方案没有 messagesAppliedAt、稳定 user message id 集、apply checkpoint 或等价字段；用 assistant_message 是否存在来判断写入前后崩溃，不能区分“用户消息已写入但助手消息尚未持久化”的场景，重试仍可能重复追加用户消息或重复执行 turn。",
+    "后台执行机制不够清晰。方案描述为确认返回后在 keepAliveWhile 中调用 saveMessages，但缺少持久 pending drain、唤醒和 pending/accepted -> running 的条件领取事务，不能充分防止多个恢复/触发路径同时领取同一任务。",
+    "恢复规则前后不一致：一处说 onStart 将超时 accepted/running 标 error，另一处说 accepted 重新入队；running 恢复依赖活跃 fiber 检查，但任务表没有 requestId/recoveryId 等持久关联。",
+    "取消设计不完整。任务表字段没有保存 requestId 或 controller/recovery 关联，却要求 cancelTask 调用 AbortRegistry.cancel(requestId)；而现有 saveMessages 的 AbortSignal 主要是内存链路，hibernation 后取消恢复中 turn 的语义没有解决。",
+    "缺少 reset/clear conversation 与 submission ledger 的同步处理，也缺少 list/inspect 批量查看和 observability lifecycle events。",
+    "cleanup 只在风险中提出幂等键保留窗口，没有形成明确 API 或状态策略。"
+  ],
+  "missing_key_mechanisms": [
+    "持久化的消息应用边界，例如 messagesAppliedAt、applied message ids、apply checkpoint 或事务版本，用于安全区分写入前崩溃、写入后崩溃和恢复重放。",
+    "后台 drain/唤醒机制，以及 pending/accepted -> running 的条件 claim 事务。",
+    "submission 与实际 Think turn 的 requestId、turnId、recoveryId 或 streamId 的持久关联。",
+    "resetTurnState/clearMessages/会话重置时对 pending/running submission 的 skipped、aborted 或 error 同步规则。",
+    "list/inspect 批量查询、cleanup API 和 submission 生命周期 observability events。",
+    "运行中恢复后的取消语义，尤其是 chatRecovery 或 hibernation 后原内存 AbortSignal 丢失时如何控制已恢复 turn。"
+  ],
+  "unsupported_claims": [
+    "“Session.appendMessage / updateMessage 与任务表状态更新在同一个 DO SQLite 事务上下文中执行”缺少当前源码依据；现有 saveMessages 自行 append 消息、再 runFiber/stream，并没有暴露把整个任务状态更新和模型流式执行包进同一事务的机制。",
+    "“推理完成后 assistant_message_id 可由 saveMessages 直接回写”依据不足；当前 Think.saveMessages 返回的是 requestId 和 status，assistant_messages 表本身没有 request_id 字段。",
+    "“cancelTask 可调用 AbortRegistry.cancel(requestId)”在方案字段中缺少 requestId 持久保存；当前 AbortRegistry 是 Think 内部私有/受保护取消机制，外部任务表必须额外建立映射才可实施。",
+    "“onStart 可检查 running 任务是否存在对应活跃 fiber”缺少明确源码接入和持久关联字段；方案没有保存 fiber 名称、requestId 或 recovery 证据。",
+    "“通过 assistant_messages 表中是否存在对应助手消息即可判断推理是否实际完成”不足以支撑恢复去重，因为用户消息可能已追加而助手消息尚未生成。"
+  ],
+  "score_rationale": "该方案属于方向正确但关键工程边界不完整的答案。它较好理解了 Think 的现有会话、流式执行、恢复和取消路径，也提出了持久任务表、幂等键、状态查询、取消、删除和条件状态推进，因此明显不是泛泛异步队列方案。但 rubric 明确要求快速接收和最终完成之间必须有持久消息应用边界；本方案没有可靠的 messagesAppliedAt 或等价 checkpoint，并且以 assistant_message 存在性推断写入状态会漏掉用户消息已写入但助手消息未完成的崩溃窗口。另缺持久 drain/claim、reset 同步、requestId/recoveryId 关联、list/observability 等关键机制。按分数上限规则，没有持久消息应用边界通常不得高于 75 分；这里保留到 75 是因为其余 ledger、幂等、管理面和复用 Think 路径的设计较完整，但不足以进入 80 分以上档位。"
+}
