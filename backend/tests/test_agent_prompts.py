@@ -43,6 +43,10 @@ def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_t
     assert "复杂任务工作流程" in prompt
     assert "单 agent 工作流" not in prompt
     assert "不要在只看到目录或少量片段后直接写正文" in prompt
+    assert "项目环境路径" in prompt
+    assert "默认路径 \".\" 指当前交底书工作区，不等于待分析源码项目" in prompt
+    assert "优先使用 file_glob、file_search、file_read" in prompt
+    assert "不要用 exec_command 执行 find、ls、grep、rg、cat、head、tail" in prompt
     assert "最小充分探索" in prompt
     assert "证据清单、技术问题、核心机制、边界条件、技术效果" in prompt
     assert "每个关键段落都要能回答" in prompt
@@ -117,7 +121,7 @@ def test_exec_command_metadata_comes_from_tool_docstring() -> None:
 
     prompt = build_main_agent_system_prompt()
     assert "命令超时时返回 command_timeout" in prompt
-    assert '执行诊断命令：{"command":"ls -la","timeout":30}' in prompt
+    assert '执行诊断命令：{"command":"git status --short","timeout":30}' in prompt
 
 
 def test_append_child_section_protocol_is_single_shape() -> None:

@@ -36,10 +36,10 @@ def current_command_platform() -> CommandPlatform:
                 "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)"
             ),
             examples=(
-                "Get-ChildItem -Force",
-                "Get-ChildItem -Recurse -Filter *.ts",
-                "Get-Content -Raw -Encoding UTF8 .\\src\\file.ts",
-                "Select-String -Path .\\src\\*.ts -Pattern \"OpenCode\"",
+                "Get-Location",
+                "git status --short",
+                "pytest -q",
+                "npm test",
                 "python -c \"print('ok')\"",
             ),
         )
@@ -52,10 +52,10 @@ def current_command_platform() -> CommandPlatform:
         command_prefix=(executable, "-c"),
         prelude=None,
         examples=(
-            "ls -la",
-            "find . -name '*.ts'",
-            "cat ./src/file.ts",
-            "grep -R \"OpenCode\" ./src",
+            "pwd",
+            "git status --short",
+            "pytest -q",
+            "npm test",
             "python -c \"print('ok')\"",
         ),
     )

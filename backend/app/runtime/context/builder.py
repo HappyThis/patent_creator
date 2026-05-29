@@ -20,6 +20,7 @@ from .history import (
     restore_main_chat_messages,
 )
 from .prompts import context_compression_user_prompt
+from .tool_budget import apply_tool_result_turn_budget
 from .usage import ContextUsage, estimate_messages_tokens, usage_for_messages
 
 logger = logging.getLogger("patent_creator.context")
@@ -66,6 +67,7 @@ class ContextManager:
             active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
+        messages = apply_tool_result_turn_budget(self.store, project_id, messages)
         return prepare_messages_for_model_request(self._emergency_trim_messages(messages), self.settings)
 
     def _build_main_agent_messages_raw(
@@ -110,6 +112,7 @@ class ContextManager:
             active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
+        raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
         request_messages = prepare_messages_for_model_request(raw_messages, self.settings)
         usage = usage_for_messages(raw_messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
@@ -186,6 +189,7 @@ class ContextManager:
                 active_block_id=active_block_id,
                 current_message_id=current_message_id,
             )
+            raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
             usage = usage_for_messages(raw_messages, self.settings)
             if on_context_event is not None:
                 await on_context_event(
@@ -326,6 +330,7 @@ class ContextManager:
         source_messages: list[dict[str, Any]] = []
         for segment in segments:
             source_messages.extend(segment.messages)
+        source_messages = apply_tool_result_turn_budget(self.store, project_id, source_messages)
         if not source_messages:
             logger.info(
                 "context compression skipped scope=main reason=insufficient_messages project_id=%s session_id=%s round_id=%s message_id=%s candidate_events=%s source_messages=%s",

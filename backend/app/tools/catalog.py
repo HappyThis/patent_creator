@@ -14,6 +14,7 @@ from .builtin.document import (
     document_replace_block,
     document_replace_section_blocks,
 )
+from .builtin.filesystem import file_glob, file_read, file_search
 from .builtin.shell import exec_command
 from .metadata import ToolFunctionMetadata, get_tool_metadata
 from .types import AgentScope
@@ -201,6 +202,30 @@ def _exec_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
     return "诊断命令已完成"
 
 
+def _file_glob_started(arguments: dict[str, Any]) -> str:
+    return "开始查找文件"
+
+
+def _file_glob_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    return "文件查找已完成"
+
+
+def _file_search_started(arguments: dict[str, Any]) -> str:
+    return "开始搜索文件内容"
+
+
+def _file_search_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    return "文件内容搜索已完成"
+
+
+def _file_read_started(arguments: dict[str, Any]) -> str:
+    return "开始读取文件"
+
+
+def _file_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    return "文件读取已完成"
+
+
 @dataclass(frozen=True, slots=True)
 class _ToolRegistration:
     function: Callable[..., Any]
@@ -269,6 +294,14 @@ _TOOL_REGISTRATIONS = (
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
+    _ToolRegistration(file_glob, _MAIN, summary_started=_file_glob_started, summary_finished=_file_glob_finished),
+    _ToolRegistration(
+        file_search,
+        _MAIN,
+        summary_started=_file_search_started,
+        summary_finished=_file_search_finished,
+    ),
+    _ToolRegistration(file_read, _MAIN, summary_started=_file_read_started, summary_finished=_file_read_finished),
     _ToolRegistration(exec_command, _MAIN, summary_started=_exec_started, summary_finished=_exec_finished),
 )
 _TOOL_REGISTRY = _build_tool_registry(_TOOL_REGISTRATIONS)

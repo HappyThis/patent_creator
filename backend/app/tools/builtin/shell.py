@@ -9,6 +9,7 @@ from ...core.command_platform import command_arguments, current_command_platform
 from ...domain.document_tool_results import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
 from ..metadata import agent_tool
+from ..output_storage import EXEC_COMMAND_INLINE_LIMIT_CHARS, EXEC_COMMAND_PREVIEW_CHARS, head_tail_preview, write_tool_output
 
 
 class ExecCommandArguments(BaseModel):
@@ -27,14 +28,16 @@ def exec_command(
     """在项目工作区内执行命令字符串，cwd 为当前 project 工作区。
 
     Returns:
-        返回 exit_code、stdout 和 stderr；命令失败时根据这些字段继续判断下一步。
+        返回 exit_code、stdout 和 stderr；stdout/stderr 过长时只返回 preview，并提供完整输出的 runtime 文件路径。
 
     Rules:
         - 当前运行平台和 shell 会在工具结果中返回。
+        - 查找文件优先用 file_glob；搜索代码优先用 file_search；读取文件优先用 file_read。
+        - stdout/stderr 不保证完整；当 *_truncated 为 true 时，需要用 file_read 读取 *_path。
         - 命令超时时返回 command_timeout。
 
     Examples:
-        - 执行诊断命令: {"command":"ls -la","timeout":30}
+        - 执行诊断命令: {"command":"git status --short","timeout":30}
     """
     command = arguments.get("command")
     if not isinstance(command, str) or not command.strip():
@@ -66,8 +69,20 @@ def exec_command(
             command=command,
             platform=profile.platform,
             shell=profile.shell,
-            stdout=decode_command_output(exc.stdout),
-            stderr=decode_command_output(exc.stderr),
+            **_stream_output_fields(
+                store,
+                project_id,
+                command=command,
+                name="stdout",
+                text=decode_command_output(exc.stdout),
+            ),
+            **_stream_output_fields(
+                store,
+                project_id,
+                command=command,
+                name="stderr",
+                text=decode_command_output(exc.stderr),
+            ),
         )
     except OSError as exc:
         return tool_failed(
@@ -83,7 +98,54 @@ def exec_command(
             "platform": profile.platform,
             "shell": profile.shell,
             "exit_code": completed.returncode,
-            "stdout": decode_command_output(completed.stdout),
-            "stderr": decode_command_output(completed.stderr),
+            **_stream_output_fields(
+                store,
+                project_id,
+                command=command,
+                name="stdout",
+                text=decode_command_output(completed.stdout),
+            ),
+            **_stream_output_fields(
+                store,
+                project_id,
+                command=command,
+                name="stderr",
+                text=decode_command_output(completed.stderr),
+            ),
         }
     )
+
+
+def _stream_output_fields(
+    store: WorkspaceStore,
+    project_id: str,
+    *,
+    command: str,
+    name: str,
+    text: str,
+) -> dict[str, Any]:
+    chars = len(text)
+    fields: dict[str, Any] = {
+        name: text,
+        f"{name}_chars": chars,
+        f"{name}_truncated": False,
+        f"{name}_path": None,
+    }
+    if chars <= EXEC_COMMAND_INLINE_LIMIT_CHARS:
+        return fields
+
+    fields[name] = head_tail_preview(text, EXEC_COMMAND_PREVIEW_CHARS)
+    fields[f"{name}_truncated"] = True
+    fields[f"{name}_path"] = write_tool_output(
+        store,
+        project_id,
+        text,
+        stem=f"exec_command_{name}",
+        suffix=".txt",
+    )
+    fields["preview_policy"] = "head_tail"
+    fields["preview_hint"] = (
+        f"{name} 已截断；完整输出已保存到 {fields[f'{name}_path']}，"
+        "如需查看请调用 file_read 读取该路径的片段。"
+    )
+    return fields

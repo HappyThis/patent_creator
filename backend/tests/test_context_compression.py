@@ -8,6 +8,7 @@ import pytest
 from app.agents.runtime.model_profiles import prepare_messages_for_model_request
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.runtime.context import ContextManager
 from app.runtime.context.barrier import COMPRESSED_CONTEXT_MESSAGE
 from app.runtime.context.compression import (
     COMPRESSED_MEMORY_PREFIX,
@@ -15,8 +16,10 @@ from app.runtime.context.compression import (
     prepare_compressed_markdown_messages,
 )
 from app.runtime.context.history import project_main_event_segments, restore_main_chat_messages
+from app.runtime.context.tool_budget import apply_tool_result_turn_budget
 from app.runtime.context.usage import estimate_messages_tokens, token_count_with_estimation, usage_for_messages
 from app.schemas import SessionEvent
+from app.storage.workspace_store import WorkspaceStore
 
 
 VALID_MARKDOWN = """## 当前任务
@@ -119,6 +122,114 @@ def test_prepare_messages_for_request_strips_usage_metadata(tmp_path: Path) -> N
     )
 
     assert prepared == [{"role": "assistant", "content": "上一轮"}]
+
+
+def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_path: Path) -> None:
+    store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
+    project = store.create_project("一种图像检测方法")
+    session_id = "sess_budget"
+    round_id = "round_budget"
+    message_id = "msg_budget"
+
+    store.append_session_event(
+        project.project_id,
+        session_id,
+        event_type="agent_message",
+        scope="main",
+        round_id=round_id,
+        message_id=message_id,
+        payload={
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_big",
+                        "type": "function",
+                        "function": {"name": "document_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            "model": "test",
+            "provider": "test",
+            "thinking": "disabled",
+        },
+    )
+    store.append_session_event(
+        project.project_id,
+        session_id,
+        event_type="tool_result",
+        scope="main",
+        round_id=round_id,
+        message_id=message_id,
+        call_id="call_big",
+        payload={"tool": "document_read", "status": "success", "output": {"text": "x" * 180000}},
+    )
+
+    manager = ContextManager(
+        store,
+        Settings(data_dir=tmp_path / "data", git_user_name="Test User", git_user_email="test@example.com"),
+    )
+    messages = manager.build_main_agent_messages(
+        project.project_id,
+        session_id,
+        user_message="继续",
+        active_section_id=None,
+        active_block_id=None,
+    )
+
+    tool_message = next(message for message in messages if message.get("role") == "tool")
+    payload = json.loads(tool_message["content"])
+    assert payload["output"]["tool_result_truncated"] is True
+    persisted_path = store.project_dir(project.project_id) / payload["output"]["tool_result_path"]
+    assert persisted_path.exists()
+    assert '"text": "xxx' in persisted_path.read_text(encoding="utf-8")
+
+    messages_again = manager.build_main_agent_messages(
+        project.project_id,
+        session_id,
+        user_message="继续",
+        active_section_id=None,
+        active_block_id=None,
+    )
+    payload_again = json.loads(next(message for message in messages_again if message.get("role") == "tool")["content"])
+    assert payload_again["output"]["tool_result_path"] == payload["output"]["tool_result_path"]
+
+
+def test_tool_result_turn_budget_stops_when_largest_result_is_already_processed(tmp_path: Path) -> None:
+    store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
+    project = store.create_project("一种图像检测方法")
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_processed", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
+                {"id": "call_raw", "type": "function", "function": {"name": "document_read", "arguments": "{}"}},
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_processed",
+            "content": json.dumps(
+                {
+                    "status": "success",
+                    "output": {"stdout": "x" * 170000, "stdout_truncated": True, "stdout_path": "runtime/out.txt"},
+                },
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_raw",
+            "content": json.dumps({"status": "success", "output": {"text": "y" * 20000}}, ensure_ascii=False),
+        },
+    ]
+
+    budgeted = apply_tool_result_turn_budget(store, project.project_id, messages)
+
+    raw_payload = json.loads(budgeted[2]["content"])
+    assert "tool_result_truncated" not in raw_payload["output"]
 
 
 def test_restore_main_chat_messages_injects_compressed_markdown_memory() -> None:

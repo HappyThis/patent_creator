@@ -343,6 +343,7 @@ def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path)
     assert output_result["status"] == "success"
     assert output_result["output"]["exit_code"] == 0
     assert output_result["output"]["stdout"].strip() == "2"
+    assert output_result["output"]["stdout_truncated"] is False
 
     write_result = run_tool(
         executor,
@@ -361,6 +362,28 @@ def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path)
     assert read_result["status"] == "success"
     assert read_result["output"]["exit_code"] == 0
     assert "中文测试" in read_result["output"]["stdout"]
+
+    large_result = run_tool(
+        executor,
+        project_id,
+        "exec_command",
+        {"command": python_command("print('x' * 35000)")},
+    )
+    assert large_result["status"] == "success"
+    assert large_result["output"]["stdout_truncated"] is True
+    assert len(large_result["output"]["stdout"]) < 10000
+    stdout_path = executor.store.project_dir(project_id) / large_result["output"]["stdout_path"]
+    assert stdout_path.exists()
+    assert stdout_path.read_text(encoding="utf-8").startswith("x" * 100)
+
+    persisted_read = run_tool(
+        executor,
+        project_id,
+        "file_read",
+        {"path": large_result["output"]["stdout_path"], "start_line": 1, "limit": 1},
+    )
+    assert persisted_read["status"] == "success"
+    assert persisted_read["output"]["content"].startswith("1 | ")
 
     null_timeout = run_tool(
         executor,
@@ -384,3 +407,71 @@ def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path)
     denied_scope = run_tool(executor, project_id, "exec_command", {"command": "pwd"}, scope="unknown")
     assert denied_scope["status"] == "failed"
     assert denied_scope["output"]["code"] == "permission_denied"
+
+
+def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    source_dir = workspace / "src"
+    source_dir.mkdir()
+    (source_dir / "alpha.py").write_text("def alpha():\n    return 'needle'\n", encoding="utf-8")
+    (source_dir / "beta.py").write_text("def beta():\n    return 'other'\n", encoding="utf-8")
+
+    glob_result = run_tool(executor, project_id, "file_glob", {"pattern": "src/*.py", "limit": 1})
+    assert glob_result["status"] == "success"
+    assert glob_result["output"]["matches"] == ["src/alpha.py"]
+    assert glob_result["output"]["truncated"] is True
+    assert glob_result["output"]["next_offset"] == 1
+
+    glob_in_path_result = run_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"path": "src/*.py", "pattern": "**/*.py", "limit": 10},
+    )
+    assert glob_in_path_result["status"] == "success"
+    assert glob_in_path_result["output"]["matches"] == ["src/alpha.py", "src/beta.py"]
+    assert glob_in_path_result["output"]["effective_path"] == "src"
+    assert glob_in_path_result["output"]["effective_pattern"] == "*.py"
+
+    search_result = run_tool(executor, project_id, "file_search", {"pattern": "needle", "path": "src"})
+    assert search_result["status"] == "success"
+    assert search_result["output"]["matches"][0]["path"] == "src/alpha.py"
+    assert search_result["output"]["matches"][0]["line"] == 2
+
+    read_result = run_tool(executor, project_id, "file_read", {"path": "src/alpha.py", "start_line": 1, "limit": 1})
+    assert read_result["status"] == "success"
+    assert read_result["output"]["content"] == "1 | def alpha():"
+    assert read_result["output"]["next_start_line"] == 2
+
+    external_dir = tmp_path / "external_repo"
+    external_dir.mkdir()
+    external_file = external_dir / "gamma.py"
+    external_file.write_text("print('external needle')\n", encoding="utf-8")
+
+    external_glob = run_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"path": str(external_dir), "pattern": "*.py", "limit": 10},
+    )
+    assert external_glob["status"] == "success"
+    assert external_glob["output"]["matches"] == [str(external_file)]
+
+    external_glob_in_path = run_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"path": str(external_dir / "*.py"), "pattern": "**/*.py", "limit": 10},
+    )
+    assert external_glob_in_path["status"] == "success"
+    assert external_glob_in_path["output"]["matches"] == [str(external_file)]
+
+    external_search = run_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"path": str(external_dir), "pattern": "external needle"},
+    )
+    assert external_search["status"] == "success"
+    assert external_search["output"]["matches"][0]["path"] == str(external_file)
