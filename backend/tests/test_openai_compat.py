@@ -100,6 +100,24 @@ def test_generate_json_sends_mimo_disabled_thinking(tmp_path: Path) -> None:
     assert fake.completions.calls[0]["max_completion_tokens"] == 8192
 
 
+def test_generate_json_sends_openai_profile_without_provider_specific_parameters(tmp_path: Path) -> None:
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))],
+        usage=None,
+    )
+    fake = FakeOpenAIClient(completion)
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="openai", thinking="enabled"), client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(client.generate_json(system_prompt="system", user_prompt="user"))
+
+    assert result == {"ok": True}
+    call = fake.completions.calls[0]
+    assert call["max_completion_tokens"] == 8192
+    assert "max_tokens" not in call
+    assert "extra_body" not in call
+    assert "reasoning_effort" not in call
+
+
 def test_generate_json_can_override_timeout(tmp_path: Path) -> None:
     completion = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))],
@@ -283,6 +301,27 @@ def test_generate_with_tools_stream_replays_reasoning_for_deepseek_enabled(tmp_p
 
     request_messages = fake.completions.calls[0]["messages"]
     assert request_messages[1]["reasoning_content"] == "需要回放"
+
+
+def test_generate_with_tools_stream_filters_reasoning_for_openai_enabled(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream("ok"))
+    client = OpenAICompatibleClient(make_settings(tmp_path, provider="openai", thinking="enabled"), client=fake)  # type: ignore[arg-type]
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[
+                {"role": "assistant", "content": "上一轮", "reasoning_content": "不应回放"},
+                {"role": "user", "content": "继续"},
+            ],
+            tools=[],
+        )
+    )
+
+    request_messages = fake.completions.calls[0]["messages"]
+    assert request_messages[1] == {"role": "assistant", "content": "上一轮"}
+    assert "extra_body" not in fake.completions.calls[0]
+    assert "reasoning_effort" not in fake.completions.calls[0]
 
 
 def test_generate_with_tools_stream_retries_transient_read_error_before_text_delta(tmp_path: Path) -> None:

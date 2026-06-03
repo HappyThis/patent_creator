@@ -16,7 +16,16 @@ export OPENAI_COMPAT_MAX_COMPLETION_TOKENS=8192
 export OPENAI_MODEL=mimo-v2.5-pro
 ```
 
-`OPENAI_COMPAT_PROVIDER` 目前支持 `mimo` 和 `deepseek`。不同 provider 会按各自 API 要求发送 thinking、token 上限和 reasoning 参数；例如 MIMO 会显式发送 `extra_body={"thinking":{"type":"enabled"}}` 或 `extra_body={"thinking":{"type":"disabled"}}`。当 MIMO 或 DeepSeek 开启 thinking 时，历史 assistant 消息中的 `reasoning_content` 会被保存并回放，以支持多轮工具调用。
+接入 GPT 系列模型时使用 `openai` profile：
+
+```bash
+export OPENAI_COMPAT_PROVIDER=openai
+export OPENAI_COMPAT_BASE_URL=https://api.openai.com/v1
+export OPENAI_COMPAT_API_KEY=your_provider_api_key
+export OPENAI_MODEL=gpt-5.5
+```
+
+`OPENAI_COMPAT_PROVIDER` 目前支持 `mimo`、`deepseek` 和 `openai`。不同 provider 会按各自 API 要求发送 thinking、token 上限和 reasoning 参数；例如 MIMO 会显式发送 `extra_body={"thinking":{"type":"enabled"}}` 或 `extra_body={"thinking":{"type":"disabled"}}`。当 MIMO 或 DeepSeek 开启 thinking 时，历史 assistant 消息中的 `reasoning_content` 会被保存并回放，以支持多轮工具调用。`openai` profile 使用标准 Chat Completions 参数，不发送 provider-specific thinking 参数，也不回放 `reasoning_content`。
 
 ## Structure
 
