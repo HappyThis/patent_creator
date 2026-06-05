@@ -1,0 +1,34 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 14,
+    "technical_effect": 10,
+    "feasibility": 9,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住本题核心：子 agent 不是普通同步函数调用，而是需要可观察、可恢复、可保留、可并行、可门禁和可清理的运行实体。",
+    "核心组合机制完整，覆盖父侧 run 注册表、runId、子侧映射、独立 facet 上下文、流式事件回流、replay 去重、drill-in 门禁、取消和清理。",
+    "技术手段粒度很深，明确了状态生命周期、事件类型、序号去重、NDJSON/ReadableStream 转发、默认 inputPreview、并行 displayOrder、无父工具调用后台运行等必要特征。",
+    "要素协同清楚，能说明父 agent、子 agent、注册表、RPC 流、客户端 reducer/hook、清理 API 和恢复调和之间的运行关系。",
+    "技术效果有较完整因果闭环，能从独立存储、注册表、事件序号和观察/执行分离推出刷新恢复、去重、上下文隔离、并行控制和访问安全。"
+  ],
+  "weaknesses": [
+    "部分内容过于贴近具体 RFC/实现命名，交底书表达略偏框架设计说明，抽象成可保护技术特征的程度还有提升空间。",
+    "父 LLM 工具调用的最终返回契约描述不够集中，尤其是 completed、error、aborted、interrupted 如何作为工具结果反馈给主 agent 继续推理，虽有 summary 和终结事件但不如参考深度中该点清晰。",
+    "存在少量内部表述不一致或过强表述，例如前文称 getAgentToolChunks 以 runId 读取，重连回放段又写成 getAgentToolChunks(streamId)；“无竞态窗口的精确取消”表述强于常规方案必要证明。"
+  ],
+  "missing_key_mechanisms": [
+    "父模型继续推理时的工具结果返回协议可以更明确，包括成功摘要、结构化失败、取消和中断结果如何进入主 agent 的后续推理上下文。",
+    "可进一步抽象可变形实施方式，例如事件日志是否由子侧 chunk 存储、父侧事件表或专门流存储承载，以及不同 chat agent 基类适配时的边界。"
+  ],
+  "unsupported_claims": [
+    "“子 agent 工具是运行在与主 agent 相同的 Worker 进程内”比材料中“同机 colocated facet”表述更具体，若作为既有运行时事实需要进一步依据。",
+    "“getAgentToolChunks(streamId)”与方案自身及参考机制中的 runId keyed replay 不一致，容易被理解为未被材料确认的接口签名。"
+  ],
+  "score_rationale": "该方案达到高质量深度标尺，基本等价并显著覆盖参考方案的核心路径：父侧调用入口、父侧注册表、稳定 runId、子侧持久映射、独立子 agent 上下文、流式事件回流、replay 去重、并行幂等、取消、清理、访问门禁和无父工具调用后台运行均有具体机制。没有触发“无注册表”“无恢复去重”“无取消清理”“无访问门禁”等上限扣分。未给满分的原因主要是交底书表达略偏具体框架 RFC，少数接口/事实表述过细或不一致，并且父 LLM 工具结果返回契约可再集中强化；这些问题不破坏核心方案成立。"
+}

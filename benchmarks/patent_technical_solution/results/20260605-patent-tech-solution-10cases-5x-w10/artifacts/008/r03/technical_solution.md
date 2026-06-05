@@ -1,0 +1,71 @@
+## 技术方案
+
+本方案提出一种保留式流式子代理工具编排方法，基于持久对象（Durable Object）的父子代理架构，使主代理在一次请求处理中可将研究、规划、比较、总结等子任务分派给一个或多个具有独立执行上下文的子代理，并将各子代理的执行过程和结果以流式事件形式带回同一主会话视图。方案的核心设计原则是：子代理是独立的持久对象实例，拥有各自的存储、会话状态和可恢复流；主代理维护一个轻量级的运行注册表用于事件重放和访问控制；观察（流式转发）与执行（子代理推理循环）是分离的关注点。
+
+### 整体架构
+
+系统由三类持久对象实例构成：主代理（Parent Agent）、代理工具子代理（Agent Tool Sub-Agent）和客户端连接。主代理是用户直接对话的入口，继承自具有对话能力的代理基类（如Think或AIChatAgent），负责接收用户请求、调用语言模型进行推理、并在模型决定需要子任务协助时分派子代理。每个子代理是一个通过父代理的subAgent(name)接口创建的、与父代理同机部署的子级持久对象，拥有独立的SQLite存储、独立的语言模型、系统提示词、工具集和可恢复流存储，具备完整的对话代理能力。子代理之间存储隔离，互不干扰。
+
+### 运行注册表与子代理运行映射
+
+主代理与子代理之间通过类型化RPC存根进行通信。子代理对外暴露的方法（如启动一次推理运行runTurnAndStream、获取存储的流式块getChatChunksForReplay、获取最终输出文本getFinalTurnText等）被映射为异步RPC调用，而代理基类的内部方法对调用方不可见。主代理创建子代理时，系统通过ctx.facets运行时原语在父代理所在机器上分配子级持久对象实例，并利用set-name fetch触发子代理的初始化（包括onStart生命周期钩子，在此创建所需的SQLite表结构）。
+
+主代理维护一个框架管理的代理工具运行注册表（cf_agent_tool_runs），记录每一次子代理分派的元数据：运行标识runId、父工具调用标识parentToolCallId、代理类型agentType、输入预览inputPreview、运行状态status、输出摘要summary、错误信息errorMessage、显示顺序displayOrder、时间戳和子代理流标识streamId。该注册表存储在主代理的SQLite中，因为重放是父代理视角的操作——只有父代理知道哪个父工具调用触发了哪个子代理运行，以及子代理在兄弟代理间的渲染顺序。
+
+子代理侧维护一个运行映射表（cf_agent_tool_child_runs），将编排层运行标识runId映射到对话轮的内部标识requestId和可恢复流标识streamId。这种双层映射设计将编排语义与对话引擎内部标识解耦：runId是产品/编排层的标识，requestId是对话轮/中止注册表的标识，streamId是可恢复流持久化的标识。该映射对于恢复至关重要——如果父代理在子代理启动后、存储生成标识前崩溃，父代理重启后可通过runId向子代理查询requestId和streamId以完成状态协调。
+
+### 流式事件转发与生命周期合成
+
+子代理的运行结果通过DO RPC的ReadableStream机制以流式方式传回父代理。具体流程为：父代理调用子代理的startAgentToolRun方法，子代理在内部创建一个ReadableStream，在start回调中执行完整的推理循环（调用saveMessages驱动语言模型进行工具调用和文本生成）。推理过程中，子代理的broadcast方法被覆写以拦截每一个聊天响应块（MSG_CHAT_RESPONSE帧），将其JSON编码后作为NDJSON行（{sequence, body}格式）写入RPC流。
+
+父代理读取RPC流的每一行NDJSON帧，将其包装为代理工具事件（agent-tool-event）并通过WebSocket广播给所有连接的客户端。事件分为两类：生命周期事件（started、finished、error、aborted、interrupted）由父代理合成，流事件（chunk）直接转发了子代理的UIMessageChunk。生命周期事件始终携带足够的元数据（代理类型、输入预览、显示顺序），使客户端即使在任何数据块到达之前也能渲染子代理运行面板。每个子代理运行维护独立的单调递增序列号，客户端通过三元组（parentToolCallId, runId, sequence）进行去重，确保重放与实时流不冲突。
+
+### 并行执行与并发控制
+
+系统支持两种并行子代理编排模式。第一种为不同父工具调用下的并行分派：语言模型在一次推理轮中通过parallel_tool_calls机制同时发起多个工具调用，每个工具调用对应一个独立的子代理运行，各子代理的事件按其parentToolCallId分组，在客户端分别渲染到不同的工具调用面板下。第二种为同一父工具调用内的扇出并行：单一工具调用（如compare比较工具）在其execute函数内通过Promise.allSettled同时启动多个子代理运行，各子代理共享同一parentToolCallId，通过displayOrder字段区分左右顺序。
+
+采用Promise.allSettled而非Promise.all处理扇出结果：若一个分支失败，其他分支继续在其独立持久对象上运行，父代理向编排语言模型同时呈现成功和失败分支的结构化结果，使其能基于部分成功做出合理响应。系统提供最大并发代理工具数（maxConcurrentAgentTools）的粗粒度并发守卫，当正在运行的子代理数量超过阈值时，新请求快速失败并返回明确的错误事件。每个子代理实例内部采用同步排他锁（_runInProgress标志）防止同一实例上的并发调用导致状态污染。
+
+### 可恢复重放与崩溃恢复
+
+系统保证页面刷新或网络短暂断开后用户仍能恢复看到已发生的子代理过程。其核心机制是双轨持久化：子代理的聊天流块通过Think/AIChatAgent内置的可恢复流（resumable stream）机制按块索引持久化到子代理自己的SQLite中，父代理运行注册表持久化到父代理SQLite中。当客户端重新连接时，父代理的onConnect钩子在聊天协议初始化完成后遍历运行注册表的所有行，对每一行进行重放。
+
+重放流程为：首先从注册表行数据合成started生命周期事件（序列0）；然后通过子代理的getChatChunksForReplay(streamId)方法按streamId精确获取该次运行的流式块，逐一作为chunk事件转发（序列1至N）；最后根据行的status字段合成对应的终端生命周期事件（finished、error或interrupted，序列N+1）。若行状态为running（即子代理仍在运行但父代理的原始观察流已丢失），重放已存储的块后将行标记为interrupted并合成错误事件，向客户端明确表示运行仍在进行但无法重新附着到实时流。行上的streamId字段确保后续的钻入（drill-in）对话不会覆盖原始工具调用轮次的流块。
+
+父代理崩溃恢复策略：父代理在onStart时将cf_agent_tool_runs中所有状态为running的行标记为interrupted，因为原来的RPC流转发循环已不可恢复。然后向子代理查询实际状态：若子代理报告completed或error，则根据实际情况更新父代理注册表状态；若子代理报告仍为running且不支持实时尾部重新附着（V1限制），则保持interrupted状态。子代理自身的对话恢复依赖于持久对象纤维（fiber）机制：子代理可在内部存储纤维行和快照，顶级父代理拥有物理告警槽位，但通过所有者路径将恢复回调路由回子代理实例。
+
+### 取消传播机制
+
+系统通过AbortSignal链实现跨越持久对象边界的取消传播。取消信号从父代理的对话轮出发，沿以下路径逐层传递至子代理的推理循环：（1）父代理的聊天请求被取消（用户点击停止按钮、关闭标签页或兄弟任务中止）；（2）父工具调用的abortSignal触发；（3）父代理取消子代理RPC流的读取器（reader.cancel）；（4）workerd的DO RPC桥在子代理侧触发ReadableStream的cancel回调；（5）cancel回调中止子代理每个运行轮次的AbortController；（6）该controller的signal通过saveMessages({signal})传递到Think的推理循环，使其同步终止。
+
+关键设计决策：取消观察者流不等同于取消运行。浏览器断开连接、父代理重启或重放失败应仅分离观察者，只有来自父代理活跃操作的显式中止信号才应取消执行。在并行扇出场景中，所有子代理共享同一个abortSignal：当父代理的聊天轮被取消时，所有子代理的RPC读取器同时取消，所有子代理的推理循环同步终止。子代理的行在父代理注册表中被标记为error并附加中止原因信息。
+
+### 幂等启动与重复请求处理
+
+系统通过运行标识runId实现幂等启动语义，防止重复请求导致重复的语言模型调用。startAgentToolRun以runId为幂等键：若子代理已存在该runId对应的运行记录且处于终止状态（completed、error、aborted），则直接返回已有结果而不重新执行；若运行正在进行中（running），则返回当前运行状态而不创建重复的对话轮。同样，父代理的runAgentTool接口在注册表中发现已有runId记录时：终止状态的运行直接返回已有结果，非终止状态的运行在V1中返回interrupted状态（遵循不支持实时尾部重新附着的规则）。这使runAgentTool可安全地从重试路径、告警回调和重连恢复中调用，不会意外重复语言模型工作。
+
+### 访问控制与钻入安全
+
+系统在父代理上安装严格的子代理访问网守（onBeforeSubAgent钩子），防止攻击者通过猜测子代理标识符生成任意持久对象实例。当外部HTTP或WebSocket请求通过/sub/{className}/{name}的嵌套URL到达时，该钩子首先验证所请求的代理类别是否为已注册的代理工具类型，然后在cf_agent_tool_runs注册表中查找是否存在对应的运行记录。若查找失败，返回404响应拒绝连接。内部通过subAgent()的调用绕过此钩子（与getAgentByName绕过onBeforeConnect的机制一致），因此父代理自身的子代理分派不受自身网守的阻碍。
+
+钻入（drill-in）功能允许用户通过嵌套URL直接连接到子代理以查看其完整对话历史。runId本身不是访问凭证——钻入URL始终通过父代理的身份信息（如useAgent({agent: parent, name: userId, sub: [...]})）访问，身份验证和租户隔离由父代理负责。子代理在框架驱动的运行期间持有排他声明：对同一runId的并发runAgentTool调用返回已有状态而非启动第二轮；钻入用户在框架运行期间发送的聊天消息应被延迟或拒绝，以确保不会静默插入到正在进行的推理轮中。
+
+### 后台运行与观察分离
+
+方案将子代理的执行与观察（流式事件转发）设计为分离的关注点，使子代理可在无直接父工具调用的场景下后台运行。runAgentTool的调用方不需要是父代理的聊天工具执行函数——代码可以从@callable标注的RPC方法、HTTP处理函数、定时告警回调或其他非聊天入口调用runAgentTool。这类无parentToolCallId的运行称为非绑定运行（unbound runs），在客户端通过useAgentToolEvents钩子的unboundRuns列表直接渲染，无需关联到聊天消息的工具调用部分。
+
+子代理支持调度机制：虽然子代理不拥有独立的物理告警槽位，但可通过顶级父代理的告警进行逻辑调度。子代理在其onStart中可通过this.schedule或this.scheduleEvery注册定时回调，框架在父代理的告警触发时根据所有者路径将回调路由回子代理实例。子代理还可使用持久纤维（runFiber）进行长期运行的后台工作，纤维行存储在子代理自己的SQLite中，恢复钩子以子代理为this执行。
+
+### 保留策略与清理机制
+
+系统默认保留子代理运行记录和子代理持久对象实例，不进行自动清理。这是因为运行完成恰好是事后检查最有价值的时刻：页面刷新重放、钻入查看详情、失败运行调试和审计追踪都依赖于保留子代理实例和注册表行。清理操作是显式的：通过clearAgentToolRuns方法，应用代码可选择性删除运行记录。该方法默认同时删除父代理注册表行和对应的子代理持久对象实例，避免仅删除注册表行而留下无法通过重放或钻入访问的孤立子代理。
+
+清理操作支持筛选条件：可按时间窗口（olderThan）删除超过指定时长的运行记录，或按状态（status列表）批量删除已完成、错误、中止或中断的运行。在清理正在运行中的子代理时，系统先发送取消信号终止推理循环，再删除注册表行和子代理实例，避免留下无观察者且无法回收的孤立语言模型调用。应用层负责决定清理策略——包括是否在清除聊天历史时同步清理代理工具运行、基于数量或时间的垃圾回收阈值、以及是否对敏感输入数据进行编辑或删除。
+
+### 统一API设计
+
+方案提供两种统一的API形态，基于同一底层机制：（1）runAgentTool(Cls, {input, ...options})——命令式API，适用于确定性工作流、后台任务、分阶段报告和非聊天编排场景。调用方可以是任何代理方法，不限于聊天工具执行函数。返回包含runId、状态、摘要和错误的结构化结果。（2）agentTool(Cls, options)——工具工厂，为语言模型选择分派的常见场景生成标准的AI SDK工具条目。它封装了runAgentTool，将父工具调用标识parentToolCallId设置为模型返回的toolCallId，将abortSignal从父代理的工具执行上下文传入。
+
+### 客户端事件消费
+
+客户端通过无头（headless）的React钩子useAgentToolEvents消费代理工具事件流。该钩子订阅父代理WebSocket连接，过滤agent-tool-event类型消息，通过三元组（parentToolCallId, runId, sequence）对实时事件和重放事件进行去重，使用applyChunkToParts原语将JSON编码的UIMessageChunk累积重建为UIMessage.parts结构，按parentToolCallId分组运行，按order字段排序兄弟代理。钩子同时暴露unboundRuns列表用于渲染无父工具调用的命令式运行。

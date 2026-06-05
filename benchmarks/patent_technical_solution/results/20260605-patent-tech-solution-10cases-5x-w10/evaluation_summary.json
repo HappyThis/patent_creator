@@ -1,0 +1,372 @@
+[
+  {
+    "case_id": "001",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      88.0,
+      88.0,
+      85.0,
+      88.0,
+      90.0
+    ],
+    "average_score": 87.8,
+    "min_score": 85.0,
+    "max_score": 90.0,
+    "score_stddev": 1.6,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "“接入任意新的本地 agent runtime”“无需修改核心代码”等效果表述偏绝对，实际依赖适配器接口实现和可确认格式规则。",
+      "“无需修改核心代码”表述偏绝对；若新 runtime 出现描述符内联规则无法覆盖的全新解析语义，仍可能需要新增解析器实现。",
+      "可变形实施方式较多体现在文件格式和路径配置上，但对安全权限、只读访问、锁冲突、认证失败等实施约束的失败诊断粒度还可更细。",
+      "复合键去重描述存在轻微不一致：使用 source:session_id 时，不同来源同一 session_id 理应不会冲突，但文本又说不同来源出现同一会话标识时保留最近一条。",
+      "对依赖本地环境的操作缺少操作前复验机制，尤其是继续会话、终止会话等操作只在探测阶段置位，未说明执行前重新验证必要条件并返回诊断失败。"
+    ],
+    "top_missing_key_mechanisms": [
+      "会话解析可信度分级及其向上层展示和交互控制的传递机制。",
+      "单条会话级解析可信度标记：完整解析、部分解析、仅元数据、不可解析，并将该标记进入统一会话视图。",
+      "对关联工作区等统一视图关键字段的处理，尤其是无法确认时的缺省与降级策略。",
+      "未知字段或无法完整解析内容的原始载荷保留机制，以便后续适配和避免信息丢失。",
+      "未知或部分可解析会话的元数据保留、原始载荷保留和诊断信息输出机制。"
+    ]
+  },
+  {
+    "case_id": "002",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      72.0,
+      75.0,
+      75.0,
+      70.0,
+      82.0
+    ],
+    "average_score": 74.8,
+    "min_score": 70.0,
+    "max_score": 82.0,
+    "score_stddev": 4.069397989875161,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "任务状态模型与实际队列表混用。被评估方案声称队列表保存 queued/running/completed/failed/cancelled 等完整生命周期，但快照中的 cf_agents_queues 主要是待处理队列，成功或失败后会 dequeue，不能天然支持完成后查询或历史状态。",
+      "取消与完成之间缺少条件终态更新规则；运行中的任务被取消后，迟到的执行成功或失败结果仍可能覆盖 cancelled/expired/cleaned 状态。",
+      "取消和清理只描述删除队列或协作取消，没有说明已进入会话历史的任务如何避免误删、如何处理已取消状态与后续模型结果之间的竞争。",
+      "取消和清理只覆盖任务表/队列/临时资源，没有说明已写入会话历史时如何避免误删或重复追加。",
+      "后台执行只描述 FIFO 队列或异步触发，没有明确条件领取、租约或 compare-and-set 领取规则，外部任务表状态和队列项之间的一致性保护不足。"
+    ],
+    "top_missing_key_mechanisms": [
+      "任务级输入应用 checkpoint，用于区分输入写入会话前崩溃和写入后崩溃。",
+      "任务记录与会话消息之间的输入应用边界，包括 input_applied、applied_message_id、applied_at 或等价持久标记。",
+      "任务记录中的 input_applied 或 message_application_checkpoint，用于标识外部输入是否已经写入会话消息。",
+      "会话消息写入的条件控制：后台领取成功后才将输入应用到会话，并以任务标识或消息幂等标识防止重复插入同一用户消息。",
+      "会话输入应用的原子或可恢复边界，包括输入写入前、写入后、推理启动前后的状态标记。"
+    ]
+  },
+  {
+    "case_id": "003",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      89.0,
+      89.0,
+      88.0,
+      86.0,
+      91.0
+    ],
+    "average_score": 88.6,
+    "min_score": 86.0,
+    "max_score": 91.0,
+    "score_stddev": 1.624807680927192,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "Fail-soft 与系统提示词冻结虽有工程价值，但父 DO 不可达时继续以空共享上下文运行可能削弱共享资源连续性；方案未区分哪些共享资源访问应失败封闭、哪些可失败软化。",
+      "WorkspaceAgent 作为同级子代理时，Think 子代理如何安全取得同级 WorkspaceAgent 的 RPC 桩描述不够严谨，通常需要经父代理中转或由父代理授予能力。",
+      "会话删除后的进行中写入、TTL回收和父级故障降级描述存在依据不足或与子代理删除语义不完全一致的风险。",
+      "共享工作区文件和外部工具连接的代理接口只作概括性说明，未像共享上下文/搜索那样展开文件读写、工具调用、凭据使用时的授权校验、审计或版本控制机制。",
+      "共享文件、外部工具连接和授权凭据的父级代理链没有给出足够具体的调用门禁、权限绑定、版本同步和冲突处理规则。"
+    ],
+    "top_missing_key_mechanisms": [
+      "共享 WorkspaceAgent 同级访问的能力授予或父代理转发链路。",
+      "共享工作区、共享记忆、工具连接或凭据变更后的统一版本广播/失效通知机制。",
+      "共享工作区、共享记忆和外部工具状态发生变化后的版本号、订阅或广播机制。",
+      "共享工作区、共享记忆和工具状态变更后的版本号或事件广播协议，而不只是会话列表广播。",
+      "共享资源变更广播的完整版本机制，尤其是文件、工具连接、授权状态变化如何通知多个会话和客户端刷新。"
+    ]
+  },
+  {
+    "case_id": "004",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      93.0,
+      89.0,
+      89.0,
+      90.0,
+      86.0
+    ],
+    "average_score": 89.4,
+    "min_score": 86.0,
+    "max_score": 93.0,
+    "score_stddev": 2.244994432064365,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "AER 闭合后“不再更新”与后续异步评测完成后回填 eval_summary 存在轻微生命周期矛盾，需要定义闭合后允许评测附着的例外或独立附着表。",
+      "Run Record 字段缺少明确的输入摘要、错误详情、中间产物或异常原因字段，失败运行的复盘粒度略弱。",
+      "mcp_call_log 的按 session_id 聚合机制没有交代必要的数据来源或补字段策略，导致单次执行工具调用归因存在缺口。",
+      "quality_reviews 仅通过 task_id 和时间区间间接匹配多轮执行-审核循环，稳定性弱于直接以 run_id 绑定评估结果。",
+      "run_id 通过事件总线广播并由订阅模块以内存缓存维护活跃运行的机制缺少持久化上下文、幂等恢复和跨实例一致性说明，削弱了其作为审计级溯源键的可实施性。"
+    ],
+    "top_missing_key_mechanisms": [
+      "pipeline/webhook/agent 轮询等非 task 触发路径的统一生命周期状态机。",
+      "quality_reviews 或人工审核结果与 execution_run 的直接绑定或冲突消解规则。",
+      "trigger_ref 中输入摘要、触发者、外部调用方等敏感信息的脱敏和保留策略。",
+      "同一 session 多 run 或并发 run 下的 token/cost 精确归属规则。",
+      "多轮执行、重试、取消、超时场景下 run 与 task/session 的一对多或多对一边界规则。"
+    ]
+  },
+  {
+    "case_id": "005",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      88.0,
+      84.0,
+      84.0,
+      92.0,
+      87.0
+    ],
+    "average_score": 87.0,
+    "min_score": 84.0,
+    "max_score": 92.0,
+    "score_stddev": 2.9664793948382653,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "10 秒时间窗口仲裁可实施，但对跨系统时钟偏差、API 延迟、并发双写的边界条件说明不足。",
+      "Issue 正文主要对应任务描述，未定义结构化正文、front matter 或字段块来表达负责人、项目、工时、执行结果、扩展元数据等全量任务字段，外部 agent 对完整任务语义的机器可读性不足。",
+      "任务删除生命周期没有形成明确镜像处理路径，仅说明同步失败不阻断删除，未说明删除任务后关闭 issue、删除 issue 映射或写入删除标记的规则。",
+      "入站同步允许远端文件覆盖标题、描述、状态、优先级等字段，与“应用数据库始终为权威来源”之间的边界还可进一步收紧，例如仅允许有限字段回写或要求冲突裁决。",
+      "冲突解决主要依赖 updated_at 和短阈值防回环，未说明同一字段双向并发修改、未知标签、多状态标签并存、权限/限流恢复后的确定性合并策略。"
+    ],
+    "top_missing_key_mechanisms": [
+      "Issue 载体中的结构化机器可读任务正文或字段编码，尤其是负责人、项目、工时、结果和扩展元数据的映射。",
+      "quality_review 等内部状态到外部目录或元数据的完整映射规则。",
+      "仓库初始化协议，包括目录结构、版本文件、说明文件、首次全量导出和后续增量同步边界。",
+      "仓库文件镜像场景下的稳定路径生成、任务文件结构和 Git 提交版本化机制。",
+      "删除任务时向外部镜像写入删除标记、关闭 Issue、归档标签或其他机器可读失效标识的规则。"
+    ]
+  },
+  {
+    "case_id": "006",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      86.0,
+      88.0,
+      84.0,
+      87.0,
+      84.0
+    ],
+    "average_score": 85.8,
+    "min_score": 84.0,
+    "max_score": 88.0,
+    "score_stddev": 1.6,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "个别内容偏实现选项或项目化策略，例如 xattr、云端同步、快照回滚，对核心可保护机制贡献有限。",
+      "以文件相对路径为唯一键时，对重命名、移动、合并冲突改名等场景的信号迁移说明不足，可能导致历史信号丢失或错配。",
+      "动态信号更新缺少明确的并发控制机制，如原子读改写、版本检查、文件锁、单写队列或冲突合并规则。批量缓冲减少写入频率，但不能替代并发一致性。",
+      "多源知识合并写入部分与本机运行时信号不共享的设定存在张力，未解释远端 runtime 信号从何而来以及为何可以参与合并。",
+      "对自动整理、合并、重命名等操作的 sidecar 迁移一致性不够完整，删除和归档较清楚，但合并或路径变更时如何迁移、合并信号记录没有展开。"
+    ],
+    "top_missing_key_mechanisms": [
+      "sidecar 原子读改写、锁、版本号或单写队列机制。",
+      "sidecar 存储故障时的降级读取、默认值返回、诊断记录和不阻断 Markdown 主流程的 fail-open 机制。",
+      "sidecar 读写失败时的 fail-open、诊断记录和默认值降级策略。",
+      "信号层与共享层之间的批量接口、缓存失效和并发一致性边界。",
+      "信号层读写失败的诊断、降级默认信号、fail-open 和不阻断共享知识文件读写的机制。"
+    ]
+  },
+  {
+    "case_id": "007",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      82.0,
+      84.0,
+      84.0,
+      88.0,
+      83.0
+    ],
+    "average_score": 84.2,
+    "min_score": 82.0,
+    "max_score": 88.0,
+    "score_stddev": 2.039607805437114,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "cancel-on-disconnect 中“取消当前所有活跃 requestId”的表述偏粗，缺少按 session、connection、turn 归属限定，存在误取消风险。",
+      "pendingExplicitCancellations 时间窗口与 onClose 之间的竞争关系说明不足，显式取消消息已到达但连接未正常关闭、或关闭先于取消帧到达时的处理不完整。",
+      "协议扩展中 CANCEL_INTENT、TURN_SUSPENDED、TURN_RESUMABLE 有可行性，但未充分说明它们与现有 requestId/stream id 的关联关系。",
+      "可变形实施方式较多，但有些像实现清单，专利式必要特征边界可再收敛。",
+      "多标签页 owner/observer 机制较有构思，但权限校验更多停留在策略描述，缺少服务端按连接角色拒绝 cancel 帧的必要校验闭环。"
+    ],
+    "top_missing_key_mechanisms": [
+      "request-lifetime 模式与 durable 模式之间更完整的配置矩阵及优先级规则。",
+      "取消后恢复请求到达时的处理规则，例如返回 aborted 状态、禁止 replay 未完成流或仅 replay 已归档片段。",
+      "取消后的迟到流块、done 帧、error 帧和恢复重播帧的过滤、忽略或归档规则。",
+      "取消帧必须携带并校验目标 turn/requestId 的完整关联规则。",
+      "取消消息必须携带或绑定目标 turn/request id，并说明多 turn 或重连场景下的目标解析规则。"
+    ]
+  },
+  {
+    "case_id": "008",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      96.0,
+      96.0,
+      96.0,
+      94.0,
+      96.0
+    ],
+    "average_score": 95.6,
+    "min_score": 94.0,
+    "max_score": 96.0,
+    "score_stddev": 0.8,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "V1 中对运行中且无法实时重连的子运行标记 interrupted，虽有边界说明，但对后续子运行完成后如何再同步最终状态描述不够充分。",
+      "run_id 的生成规则、重复请求的外部幂等键或与父请求上下文的绑定方式没有展开到同等细度。",
+      "存在少量内部表述不一致或过强表述，例如前文称 getAgentToolChunks 以 runId 读取，重连回放段又写成 getAgentToolChunks(streamId)；“无竞态窗口的精确取消”表述强于常规方案必要证明。",
+      "对技术效果的总结不如机制描述充分，虽然因果关系可从各节推出，但缺少集中说明各技术手段如何分别产生可恢复、可并行、可审计和上下文隔离效果。",
+      "对无直接父工具调用的后台子运行只通过 runAgentTool 和定时回调场景间接覆盖，未明确说明 parentToolCallId 为空时如何归属父会话、如何排序展示和如何回流事件。"
+    ],
+    "top_missing_key_mechanisms": [
+      "running 状态被标记 interrupted 后，若子代理随后完成，父侧注册表是否以及如何再次核对并补写 completed/error/aborted 终态。",
+      "可进一步抽象可变形实施方式，例如事件日志是否由子侧 chunk 存储、父侧事件表或专门流存储承载，以及不同 chat agent 基类适配时的边界。",
+      "后台子运行在 parentToolCallId 不存在时的替代关联键、主会话展示位置和恢复重放排序规则。",
+      "后台子运行在没有 parentToolCallId 时的父会话归属字段、展示锚点和客户端事件分组规则。",
+      "子代理最终摘要或结构化输出的确定性提取规则及失败时的回退边界。"
+    ]
+  },
+  {
+    "case_id": "009",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      88.0,
+      90.0,
+      84.0,
+      90.0,
+      92.0
+    ],
+    "average_score": 88.8,
+    "min_score": 84.0,
+    "max_score": 92.0,
+    "score_stddev": 2.7129319932501073,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "与服务端 CodeMode 协同部分不是本题核心必要机制，对主链路加分有限。",
+      "动态工具描述没有充分处理 provider/source 标识、重复工具名冲突和真实工具名到规范化名的反向映射策略，复杂动态工具集合下保护粒度略弱。",
+      "参数校验被写成可选开关，安全校验深度略弱于高分参考中的强制校验工具来源、工具名、参数形态和执行上下文。",
+      "双向协议主要围绕 tool-call/tool-result 展开，没有充分展开 ready、execute、execution-result、timeout、cleanup 等生命周期消息或状态机。",
+      "受控协议只明确 TOOL_CALL 和 TOOL_RESULT，缺少参考标尺要求的 ready、execute、execution-result、error、timeout、cleanup 等完整生命周期消息或状态。"
+    ],
+    "top_missing_key_mechanisms": [
+      "pending call map 的并发管理、取消、超时清理和迟到 tool-result 丢弃规则。",
+      "postMessage 消息来源、目标窗口或执行实例标识的校验机制。",
+      "ready/execute/execution-result/error/timeout/cleanup 的完整生命周期协议或状态流转。",
+      "ready/execute/tool-call/tool-result/execution-result/error/timeout/cleanup 的完整协议状态机。",
+      "ready、execute、execution-result、error、timeout、cleanup 等完整协议状态机。"
+    ]
+  },
+  {
+    "case_id": "010",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      85.0,
+      88.0,
+      90.0,
+      91.0,
+      89.0
+    ],
+    "average_score": 88.6,
+    "min_score": 85.0,
+    "max_score": 91.0,
+    "score_stddev": 2.0591260281974,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "PDF 处理写得较重，包括解析交叉引用表、信息字典、内容流 BT/ET 和首页光栅化，但没有说明依赖库、失败边界或在 workspace 环境中的最低可实施路径，实施条件略不足。",
+      "PDF 处理机制偏弱，主要是文本提取尝试或降级，缺少将可消费 PDF 作为模型 file/content block 传递的明确机制。",
+      "PDF 处理机制略宽泛，只给出直接 base64 或首页栅格化两种模式，缺少对模型是否支持 PDF 文件块、页范围选择、渲染失败、页级限制和来源说明的更严密运行规则。",
+      "PDF 方案主要采用文本提取，缺少将 PDF 作为模型 file/content block 直接传递或将扫描页渲染为图像块的机制，因此对非文本 PDF 的多模态理解覆盖不足。",
+      "PDF 路径提出直接传 PDF 或转前若干页图片，但页数选择、转换失败、文本型 PDF 与扫描型 PDF 的差异处理较浅。"
+    ],
+    "top_missing_key_mechanisms": [
+      "PDF 作为模型可消费文件时的文件内容块、媒体类型和大小约束转换规则。",
+      "PDF 直接作为模型可消费文件内容块的输出分支，或对扫描型 PDF 的页面图像化/多模态页块生成机制。",
+      "PDF 转换的页范围、页数上限、转换失败和直接 PDF 不支持时的统一降级协议。",
+      "magic bytes 与 MIME/扩展名冲突时的优先级、读取头部大小、文本编码探测和伪装文件处理规则。",
+      "基于文件头的明确格式嗅探规则，例如 PNG/JPEG/GIF/WebP/PDF/SVG 的签名识别优先级。"
+    ]
+  }
+]

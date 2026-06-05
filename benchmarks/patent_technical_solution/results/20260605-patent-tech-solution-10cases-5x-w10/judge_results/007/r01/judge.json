@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 17,
+    "technical_depth": 19,
+    "mechanism_coherence": 12,
+    "technical_effect": 8,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住了客户端断开、本地清理与服务端持续运行的生命周期不一致问题，并保留了用户显式停止通道。",
+    "提出了可配置断开策略、宽限期、多标签页观察者计数、恢复握手和工具调用宽限等较完整的组合机制。",
+    "与 AbortRegistry、TurnQueue、ResumableStream 等快照中的真实对象建立了较清晰的集成关系，整体达到可实施的交底书粒度。",
+    "对流式恢复和多观察者边界有较具体的流程描述，不只是停留在“刷新后继续”或“增加停止按钮”。"
+  ],
+  "weaknesses": [
+    "方案重点放在 WebSocket onClose 后的服务端策略，未充分覆盖 reader.cancel、本地 reader/监听器/promise 清理与服务端 turn 生命周期解耦的客户端侧状态机。",
+    "缺少明确的活动服务端 turn 标识在客户端 transport 中如何保存、切换和用于显式取消的机制；stableChatId 只能标识会话或观察对象，不能替代 turn/request id。",
+    "显式取消后的迟到 chunk、完成帧或错误帧过滤/归档机制基本缺失，无法充分避免已取消 turn 污染当前 UI。",
+    "默认 cancel_on_unmount=true、网络断开宽限期超时后取消，与 durable agent chat 的默认可恢复倾向存在张力，可能在页面切换或组件卸载时仍误杀长任务。",
+    "部分断开原因识别依赖 beforeunload 发送前置消息、最后一帧消息类型或 CloseEvent 语义，可靠性和边界条件说明不足。"
+  ],
+  "missing_key_mechanisms": [
+    "客户端 transport 维护 active server turn/request id，并将本地 stream、reader、resume 状态和 stop 操作绑定到该 id。",
+    "本地 reader.cancel、组件卸载、页面切换时只释放本地资源而不发送服务端取消的默认 durable 清理流程。",
+    "显式取消消息必须携带目标 turn/request id，并说明取消后本地如何记录 cancelled id。",
+    "取消后的迟到流块、done 帧、error 帧和恢复重播帧的过滤、忽略或归档规则。",
+    "多个 turn 或连续 submit 场景下，stableChatId、requestId、streamId 之间的关联和误取消防护。"
+  ],
+  "unsupported_claims": [
+    "“stableChatId”作为 AIChatAgent 核心断开/恢复标识在材料中未被确认；快照中可确认的是请求 id、stream activeRequestId 和部分示例 chatId。",
+    "“CF_AGENT_CHAT_DISCONNECT”以及 reason=unload/unmount、remaining_tabs 字段不是现有协议中已确认的消息类型或字段；作为新增机制可以成立，但不能表述为已有链路。",
+    "“TurnQueue 中当前 turn 的执行阶段（tool_call 状态）”缺少材料依据；现有 TurnQueue 主要暴露 generation、activeRequestId、queuedCount 等队列状态。",
+    "“服务端维护每个 chatId 的 ConnectionTracker/activeCount”不是快照中确认的已有 AIChatAgent 结构，应视为新增组件。"
+  ],
+  "score_rationale": "该方案方向正确，技术问题抓得准，提出的断开策略引擎、显式取消、宽限期、恢复兼容和多标签页计数具备较强机制密度，明显高于普通功能清单。与参考路径相比，它覆盖了可配置策略、恢复、工具 continuation 和多观察者边界，但没有把客户端本地清理状态机、active turn/request id 绑定和迟到消息过滤讲完整；同时默认 unmount 取消与 durable 默认语义不够一致，并有若干把未确认结构写得像既有事实的表述。因此按 rubric 属于 75-85 档的高端，但受“没有活动 turn 标识通常不高于 82”和“缺少迟到消息处理通常不高于 85”的上限约束，给 82 分。"
+}

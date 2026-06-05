@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "result_id": "20260605-patent-tech-solution-10cases-5x-w10",
+  "source_run_id": "20260605-patent-tech-solution-10cases-5x-w10",
+  "source_run_dir": "runs/20260605-patent-tech-solution-10cases-5x-w10",
+  "published_at": "2026-06-05T11:36:28+08:00",
+  "benchmark_git": {
+    "commit": "82c2c5a273ad9231c952dbb0e9ed3888d7e85079",
+    "dirty": true
+  },
+  "metadata": {
+    "subject_model": "deepseek-v4-pro",
+    "judge_model": "codex",
+    "provider": "deepseek",
+    "notes": "Full patent technical solution benchmark after benchmark redesign; 10 cases x 5 repeats, workers=10, judge enabled; 50/50 scored, artifact_success=50/50, round_failed=0, judge_failed=0, avg=87.06, min=70, max=96."
+  },
+  "model_config": {
+    "source": "source_run_manifest",
+    "schema_version": 1,
+    "subject": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "base_url": "https://api.deepseek.com/v1",
+      "thinking": "enabled",
+      "reasoning_effort": "high",
+      "max_completion_tokens": 8192,
+      "api_key_configured": true,
+      "api_key_env_var": "OPENAI_COMPAT_API_KEY"
+    },
+    "runtime": {
+      "llm_timeout": 45.0,
+      "llm_max_retries": 2
+    },
+    "context_compression": {
+      "max_tokens": 128000,
+      "compress_threshold_ratio": 0.8,
+      "reserved_output_tokens": 8000,
+      "token_char_coefficient": 0.5,
+      "compression_timeout": 180.0
+    }
+  },
+  "run_config": {
+    "source": "source_run_manifest",
+    "cases": [
+      "001",
+      "002",
+      "003",
+      "004",
+      "005",
+      "006",
+      "007",
+      "008",
+      "009",
+      "010"
+    ],
+    "repeats": 5,
+    "workers": 10,
+    "round_timeout_seconds": 1800,
+    "judge_timeout_seconds": 1800,
+    "skip_judge": false
+  },
+  "case_ids": [
+    "001",
+    "002",
+    "003",
+    "004",
+    "005",
+    "006",
+    "007",
+    "008",
+    "009",
+    "010"
+  ],
+  "runs": 50,
+  "scored_runs": 50,
+  "artifact_success_runs": 50,
+  "included_files": [
+    "manifest.json",
+    "evaluation_summary.json",
+    "evaluation_report.md",
+    "case_results.jsonl",
+    "artifacts/",
+    "judge_results/"
+  ],
+  "excluded_from_publish": [
+    "prepared_environment/project_snapshot/",
+    "subject/session_events.jsonl",
+    "judge/codex_judge_events.jsonl",
+    "run_case_stdout.txt",
+    "run_case_stderr.txt",
+    "subject/disclosure.json",
+    "absolute local paths",
+    "provider API keys"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 84,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 18,
+    "technical_depth": 19,
+    "mechanism_coherence": 12,
+    "technical_effect": 8,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住本地 reader/组件/连接生命周期与服务端 durable turn 生命周期不应默认绑定的问题，也保留了用户显式停止必须能传达服务端的目标。",
+    "核心构思较完整：取消意图区分、显式取消通道、可配置策略、本地清理与远程取消解耦、恢复流、多标签页观察和资源超时都有覆盖。",
+    "方案给出了较具体的协议消息、策略字段、客户端 transport 流程、服务端 AbortRegistry 集成和异常竞态处理，达到可实施草案粒度。",
+    "与参考路径不同处主要是用 AbortController.reason 做分类入口；该路径本身合理，可视为等价机制的一部分。"
+  ],
+  "weaknesses": [
+    "对迟到 chunk、done 帧、error 帧在显式取消后的过滤或归档机制描述不足，只说恢复返回 none，未说明当前 UI/activeRequestIds/取消 tombstone 如何避免污染。",
+    "活动 turn 标识的生命周期没有作为必要特征单独展开，尤其是本地清理后如何保留 requestId、恢复时如何关联、显式取消如何避免误取消其他 turn。",
+    "恢复协议部分有多处与项目快照不一致的细节，导致该段技术机理的可信度下降。",
+    "多标签页 owner/observer 机制较有构思，但权限校验更多停留在策略描述，缺少服务端按连接角色拒绝 cancel 帧的必要校验闭环。"
+  ],
+  "missing_key_mechanisms": [
+    "显式取消后的迟到消息处理：应按 turn/request id 过滤、忽略或归档后续 chunk、完成帧和错误帧，避免已经停止的输出回写 UI。",
+    "活动 turn id 的持久跟踪机制：客户端本地流清理后仍需保留可取消/可恢复的服务端 request id，并明确何时清除。",
+    "多观察者取消权限的服务端强制校验：只读或 observer 连接发送 cancel 帧时应被拒绝或降级为本地清理，而不能仅依赖客户端策略。",
+    "若采用序列号增量恢复，需要定义客户端 last-seen sequence 的记录、RESUME_REQUEST 字段和服务端按序号重放规则，并与现有 replayComplete/ACK 方向保持一致。",
+    "工具 continuation 的取消登记与迟到输出处理还需更明确地绑定到 continuation request id。"
+  ],
+  "unsupported_claims": [
+    "称 CF_AGENT_STREAM_RESUME_REQUEST 携带上次收到的最大 chunk 序列号；项目快照中的该消息类型没有该字段，服务端 replayChunks 当前按 stream_id 全量重放。",
+    "称服务端重放后发送 CF_AGENT_STREAM_RESUME_ACK；项目快照中 RESUME_ACK 是客户端发给服务端的确认帧，服务端实际用 replay/replayComplete 的 USE_CHAT_RESPONSE 帧表示重放状态。",
+    "称 shouldConnectionBeReadonly 标记的只读连接不能发送消息包括取消消息；快照中的基础 readonly 逻辑主要阻止状态更新消息，未证明会阻止 AI chat cancel 帧。",
+    "将 AbortRegistry 标记 disconnected 状态描述得接近现有行为；快照中的 AbortRegistry 仅按 id 管理 AbortController，cancel 会直接 abort，没有 disconnected 状态。",
+    "称快速重连可直接接管原请求的 AbortController 和 ReadableStream，材料中没有该既有能力依据。"
+  ],
+  "score_rationale": "该方案达到高分段的主要原因是技术问题定位准确，并提出了生命周期解耦、显式取消、策略配置、恢复兼容和多观察者边界的组合机制，整体技术深度明显高于简单“刷新不取消”或“加停止按钮”。但它没有完整补齐参考方案强调的迟到消息过滤和活动 turn id 生命周期，且恢复协议、只读连接能力等若干项目事实与快照不符。按 rubric，缺少迟到消息边界通常不宜超过 85 分；本方案虽有等价深度构思，但因上述机制缺口和 unsupported claims，校准为 84 分。"
+}

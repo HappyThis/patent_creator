@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 84,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 17,
+    "technical_depth": 20,
+    "mechanism_coherence": 13,
+    "technical_effect": 8,
+    "feasibility": 7,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住浏览器本地断开与服务端 durable turn 生命周期不应默认绑定的问题。",
+    "提出了显式取消意图、可配置断开策略、服务端策略判定、恢复流协同和多标签页观察边界，整体方向与本题目标高度一致。",
+    "能围绕 AbortRegistry、ResumableStream、ContinuationState、TurnQueue 等环境中真实存在的对象构造可实施方案。",
+    "对 persist、断连取消、仅显式停止取消三类策略给出较清楚的行为矩阵。"
+  ],
+  "weaknesses": [
+    "活动 turn 标识的维护不够明确，尤其是客户端如何持有服务端 requestId、如何把 stop 精确关联到对应 turn，未作为核心机制展开。",
+    "没有处理显式取消后的迟到 chunk、done 帧、错误帧或 replay 帧如何过滤，容易污染当前 UI 或误恢复已取消 turn。",
+    "cancel-on-disconnect 中“取消当前所有活跃 requestId”的表述偏粗，缺少按 session、connection、turn 归属限定，存在误取消风险。",
+    "pendingExplicitCancellations 时间窗口与 onClose 之间的竞争关系说明不足，显式取消消息已到达但连接未正常关闭、或关闭先于取消帧到达时的处理不完整。",
+    "恢复阶段用 AbortRegistry 状态判断 turn 是否已取消的实现依据不足，AbortRegistry 更像控制器注册表，不天然提供持久取消状态。"
+  ],
+  "missing_key_mechanisms": [
+    "客户端 active turn/requestId 跟踪机制，以及本地 reader cancel、组件卸载、页面切换时如何保留该标识但只清理本地资源。",
+    "取消帧必须携带并校验目标 turn/requestId 的完整关联规则。",
+    "显式取消后的迟到消息过滤、归档或 UI 丢弃规则。",
+    "取消状态的持久化或可查询标记，用于 resume 时区分无流、已完成、已取消和仍在运行。",
+    "工具 continuation、后台继续流与普通 chat turn 在取消和恢复上的统一标识登记规则。"
+  ],
+  "unsupported_claims": [
+    "“resume 流程中通过 AbortRegistry 状态判断当前 turn 是否已被取消”缺少环境依据，现有 AbortRegistry 不等同于持久取消状态表。",
+    "“cancel-on-disconnect 时标记 ResumableStream 为 cancelled 状态并清理缓冲区”更像新增设计，材料中未确认 ResumableStream 现有 cancelled 状态。",
+    "“通过 RESUME_REQUEST 注册到 connectionObserver”属于新增观察者机制，不能作为现有广播/恢复机制的已存在事实。"
+  ],
+  "score_rationale": "该方案达到高质量答案的大部分深度：问题定位准确，核心构思是生命周期解耦加显式取消和配置策略，并能与恢复流、多标签页和工具继续执行建立协同，明显不是单纯停止按钮或断线重连描述。但它缺少参考标尺中很关键的 active turn 标识闭环和迟到消息处理，对取消状态查询也有实现依据不足的问题。按 rubric，“没有恢复、迟到消息或 continuation 边界处理”通常不高于 85；本方案有恢复和 continuation 描述，但迟到消息缺失且 active id 机制不够完整，因此给 84 分。"
+}

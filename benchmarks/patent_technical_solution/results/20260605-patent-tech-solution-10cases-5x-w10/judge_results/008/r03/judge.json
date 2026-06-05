@@ -1,0 +1,38 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住了子 agent 不能退化为普通函数调用，而应作为可观察、可恢复、可保留、可访问控制的独立运行实体。",
+    "核心构思完整，覆盖父侧 runAgentTool/agentTool 入口、父侧注册表、子侧 runId 到 requestId/streamId 映射、独立子上下文、事件回流、replay 去重、drill-in 门禁、取消和清理。",
+    "技术手段粒度很深，具体说明了状态字段、事件种类、序列号去重、并行 fan-out、幂等启动、V1 interrupted 语义、后台 unbound runs 和清理运行中任务的取消顺序。",
+    "要素协同清楚，能说明父 agent、子 agent、RPC/ReadableStream、SQLite 注册表、客户端 hook 和访问网守如何共同支撑主会话中的子运行展示与恢复。",
+    "方案与隐藏参考路径高度等价，且在取消传播、父崩溃恢复、后台运行和 drill-in 并发安全方面有超出基础答案的细化。"
+  ],
+  "weaknesses": [
+    "部分内容偏框架 RFC/实现说明，方法名、表名和生命周期钩子过多，作为交底书技术方案时可再抽象为更稳定的必要技术特征。",
+    "对技术效果的总结不如机制描述充分，虽然因果关系可从各节推出，但缺少集中说明各技术手段如何分别产生可恢复、可并行、可审计和上下文隔离效果。",
+    "对父模型接收子 agent 结果的返回契约、结构化输出校验和非 completed 状态如何反馈给父模型有提及但不够完整。",
+    "少量表述把阶段性设计目标或 V1 后续能力写得像已经普遍支持，可能带来事实边界不清。"
+  ],
+  "missing_key_mechanisms": [
+    "结构化 outputSchema 校验失败时如何将子运行标记为 error，并如何向父 LLM 返回结构化失败结果。",
+    "成本计量、审计或生命周期 hook 只间接涉及，未形成明确可选实施方式。",
+    "对未来 live-tail reattach 的可变形方案仅以 V1 不支持方式描述，缺少更清楚的扩展条件。"
+  ],
+  "unsupported_claims": [
+    "将 Think 或 AIChatAgent 并列描述为现成适用基类容易超出材料边界；项目材料显示 Think 是已验证的首期实现，AIChatAgent 支持属于后续 adapter 目标。",
+    "“每个子代理拥有独立的语言模型、系统提示词、工具集”作为普遍既有属性表述过强；材料支持子代理拥有独立上下文和存储，模型/提示词/工具集是否独立取决于具体子类配置。",
+    "“通过 set-name fetch 触发初始化并创建表结构”属于很具体的实现路径，材料中与 facet 初始化有关但该表述不是本题必要事实，作为确定既有机制支撑略显过实。",
+    "“父代理 onStart 先把所有 running 行标记为 interrupted 再查询子代理状态”的顺序表述不够严谨；材料更强调对 starting/running 行做协调检查，并按子侧实际状态更新或标记 interrupted。"
+  ],
+  "score_rationale": "该方案达到本题高质量标尺：它不是泛泛描述主 agent 调用子 agent 后汇总，而是把子 agent 抽象为带稳定 runId、父侧保留注册表、子侧独立流和映射、父连接事件回流、replay 去重、访问门禁、取消、清理、幂等和后台运行的可恢复运行实体。与参考方案的核心机制基本等价，且机制密度更接近项目 RFC。扣分主要来自表达偏实现文档、少量阶段性能力被写成既有普遍事实，以及技术效果和父 LLM 返回契约仍可更集中、更专利化。不存在触发总分上限的缺口：方案有明确核心构思，有父侧注册表，有恢复与 replay 去重，有取消/失败/清理策略，也有访问门禁。"
+}

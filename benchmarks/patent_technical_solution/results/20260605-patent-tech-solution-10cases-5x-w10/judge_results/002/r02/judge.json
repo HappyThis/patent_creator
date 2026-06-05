@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 75,
+  "dimension_scores": {
+    "technical_problem": 12,
+    "core_concept": 16,
+    "technical_depth": 18,
+    "mechanism_coherence": 12,
+    "technical_effect": 7,
+    "feasibility": 6,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "抓住了外部程序化提交需要快速确认、异步执行、幂等去重、状态查询、取消和恢复的一组核心目标。",
+    "提出了持久化任务对象、任务状态机、幂等键映射、原子写入和终态清理等可实施机制。",
+    "利用项目快照中确有依据的 onRequest、SQLite、cf_agents_queues、runFiber、stash、cf_agents_runs、onFiberRecovered、keepAlive/alarm 等能力构建方案，整体工程可落地。",
+    "取消、查询、清理和恢复流程之间有基本生命周期协同，表达也较接近专利交底书的技术方案粒度。"
+  ],
+  "weaknesses": [
+    "最关键缺口是没有区分“任务已接收”和“用户输入已应用到会话历史”的持久边界，无法可靠判断崩溃发生在写入会话前还是写入会话后。",
+    "虽然提出幂等任务记录，但没有说明任务输入写入会话时如何记录 message_id、input_applied、applied_at 等 checkpoint，因此不能充分支撑“避免重复写入用户输入”。",
+    "后台执行只描述 FIFO 队列或异步触发，没有明确条件领取、租约或 compare-and-set 领取规则，外部任务表状态和队列项之间的一致性保护不足。",
+    "没有条件终态更新机制，迟到的完成、失败或恢复结果可能覆盖已经取消或清理的任务状态。",
+    "恢复逻辑主要依赖 runFiber stash，缺少按任务阶段分支处理：未应用输入可重排队、已应用输入但无安全恢复证据应失败或诊断、已完成但状态未更新应修正终态。",
+    "没有明确复用 AIChatAgent 既有 saveMessages/continueLastTurn/turn queue 等会话执行语义，容易形成外部任务通道与交互式对话通道不一致的问题。"
+  ],
+  "missing_key_mechanisms": [
+    "任务记录与会话消息之间的输入应用边界，包括 input_applied、applied_message_id、applied_at 或等价持久标记。",
+    "后台执行器对待执行任务的条件领取或租约机制，防止多执行者重复处理同一任务。",
+    "完成、失败、取消、恢复修正时的条件终态更新，防止迟到结果覆盖取消或清理状态。",
+    "恢复判定按阶段分支：未写入会话、已写入会话但未完成、已完成但任务状态未更新等。",
+    "外部任务与既有 chat turn queue/saveMessages/continueLastTurn 的衔接机制，确保程序化输入与在线对话共享同一会话序列化规则。",
+    "幂等键的作用域和请求一致性校验，例如调用方标识加幂等键并绑定 payload hash，避免不同请求误复用同一 key。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案明显优于普通“返回 taskId 后后台执行”的浅层方案，具备持久任务、幂等映射、状态机、取消、清理和 runFiber 恢复等具体技术手段；其中多数框架能力在项目快照中有依据。主要扣分来自本 case 的高价值机制缺失：没有任务接收与会话输入应用的持久边界，也没有条件领取和条件终态更新。按照 rubric，“没有区分任务接收与会话输入应用，总分通常不高于 75 分”，本方案虽机制较完整但仍无法可靠解决重复写入用户输入和写入后崩溃恢复，因此取该上限附近的 75 分；不存在可等价替代该输入应用 checkpoint 的其他机制。"
+}

@@ -1,0 +1,39 @@
+{
+  "status": "scored",
+  "total_score": 83,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 17,
+    "technical_depth": 20,
+    "mechanism_coherence": 12,
+    "technical_effect": 8,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住了客户端本地清理与服务端 durable turn 取消不能简单耦合的核心问题。",
+    "提出了隐式断连与显式取消的分类机制，并给出可配置的信号映射策略，符合本题的主要改进方向。",
+    "能覆盖流式恢复、工具 continuation、多标签页观察等关键兼容场景，整体深度明显高于普通停止按钮或断线重连方案。",
+    "对 AbortRegistry 取消原因、客户端 CancelPolicy、协议字段和挂起状态等给出了一定可实施粒度。"
+  ],
+  "weaknesses": [
+    "活动 turn/request 标识的客户端跟踪机制不够明确，没有清楚说明显式取消如何稳定绑定到当前服务端 turn，如何避免取消错误任务。",
+    "显式取消后的迟到 chunk、完成帧、错误帧过滤或归档机制基本缺失，只说明了取消消息发送，没有闭合 UI 状态污染问题。",
+    "部分服务端机制偏模块堆叠，例如 CLIENT_DISCONNECT、TIMEOUT、挂起状态与继续执行、缓冲、恢复之间的状态转换边界还不够严密。",
+    "协议扩展中 CANCEL_INTENT、TURN_SUSPENDED、TURN_RESUMABLE 有可行性，但未充分说明它们与现有 requestId/stream id 的关联关系。"
+  ],
+  "missing_key_mechanisms": [
+    "客户端 transport 维护当前活动 turn/request 标识及其本地 reader、listener、promise 清理资源的机制。",
+    "取消消息必须携带或绑定目标 turn/request id，并说明多 turn 或重连场景下的目标解析规则。",
+    "显式取消后对同一 turn 的迟到 chunk、done 帧、错误帧的过滤、归档或状态隔离机制。",
+    "request-lifetime 模式与 durable 模式之间更完整的配置矩阵及优先级规则。",
+    "服务端感知连接关闭后如何区分观察者断开、所有观察者断开、长时失联挂起和真正取消的状态机。"
+  ],
+  "unsupported_claims": [
+    "“服务端不感知断连事件”表述过强；项目中的 WebSocket/Durable Object 通常可以感知连接关闭，只是不应默认将其解释为取消。",
+    "“ResumableStream.replayChunks()”作为具体方法名在已核对材料中未确认，快照确认存在 ResumableStream 和恢复握手，但该方法名可能是拟新增或推断。",
+    "“仅当所有观察标签页均断开且超过阈值时间后服务端才考虑挂起”属于新增方案设想可以成立，但不能当作项目已有行为。",
+    "“AbortRegistry 已有 getSignal、cancel、remove、linkExternal、destroyAll 方法基础上增加取消原因标记能力”中 destroyAll 等基础方法存在，但 NONE/USER_INTENT/CLIENT_DISCONNECT/TIMEOUT 枚举和持久取消原因状态属于新增设计，不应表述成已有能力。"
+  ],
+  "score_rationale": "该方案达到高质量方向：明确解耦本地清理与服务端取消，并围绕分类器、可配置策略、显式取消通道、恢复、多标签页和 continuation 给出较完整机制，因此高于 75-85 档的普通可用方案下限。扣分主要来自参考深度标尺中的两个关键缺口：没有把活动 turn/request 标识作为清晰必要特征展开，显式取消后的迟到消息处理也缺失；按 rubric，“没有活动 turn 标识”与“没有恢复、迟到消息或 continuation 边界处理”的上限倾向不宜给到 85 分以上。方案与参考路径不完全相同，新增取消原因标记和挂起协议可视为等价方向的扩展，但其机制闭环还不足以进入 90 分强答案。"
+}

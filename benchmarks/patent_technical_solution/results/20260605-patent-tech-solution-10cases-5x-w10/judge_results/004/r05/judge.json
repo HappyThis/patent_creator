@@ -1,0 +1,40 @@
+{
+  "status": "scored",
+  "total_score": 86,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 19,
+    "technical_depth": 22,
+    "mechanism_coherence": 13,
+    "technical_effect": 9,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住一次 agent 执行记录分散、难以溯源、评估和复用的问题，不是把需求简化为普通日志保存。",
+    "提出了统一 AER 聚合根，并覆盖任务、会话、agent、触发来源、执行状态、产物、成本、工具调用、评测和审计标签等关键字段。",
+    "生命周期机制较完整，说明在启动、运行中状态变化、token/tool 增量聚合、终止闭合和评估回填等阶段自动维护记录。",
+    "工具化访问设计充分，包含列表、详情、按 agent 聚合、trace 查询、SSE 事件、导出和 webhook，符合外部工具复用和排行榜需求。",
+    "明确强调 AER 不替代现有表，而是现有执行体系之上的结构化聚合层，符合复用现有任务、agent、会话、事件和工具入口的约束。"
+  ],
+  "weaknesses": [
+    "部分具体既有结构判断不够严谨，把可新增的关联能力写成了现有可直接对齐的事实。",
+    "AER 闭合后“不再更新”与后续异步评测完成后回填 eval_summary 存在轻微生命周期矛盾，需要定义闭合后允许评测附着的例外或独立附着表。",
+    "mcp_call_log 的按 session_id 聚合机制没有交代必要的数据来源或补字段策略，导致单次执行工具调用归因存在缺口。",
+    "评测附着机制写得偏理想化，现有 eval_runs 更偏 agent 维度，方案虽提出 execution_id 外键，但对如何从一次运行输出生成对应评测输入、如何选择黄金集的规则说明不足。",
+    "表达中接口和字段清单较多，专利式的必要技术特征和协同机理已具备，但仍有少量工程任务清单化倾向。"
+  ],
+  "missing_key_mechanisms": [
+    "工具调用日志与单次 AER 的稳定归因机制，例如为 mcp_call_log 增加 execution_id/session_id，或通过事件上下文注入运行标识。",
+    "评测调度器选择 eval_golden_sets 的具体匹配规则，以及评测输入如何从 AER 的 outcome、trace 或 task 上下文构造。",
+    "闭合后评测附着与不可变执行档案之间的状态模型，例如主记录不可变、评测附着作为子记录追加。",
+    "trigger_ref 中输入摘要、触发者、外部调用方等敏感信息的脱敏和保留策略。"
+  ],
+  "unsupported_claims": [
+    "mcp_call_log 可按 agent_name + session_id 聚合：项目快照中的 mcp_call_log 表包含 agent_name、mcp_server、tool_name、success、duration_ms 等字段，但未见 session_id 字段。",
+    "eval_runs 通过 agent_name + session_id + task_id 组合键与 AER 关联：项目快照中的 eval_runs 主要包含 agent_name、eval_layer、score、passed、detail、golden_dataset_id，未见 session_id 或 task_id。",
+    "eval_runs 表“迁移038”已有可直接支撑该组合关联的结构：迁移038确有 eval_runs 和 eval_traces，但 task_id 位于 eval_traces，不在 eval_runs。",
+    "spawn API 中 agent 进程成功启动后已有可直接作为 AER 创建挂载的持久化 spawn_history 流程：快照中 /api/spawn 当前主要调用 gateway 并写 audit，GET 仍有日志回读逻辑，recordSpawnStart/Finish 存在但未见该 route 使用。"
+  ],
+  "score_rationale": "该方案与参考路径基本等价，覆盖统一运行对象、来源溯源、生命周期桥接、评估附着、事件通知、工具化访问、统计排行和向后兼容，技术问题和核心构思都很到位，达到高分档。未给 90 分以上的原因是若干关键归因点依赖项目快照未确认的既有字段或能力，尤其是 mcp_call_log 缺少 session_id、eval_runs 缺少 session_id/task_id，导致工具调用追踪和单次运行评估附着需要额外补充机制才能完全成立。这些问题不推翻 AER 聚合层的核心构思，因为方案也提出了新增 AER 表和 execution_id 外键等改造方向，但它们降低了现有体系复用边界、协同机理和可实施性的确定性。"
+}

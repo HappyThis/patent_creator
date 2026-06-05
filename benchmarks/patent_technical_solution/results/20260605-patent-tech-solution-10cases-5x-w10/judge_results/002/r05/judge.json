@@ -1,0 +1,42 @@
+{
+  "status": "scored",
+  "total_score": 82,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 17,
+    "technical_depth": 19,
+    "mechanism_coherence": 12,
+    "technical_effect": 8,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住快速确认、幂等重试、后台执行、状态查询、取消清理和中断恢复的一组核心问题。",
+    "提出持久任务记录、幂等键、生命周期状态机、异步执行层、查询/取消/清理接口和唤醒恢复检查，整体方向与需求匹配。",
+    "幂等键加数据库唯一约束的两层去重机制较具体，能避免重复创建任务并返回已有任务状态。",
+    "能合理复用快照中的 Durable Object、SQLite、runFiber、stash、onFiberRecovered、keepAlive 和告警恢复等已有机制。",
+    "取消场景区分未执行、排队中、执行中和终态任务，具备基本的状态化控制思路。"
+  ],
+  "weaknesses": [
+    "最关键的任务记录与会话输入应用边界没有被明确建模；没有在任务表中记录 input_applied、applied_at、message_ids 或会话位置等 checkpoint。",
+    "缺少后台执行器的条件领取机制；没有说明如何通过状态版本、WHERE status='queued'、lease 或 CAS 防止多个执行者同时处理同一任务。",
+    "缺少条件终态更新；未说明完成、失败、取消、清理之间如何防止迟到完成覆盖已取消或已清理状态。",
+    "恢复逻辑存在过度乐观判断，例如纤程行不存在但任务仍为执行中即修正为已完成，不能可靠推出任务已完成。",
+    "清理机制未充分说明任务记录、推理结果和已进入会话历史之间的删除边界。"
+  ],
+  "missing_key_mechanisms": [
+    "任务级输入应用 checkpoint，用于区分输入写入会话前崩溃和写入后崩溃。",
+    "后台领取的条件更新或租约规则。",
+    "完成、失败、取消、清理的条件终态写入规则。",
+    "基于输入应用状态、执行证据、任务年龄和错误信息的恢复分支。",
+    "取消和清理时对已进入会话历史的保护规则。"
+  ],
+  "unsupported_claims": [
+    "消息写入采用 INSERT OR IGNORE 语义无依据；快照中的 AIChatAgent persistMessages 使用 insert ... on conflict(id) do update。",
+    "称已有队列原语为 enqueue 无依据；快照体现的是 queue() 和 cf_agents_queues。",
+    "称 cf_agents_runs 行不存在即可把执行中任务修正为已完成缺乏依据。",
+    "称存在通用的每 Agent 最大并发任务数静态选项未在材料中确认。",
+    "任务进度报告、任务查询端点、取消 RPC、清理接口等若表述为既有能力，材料中未确认；作为新增机制则可以成立。"
+  ],
+  "score_rationale": "方案整体达到较强工程可实施深度，明显高于普通异步队列方案；其持久接收、幂等去重、状态机和 durable fiber 恢复组合可解决大部分外部提交可靠性问题。但本题高分标尺强调输入应用边界、条件领取、条件终态更新和恢复判定。evaluated_artifact 对输入写入只用消息唯一标识和数据库去重概括，缺少任务级 checkpoint；对领取和终态也缺少条件更新保护，迟到结果可能覆盖取消或清理。按 rubric 中“没有条件终态更新通常不高于 82 分”的校准，给 82 分；不再上探到 90+，因为缺失的正是本 case 区分优秀方案的关键机制。"
+}

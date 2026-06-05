@@ -1,0 +1,38 @@
+{
+  "status": "scored",
+  "total_score": 88,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 18,
+    "technical_depth": 20,
+    "mechanism_coherence": 13,
+    "technical_effect": 9,
+    "feasibility": 8,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 中混入高频动态信号会造成版本噪声、合并冲突，同时动态信号又不能丢弃的核心矛盾。",
+    "提出了较完整的分层方案：稳定知识内容保留在 Markdown，访问次数、importance、recency、maturity 等信号进入本机 sidecar，并以相对路径关联。",
+    "读取融合机制写得较深入，能说明检索排序、manifest 构建、归档阈值判断如何使用融合后的视图，并给出缺省信号值和时间衰减。",
+    "写入剥离路径较清楚，区分检索命中批量刷新和策展更新；清理一致性也覆盖了删除、归档和周期性对账。",
+    "包含旧 frontmatter 动态字段迁移方案和 JSON/SQLite 等可变形实施方式，达到较好的交底书可实施粒度。"
+  ],
+  "weaknesses": [
+    "缺少 sidecar 原子更新、版本检查、单写队列或文件锁等并发一致性机制；在高频检索命中和策展更新并发时，读改写覆盖风险没有被解决。",
+    "缺少 sidecar 读写失败隔离机制；没有说明信号层损坏、不可读或写入失败时如何 fail-open，如何保留 Markdown 主流程可用。",
+    "以文件相对路径为唯一键时，对重命名、移动、合并冲突改名等场景的信号迁移说明不足，可能导致历史信号丢失或错配。",
+    "读取融合主要描述逐条查询，缺少批量读取 sidecar 信号、缓存失效和索引重建时的一致视图边界。",
+    "部分表述把新增信号存储与现有派生制品排除机制衔接得过于确定，未明确需要扩展 isDerivedArtifact/isExcludedFromSync 的匹配规则或把 signal-store 放在不会被 context-tree 扫描的位置。"
+  ],
+  "missing_key_mechanisms": [
+    "sidecar 原子读改写、锁、版本号或单写队列机制。",
+    "sidecar 读写失败时的 fail-open、诊断记录和默认值降级策略。",
+    "文件重命名、移动、合并冲突改名时的路径键迁移或稳定知识 ID 备选机制。",
+    "批量读取 sidecar 信号并与索引快照形成一致融合视图的机制。"
+  ],
+  "unsupported_claims": [
+    "“signal-store.json 或嵌入式信号数据库被标记为派生制品并通过现有 isDerivedArtifact / isExcludedFromSync 机制排除在 snapshot、CoGit push/pull 和 merge 流程之外”表述过于确定；项目中确有这些排除函数，但当前规则只覆盖既有派生路径模式，未直接证明 signal-store 会被现有规则识别。",
+    "“通过 LRU 缓存使融合开销降至亚毫秒级”属于未经材料验证的性能量化声明。"
+  ],
+  "score_rationale": "该方案与参考路径基本同构，覆盖字段分层、sidecar 存储、路径映射、读取融合、写入剥离、批量命中刷新、清理对账和迁移兼容，技术问题和因果效果都比较扎实。因此不适用“没有读取融合”“没有迁移兼容”或“只是功能清单”的分数上限。但它没有解决参考方案强调的原子更新和失败隔离，两者是本题高质量 sidecar 机制的重要必要特征；路径键在重命名/合并场景下的迁移也偏弱。整体属于强于 75-85 档的可实施方案，但未达到 90 分以上所需的完整可靠性机制。"
+}

@@ -1,0 +1,31 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 9,
+    "feasibility": 8,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确把问题定位为子 agent 运行实体的可观察、可恢复、可保留、可取消和可门禁访问，而不是普通工具调用。",
+    "核心构思完整，覆盖父侧运行注册表、稳定 runId、独立子 agent 存储、事件回流、重放去重、幂等、并发、取消、清理和 drill-in。",
+    "事件协议、状态机、父子标识分工、取消传播和清理策略都有较细的技术特征，达到可实施粒度。",
+    "对刷新重连、父进程崩溃、重复请求、延迟取消和孤立运行等异常边界有机制化处理。",
+    "技术效果能从注册表、独立上下文和持久化流式事件自然推出。"
+  ],
+  "weaknesses": [
+    "对无直接父工具调用的后台子运行只通过 runAgentTool 和定时回调场景间接覆盖，未明确说明 parentToolCallId 为空时如何归属父会话、如何排序展示和如何回流事件。",
+    "部分内容偏具体框架设计说明，使用较多内部 API 名称，作为交底书可再抽象为更稳定的必要技术特征。",
+    "V1 中对运行中且无法实时重连的子运行标记 interrupted，虽有边界说明，但对后续子运行完成后如何再同步最终状态描述不够充分。"
+  ],
+  "missing_key_mechanisms": [
+    "后台子运行在没有 parentToolCallId 时的父会话归属字段、展示锚点和客户端事件分组规则。",
+    "running 状态被标记 interrupted 后，若子代理随后完成，父侧注册表是否以及如何再次核对并补写 completed/error/aborted 终态。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案与参考路径达到高度等价深度，并且在若干机制上更细：将子 agent 定义为独立持久化运行实体，使用父侧注册表和子侧 runId/requestId/streamId 映射建立身份与恢复基础，通过统一生命周期事件、序列号去重和持久化 chunk 实现主会话内流式观察与刷新重放，并处理幂等、并发、取消、访问门禁和清理。扣分主要来自后台子运行无父工具调用场景未显式展开，以及 interrupted 后的后续终态同步边界不够完整。不存在触发 rubric 上限的严重缺项，因此总分可超过 90 分。"
+}

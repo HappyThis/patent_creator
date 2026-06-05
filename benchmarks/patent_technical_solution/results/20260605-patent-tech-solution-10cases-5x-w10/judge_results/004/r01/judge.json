@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 93,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 23,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住了缺少单次 agent 执行统一运行抽象导致溯源、成本、评估和外部复用割裂的问题。",
+    "提出了 Execution Run 作为第一类实体，并覆盖触发源、agent、任务、会话、状态、步骤、结果、成本、评估和 workspace 等核心字段。",
+    "包含生命周期桥接、上下文传播、token/tool/quality review 绑定、评估附着、事件通知、REST/MCP 查询和导出，机制密度达到高分档。",
+    "清楚说明了典型任务派发执行中运行记录从创建、运行、结果聚合到评估附着的协同流程。",
+    "能复用现有任务调度、事件总线、SQLite、评估、搜索和 MCP 入口，符合“不割裂为人工日志”的要求。"
+  ],
+  "weaknesses": [
+    "部分实施表述过于贴合项目内部函数和表名，交底书表达略偏工程设计说明，而不是完全抽象的可保护机制。",
+    "“不要求 agent 或网关做额外改造”与后文需要在网关、心跳、token/mcp 写入路径传播 execution_run_id 存在张力。",
+    "quality_reviews 仅通过 task_id 和时间区间间接匹配多轮执行-审核循环，稳定性弱于直接以 run_id 绑定评估结果。",
+    "对异常、重试、多轮执行、同一会话内多次 run 的边界规则说明还可以更严密。"
+  ],
+  "missing_key_mechanisms": [
+    "多轮执行、重试、取消、超时场景下 run 与 task/session 的一对多或多对一边界规则。",
+    "quality_reviews 或人工审核结果与 execution_run 的直接绑定或冲突消解规则。",
+    "运行记录不可变性的具体约束，例如哪些字段只追加事件、哪些字段允许终态更新。"
+  ],
+  "unsupported_claims": [
+    "称记录采集层“不要求 agent 或网关做额外改造”，但方案后续又要求网关调用、心跳处理、token_usage 和 mcp_call_log 写入携带 execution_run_id，材料中未显示现有 agent/网关天然支持该上下文。",
+    "称网关通过心跳上报 token 消耗和工具调用信息并由心跳处理逻辑写入 token_usage 和 mcp_call_log，这一具体既有数据通路在材料中未被充分确认。",
+    "将 Aegis 审核流程的每次审核执行归类为 manual_review 触发源，材料支持存在 runAegisReviews/quality_reviews，但“manual_review”作为既有触发语义不够准确。"
+  ],
+  "score_rationale": "该方案达到参考路径的等价甚至更细粒度深度：有统一运行对象、来源溯源、生命周期自动桥接、评估附着、事件通知、聚合统计和工具化访问，并解释了这些要素如何协同产生可审计、可复盘、可评测和可复用效果。分数超过90是因为所有高分必要机制均已覆盖，且未把核心成立建立在未确认事实上；列出的 unsupported_claims 主要是对现有工程通路的过度具体化或局部表述矛盾，不破坏“新增运行记录层+上下文传播+评估绑定+查询契约”的核心技术构思。扣分主要来自少量项目事实表述风险、审核绑定机制不够稳健，以及异常/重试边界规则尚未完全闭合。"
+}
