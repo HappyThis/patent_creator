@@ -4,6 +4,16 @@
     gap: 16px;
   }
 
+  .chat-workspace {
+    grid-template-columns:
+      var(--left-pane-width)
+      var(--left-resizer-width)
+      minmax(340px, 1fr)
+      var(--right-resizer-width)
+      var(--right-pane-width);
+    gap: 0;
+  }
+
   .document-workspace {
     grid-template-columns: 204px minmax(380px, 1fr);
     gap: 16px;
@@ -32,5 +42,16 @@
 
   .chat-panel {
     min-height: 520px;
+  }
+
+  .chat-workspace {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100vh - 28px);
+  }
+
+  .chat-workspace .workspace-side-pane,
+  .chat-workspace .workspace-resizer {
+    display: none;
   }
 }

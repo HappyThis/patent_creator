@@ -55,13 +55,6 @@ export function ChatHeader({
   return (
     <div className="chat-header">
       <div className="chat-header-top" ref={sessionSwitcherRef}>
-        <div className="chat-agent-heading">
-          <span className="chat-agent-title">AI 协作助手</span>
-          <span className={`chat-agent-status ${isBusy ? 'running' : 'idle'}`}>
-            <span className="chat-agent-status-dot" aria-hidden="true" />
-            {isBusy ? '运行中' : '就绪'}
-          </span>
-        </div>
         <div className="chat-header-actions">
           <button
             className="session-export-button"

@@ -1,8 +1,9 @@
 .process-group {
-  padding: 12px 12px 13px;
-  border: 1px solid rgba(92, 82, 68, 0.1);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.22);
+  margin: 18px 0 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--chat-muted);
 }
 
@@ -10,11 +11,21 @@
   list-style: none;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   cursor: pointer;
-  color: #6d6860;
-  font-size: 12px;
-  font-weight: 600;
+  color: #8a8378;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  transform: translateX(-1px);
+}
+
+.process-summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(127, 153, 184, 0.58);
 }
 
 .process-summary::-webkit-details-marker {
@@ -23,14 +34,14 @@
 
 .process-summary-meta {
   font-weight: 400;
-  color: #9a9387;
+  color: #aaa397;
 }
 
 .process-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 10px;
+  padding: 12px 0 0 16px;
 }
 
 .command-item {

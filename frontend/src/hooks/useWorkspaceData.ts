@@ -27,7 +27,7 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   const refreshRenderAst = useCallback(
     async (project_id: string, focus?: RenderFocus) => {
@@ -64,12 +64,17 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
     setEvents(hydrateEvents(response.events));
   }, []);
 
-  const ensureProject = useCallback(async () => {
-    const response = await apiClient.listProjects();
-    const currentProject = response.projects[0];
-    if (!currentProject) {
-      throw new Error('后端未返回可用 project。');
-    }
+  const clearWorkspace = useCallback(() => {
+    setProject(null);
+    setRenderAst(emptyRenderAst);
+    setEvents([]);
+    setSessions([]);
+    setSelectedSessionId(null);
+    syncActiveSection(null);
+  }, [syncActiveSection]);
+
+  const loadProject = useCallback(async (project_id: string) => {
+    const currentProject = await refreshProject(project_id);
     setProject(currentProject);
     await refreshRenderAst(currentProject.project_id);
     const knownSessions = await refreshSessions(currentProject.project_id, currentProject.active_session_id);
@@ -79,7 +84,7 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
       return;
     }
     setEvents([]);
-  }, [loadSessionEvents, refreshRenderAst, refreshSessions]);
+  }, [loadSessionEvents, refreshProject, refreshRenderAst, refreshSessions]);
 
   return {
     project,
@@ -97,6 +102,7 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
     refreshProject,
     refreshSessions,
     loadSessionEvents,
-    ensureProject,
+    clearWorkspace,
+    loadProject,
   };
 }

@@ -25,6 +25,16 @@ SECTION_ID_PATTERN = re.compile(r"^sec_\d{6}$")
 BLOCK_ID_PATTERN = re.compile(r"^blk_\d{6}$")
 
 
+def section_type(section: dict[str, Any]) -> str:
+    value = section.get("type")
+    if isinstance(value, str) and value:
+        return value
+    section_id = section.get("id")
+    if isinstance(section_id, str) and section_id in STANDARD_SECTION_TYPES:
+        return section_id
+    return "custom"
+
+
 def build_initial_disclosure(title: str) -> dict[str, Any]:
     sections = []
     for index, item in enumerate(STANDARD_SECTIONS, start=1):
@@ -55,7 +65,7 @@ def build_outline_items(sections: list[dict[str, Any]], level: int = 2) -> list[
         items.append(
             OutlineItem(
                 id=section["id"],
-                type=section["type"],
+                type=section_type(section),
                 title=section["title"],
                 level=level,
                 anchor=section["id"],
@@ -88,7 +98,7 @@ def render_section(section: dict[str, Any], level: int) -> dict[str, Any]:
     return {
         "type": "section",
         "id": section["id"],
-        "section_type": section["type"],
+        "section_type": section_type(section),
         "title": section["title"],
         "level": level,
         "anchor": section["id"],

@@ -7,7 +7,7 @@ import { useWorkspaceData } from './useWorkspaceData';
 import { useWorkspaceSelection } from './useWorkspaceSelection';
 import { useWorkspaceStream } from './useWorkspaceStream';
 
-export function useWorkspace() {
+export function useWorkspace(projectId: string | null) {
   const [composer, setComposer] = useState('');
   const [isCancelling, setIsCancelling] = useState(false);
   const {
@@ -38,7 +38,8 @@ export function useWorkspace() {
     refreshProject,
     refreshSessions,
     loadSessionEvents,
-    ensureProject,
+    clearWorkspace,
+    loadProject,
   } = useWorkspaceData(syncActiveSection);
   const { closeStream, trackOptimisticMessage, startChatMessageStream } = useWorkspaceStream({
     project,
@@ -56,8 +57,17 @@ export function useWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!projectId) {
+      closeStream();
+      clearWorkspace();
+      setIsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     setIsLoading(true);
-    ensureProject()
+    loadProject(projectId)
       .catch((error: unknown) => {
         if (cancelled) {
           return;
@@ -79,11 +89,11 @@ export function useWorkspace() {
         }
       });
 
-    return () => {
-      cancelled = true;
-      closeStream();
-    };
-  }, [closeStream, ensureProject]);
+      return () => {
+        cancelled = true;
+        closeStream();
+      };
+  }, [clearWorkspace, closeStream, loadProject, projectId, setEvents, setIsLoading]);
 
   const handleSessionSelect = useCallback(
     async (session_id: string) => {
@@ -261,6 +271,7 @@ export function useWorkspace() {
     renderAst,
     events,
     composer,
+    isLoading,
     isBusy: project?.is_busy ?? isLoading,
     isCancelling,
     canCancelRound,

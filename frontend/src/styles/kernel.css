@@ -1,0 +1,82 @@
+.kernel-pane {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kernel-header {
+  height: 64px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 18px;
+  border-bottom: 1px solid rgba(92, 82, 68, 0.11);
+  background: rgba(250, 247, 241, 0.72);
+}
+
+.kernel-title {
+  color: #18232c;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.kernel-subtitle {
+  max-width: 220px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #7c8585;
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kernel-progress {
+  flex: 0 0 auto;
+  color: #4f6f61;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.kernel-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 18px 20px 46px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.kernel-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.kernel-document .preview-section h2,
+.kernel-document .preview-section h3 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.kernel-document .preview-heading-index {
+  min-width: 26px;
+}
+
+.kernel-document .preview-block {
+  margin-bottom: 18px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.kernel-empty {
+  padding: 16px;
+  border: 1px solid rgba(92, 82, 68, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+  color: #7c8585;
+  font-size: 14px;
+}

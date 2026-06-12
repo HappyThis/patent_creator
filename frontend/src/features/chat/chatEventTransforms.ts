@@ -63,7 +63,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       continue;
     }
 
-    if (event.type === 'context_summary') {
+    if (event.type === 'context_summary' || event.type === 'context_pruned') {
       events.push({
         id: event.id,
         kind: 'context_status',
@@ -72,7 +72,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         message_id: event.message_id,
         seq: event.seq,
         status: 'done',
-        summary: '上下文压缩已完成',
+        summary: event.type === 'context_summary' ? '上下文压缩已完成' : '上下文已裁剪',
       });
       continue;
     }

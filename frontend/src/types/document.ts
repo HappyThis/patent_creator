@@ -41,6 +41,7 @@ export type TableNode = {
 export type SectionNode = {
   type: 'section';
   id: string;
+  section_type?: string;
   title: string;
   level: number;
   anchor: string;

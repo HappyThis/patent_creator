@@ -1,7 +1,7 @@
 .chat-scroll {
   flex: 1;
   min-height: 0;
-  padding: 14px 18px 12px;
+  padding: 10px 18px 8px;
   background: transparent;
 }
 
@@ -40,6 +40,7 @@
   background: #f8f4ed;
   border: 1px solid rgba(92, 82, 68, 0.15);
   color: #2b3438;
+  text-align: right;
 }
 
 .message-bubble.assistant {
@@ -196,6 +197,14 @@
   font-size: 11px;
   color: var(--chat-muted);
   padding: 0 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.message-row:hover time,
+.message-row:focus-within time,
+.message-bubble:hover + time {
+  opacity: 1;
 }
 
 .message-row.user time {

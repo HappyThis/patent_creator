@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ChatEvent, ContextUsageSummary, SessionTab } from '../../types';
 import { ChatComposer } from './ChatComposer';
-import { ChatHeader } from './ChatHeader';
 import { ChatThread } from './ChatThread';
 
 type ChatPanelProps = {
@@ -45,19 +44,12 @@ export function ChatPanel({
 
   return (
     <aside className="chat-panel">
-      <ChatHeader
-        sessionTabs={sessionTabs}
-        isBusy={isBusy}
-        onExport={onExport}
-        onSessionSelect={onSessionSelect}
-        onNewSession={onNewSession}
-      />
-
       <div className="chat-scroll" ref={scrollRef}>
         <ChatThread events={events} />
       </div>
 
       <ChatComposer
+        sessionTabs={sessionTabs}
         composer={composer}
         isBusy={isBusy}
         contextUsage={contextUsage}
@@ -66,6 +58,9 @@ export function ChatPanel({
         onComposerChange={onComposerChange}
         onSubmit={onSubmit}
         onCancel={onCancel}
+        onExport={onExport}
+        onSessionSelect={onSessionSelect}
+        onNewSession={onNewSession}
       />
     </aside>
   );

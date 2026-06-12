@@ -13,20 +13,20 @@
 .chat-header {
   position: relative;
   z-index: 4;
-  min-height: 56px;
+  min-height: 52px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: 0 18px;
-  background: rgba(250, 247, 241, 0.72);
-  border-bottom: 1px solid var(--chat-line);
+  background: transparent;
+  border-bottom: 0;
 }
 
 .chat-header-top {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
 }
 
@@ -39,8 +39,8 @@
 
 .chat-agent-title {
   color: #1f282d;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 760;
   line-height: 1.15;
   white-space: nowrap;
 }
@@ -50,7 +50,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #5f6d60;
+  color: #718070;
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
@@ -73,14 +73,20 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .session-export-button,
 .session-history-button,
 .session-new-button {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -88,21 +94,27 @@
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  color: #59646a;
+  color: #7a858b;
   font-size: 0;
   font-weight: 400;
   line-height: 1;
+  box-shadow: none;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 }
 
 .session-export-icon,
 .session-history-icon,
 .session-new-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: block;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -110,13 +122,16 @@
 .session-export-button:hover:not(:disabled),
 .session-history-button:hover:not(:disabled),
 .session-new-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgba(92, 82, 68, 0.045);
   color: #293640;
-  background: rgba(127, 153, 184, 0.11);
+  transform: translateY(-0.5px);
 }
 
 .session-history-button[aria-expanded="true"] {
   color: #2d3438;
-  background: rgba(127, 153, 184, 0.14);
+  border-color: transparent;
+  background: rgba(92, 82, 68, 0.06);
 }
 
 .session-export-button:disabled,
