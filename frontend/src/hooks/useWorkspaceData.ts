@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { hydrateEvents } from '../features/chat/chatEventTransforms';
 import { apiClient } from '../services/api/client';
-import type { ChatEvent, ProjectState, RenderAst, SessionSummary } from '../types';
+import type { ChatEvent, InnovationKernelState, ProjectState, RenderAst, SessionSummary } from '../types';
 
 const EMPTY_DOCUMENT_TITLE = '未加载交底书';
 
@@ -16,6 +16,13 @@ const emptyRenderAst: RenderAst = {
   children: [],
 };
 
+export const emptyInnovationKernel: InnovationKernelState = {
+  exists: false,
+  kernel_markdown: '',
+  updated_at: null,
+  source: null,
+};
+
 type RenderFocus = {
   focus_section_id?: string | null;
   focus_block_id?: string | null;
@@ -27,6 +34,7 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [innovationKernel, setInnovationKernel] = useState<InnovationKernelState>(emptyInnovationKernel);
   const [isLoading, setIsLoading] = useState(false);
 
   const refreshRenderAst = useCallback(
@@ -58,12 +66,19 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
     setEvents(hydrateEvents(response.events));
   }, []);
 
+  const refreshInnovationKernel = useCallback(async (project_id: string, session_id: string) => {
+    const response = await apiClient.getInnovationKernel(project_id, session_id);
+    setInnovationKernel(response);
+    return response;
+  }, []);
+
   const clearWorkspace = useCallback(() => {
     setProject(null);
     setRenderAst(emptyRenderAst);
     setEvents([]);
     setSessions([]);
     setSelectedSessionId(null);
+    setInnovationKernel(emptyInnovationKernel);
     syncActiveSection(null);
   }, [syncActiveSection]);
 
@@ -75,10 +90,12 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
     const targetSessionId = currentProject.active_session_id || knownSessions[0]?.session_id;
     if (targetSessionId) {
       await loadSessionEvents(currentProject.project_id, targetSessionId);
+      await refreshInnovationKernel(currentProject.project_id, targetSessionId);
       return;
     }
     setEvents([]);
-  }, [loadSessionEvents, refreshProject, refreshRenderAst, refreshSessions]);
+    setInnovationKernel(emptyInnovationKernel);
+  }, [loadSessionEvents, refreshInnovationKernel, refreshProject, refreshRenderAst, refreshSessions]);
 
   return {
     project,
@@ -86,6 +103,8 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
     renderAst,
     events,
     setEvents,
+    innovationKernel,
+    setInnovationKernel,
     sessions,
     setSessions,
     selectedSessionId,
@@ -95,6 +114,7 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
     refreshRenderAst,
     refreshProject,
     refreshSessions,
+    refreshInnovationKernel,
     loadSessionEvents,
     clearWorkspace,
     loadProject,

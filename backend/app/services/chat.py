@@ -9,11 +9,11 @@ from typing import Any
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.model_profiles import resolve_model_profile
 from ..agents.runtime.openai_compat import OpenAICompatibleClient
-from ..agents.workers import MainAgentAction, MainAgentToolCall, decide_main_agent_step
+from ..agents.workers import MAIN_AGENT_TOOLS, MainAgentAction, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
 from ..domain.document_tool_results import tool_failed
 from ..runtime.context import ContextManager
-from ..runtime.executor import ExecutorEngine
+from ..runtime.executor import ExecutorEngine, ToolRuntimeContext
 from ..tools import DOCUMENT_WRITE_TOOL_NAMES, get_tool_declaration
 from ..schemas import ChatMessageRequest, ChatMessageResponse
 from ..storage.workspace_store import WorkspaceStore
@@ -251,7 +251,13 @@ class ChatService:
                     await self.events.agent_output(project_id, state, tool_preamble)
 
                 for tool_call in tool_calls:
-                    result = await self._execute_tool_call(project_id, state, tool_call)
+                    result = await self._execute_tool_call(
+                        project_id,
+                        state,
+                        tool_call,
+                        caller_messages=messages,
+                        system_prompt=system_prompt,
+                    )
 
                     if tool_call.tool in DOCUMENT_WRITE_TOOL_NAMES and result.get("status") == "success":
                         output = result["output"]
@@ -266,6 +272,21 @@ class ChatService:
                             "document_changed",
                             {
                                 **changed_payload,
+                                "round_id": state.round_id,
+                                "message_id": state.message_id,
+                            },
+                        )
+
+                    if (
+                        tool_call.tool == "innovation_kernel_kit"
+                        and result.get("status") == "success"
+                        and tool_call.arguments.get("action") in {"create", "recreate"}
+                    ):
+                        await self.bus.publish(
+                            key,
+                            "innovation_kernel_changed",
+                            {
+                                **result["output"],
                                 "round_id": state.round_id,
                                 "message_id": state.message_id,
                             },
@@ -351,6 +372,9 @@ class ChatService:
         project_id: str,
         state: RoundState,
         tool_call: MainAgentToolCall,
+        *,
+        caller_messages: list[dict[str, Any]],
+        system_prompt: str,
     ) -> dict[str, Any]:
         logger.info(
             "round tool_call id=%s tool=%s arguments=%s",
@@ -405,6 +429,17 @@ class ChatService:
             project_id,
             tool_call.tool,
             tool_call.arguments,
+            runtime_context=ToolRuntimeContext(
+                session_id=state.session_id,
+                round_id=state.round_id,
+                message_id=state.message_id,
+                parent_call_id=tool_call.tool_call_id,
+                caller_messages=caller_messages,
+                system_prompt=system_prompt,
+                tools=MAIN_AGENT_TOOLS,
+                llm_client=self.llm_client,
+                settings=self.settings,
+            ),
         )
         await self.events.tool_finished(
             project_id,

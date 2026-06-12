@@ -52,6 +52,7 @@ function App() {
     canCancelRound,
     contextUsage,
     sessionTabs,
+    innovationKernel,
     previewFocusTarget,
     recentSectionIds,
     recentBlockIds,
@@ -219,12 +220,7 @@ function App() {
       >
         {isKernelOpen ? (
           <div className="workspace-side-pane workspace-side-kernel">
-            <InnovationKernelPanel
-              renderAst={renderAst}
-              recentSectionIds={recentSectionIds}
-              recentBlockIds={recentBlockIds}
-              stats={documentStats}
-            />
+            <InnovationKernelPanel innovationKernel={innovationKernel} />
           </div>
         ) : null}
 

@@ -3,7 +3,7 @@ import { apiClient } from '../services/api/client';
 import type { ChatEvent } from '../types';
 import { formatTimestamp } from '../features/chat/chatEventTransforms';
 import { buildSessionTabs } from '../features/chat/sessionTabs';
-import { useWorkspaceData } from './useWorkspaceData';
+import { emptyInnovationKernel, useWorkspaceData } from './useWorkspaceData';
 import { useWorkspaceSelection } from './useWorkspaceSelection';
 import { useWorkspaceStream } from './useWorkspaceStream';
 
@@ -27,6 +27,8 @@ export function useWorkspace(projectId: string | null) {
     renderAst,
     events,
     setEvents,
+    innovationKernel,
+    setInnovationKernel,
     sessions,
     setSessions,
     selectedSessionId,
@@ -36,6 +38,7 @@ export function useWorkspace(projectId: string | null) {
     refreshRenderAst,
     refreshProject,
     refreshSessions,
+    refreshInnovationKernel,
     loadSessionEvents,
     clearWorkspace,
     loadProject,
@@ -46,6 +49,7 @@ export function useWorkspace(projectId: string | null) {
     setEvents,
     setSessions,
     setSelectedSessionId,
+    setInnovationKernel,
     setIsCancelling,
     refreshProject,
     refreshSessions,
@@ -103,8 +107,9 @@ export function useWorkspace(projectId: string | null) {
       setSelectedSessionId(session_id);
       resetRecent();
       await loadSessionEvents(project.project_id, session_id);
+      await refreshInnovationKernel(project.project_id, session_id);
     },
-    [closeStream, loadSessionEvents, project, resetRecent, selectedSessionId],
+    [closeStream, loadSessionEvents, project, refreshInnovationKernel, resetRecent, selectedSessionId],
   );
 
   const handleNewSession = useCallback(() => {
@@ -115,6 +120,7 @@ export function useWorkspace(projectId: string | null) {
     setSelectedSessionId(null);
     resetRecent();
     setEvents([]);
+    setInnovationKernel(emptyInnovationKernel);
     trackOptimisticMessage(null);
     setProject((current) =>
       current
@@ -124,7 +130,7 @@ export function useWorkspace(projectId: string | null) {
           }
         : current,
     );
-  }, [closeStream, project, resetRecent, trackOptimisticMessage]);
+  }, [closeStream, project, resetRecent, setInnovationKernel, trackOptimisticMessage]);
 
   const submitMessage = useCallback(async () => {
     const message = composer.trim();
@@ -268,6 +274,7 @@ export function useWorkspace(projectId: string | null) {
 
   return {
     renderAst,
+    innovationKernel,
     events,
     composer,
     isLoading,

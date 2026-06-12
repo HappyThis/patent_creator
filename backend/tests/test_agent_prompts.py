@@ -85,6 +85,16 @@ def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_t
     assert "exec_command" not in main_body
 
 
+def test_main_agent_prompt_defines_current_innovation_kernel_workflow() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "创新内核是交底书生成前的当前态核心事实源" in prompt
+    assert "innovation_kernel_kit" in prompt
+    assert "create、recreate、read_all" in prompt
+    assert "没有历史版本、候选或 review" in prompt
+    assert "当前创新内核" in prompt
+
+
 def test_main_agent_prompt_uses_model_visible_action_words() -> None:
     prompt = build_main_agent_system_prompt()
 
