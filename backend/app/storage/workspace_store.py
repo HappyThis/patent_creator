@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..schemas import ProjectRecord, SessionEvent, SessionSummary
 
 DEFAULT_PROJECT_TITLE = "一种图像检测方法"
+DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
 CURRENT_PROJECT_POINTER = "current_project_id"
 
 
@@ -22,11 +24,16 @@ class WorkspaceStore:
         self.projects_dir = self.root_dir / "projects"
         self.projects_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_project(self, title: str) -> ProjectRecord:
+    def create_project(self, project_name: str, disclosure_title: str | None = None) -> ProjectRecord:
         project_id = generate_id("proj")
-        return self.create_project_with_id(project_id, title)
+        return self.create_project_with_id(project_id, project_name, disclosure_title)
 
-    def create_project_with_id(self, project_id: str, title: str) -> ProjectRecord:
+    def create_project_with_id(
+        self,
+        project_id: str,
+        project_name: str,
+        disclosure_title: str | None = None,
+    ) -> ProjectRecord:
         workspace = self.project_dir(project_id)
         workspace.mkdir(parents=True, exist_ok=False)
         for name in ("sessions", "assets", "exports", "runtime"):
@@ -35,17 +42,48 @@ class WorkspaceStore:
         created_at = now_iso()
         project = ProjectRecord(
             project_id=project_id,
-            title=title,
+            title=project_name,
             created_at=created_at,
             updated_at=created_at,
         )
-        disclosure = build_initial_disclosure(title)
+        disclosure = build_initial_disclosure(disclosure_title if disclosure_title is not None else project_name)
 
         self.write_json(self.project_file(project_id), project.model_dump())
         self.write_json(self.disclosure_file(project_id), disclosure)
         (workspace / ".gitignore").write_text("runtime/\nexports/\n", encoding="utf-8")
         self._init_workspace_git(workspace)
         return project
+
+    def delete_project(self, project_id: str) -> str | None:
+        project = self.get_project(project_id)
+        if project.is_busy or project.running_session_id or project.running_round_id:
+            raise ApiError(409, "project_busy", "项目正在运行，不能删除。")
+
+        shutil.rmtree(self.project_dir(project_id))
+
+        pointer_path = self.root_dir / CURRENT_PROJECT_POINTER
+        next_project_id: str | None = None
+        projects = self.list_projects()
+        if projects:
+            next_project_id = projects[0].project_id
+
+        if pointer_path.exists():
+            current_project_id = pointer_path.read_text(encoding="utf-8").strip()
+            if current_project_id == project_id:
+                if next_project_id:
+                    pointer_path.write_text(next_project_id + "\n", encoding="utf-8")
+                else:
+                    pointer_path.unlink()
+
+        return next_project_id
+
+    def rename_project(self, project_id: str, project_name: str) -> ProjectRecord:
+        project = self.get_project(project_id)
+        if project.is_busy or project.running_session_id or project.running_round_id:
+            raise ApiError(409, "project_busy", "项目正在运行，不能重命名。")
+        project.title = project_name
+        project.updated_at = now_iso()
+        return self.save_project(project)
 
     def list_projects(self) -> list[ProjectRecord]:
         projects: list[ProjectRecord] = []
@@ -117,7 +155,11 @@ class WorkspaceStore:
                     pass
 
         projects = self.list_projects()
-        current = projects[0] if projects else self.create_project(DEFAULT_PROJECT_TITLE)
+        current = (
+            projects[0]
+            if projects
+            else self.create_project(DEFAULT_PROJECT_TITLE, disclosure_title=DEFAULT_PROJECT_TITLE)
+        )
         pointer_path.write_text(current.project_id + "\n", encoding="utf-8")
         return current
 

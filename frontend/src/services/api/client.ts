@@ -3,6 +3,13 @@ import { requestJson } from './http';
 
 export type ApiClient = {
   listProjects: () => Promise<{ projects: ProjectState[] }>;
+  createProject: (payload: { project_name: string; disclosure_title?: string | null }) => Promise<ProjectState>;
+  renameProject: (project_id: string, payload: { project_name: string }) => Promise<ProjectState>;
+  deleteProject: (project_id: string) => Promise<{
+    deleted: boolean;
+    project_id: string;
+    next_project_id: string | null;
+  }>;
   getProject: (project_id: string) => Promise<ProjectState>;
   getOutline: (project_id: string) => Promise<{ sections: OutlineItem[] }>;
   getRenderAst: (
@@ -34,6 +41,27 @@ export type ApiClient = {
 export const apiClient: ApiClient = {
   async listProjects() {
     return requestJson<{ projects: ProjectState[] }>('/api/projects');
+  },
+  async createProject(payload) {
+    return requestJson<ProjectState>('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  async renameProject(project_id, payload) {
+    return requestJson<ProjectState>(`/api/projects/${project_id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  async deleteProject(project_id) {
+    return requestJson<{
+      deleted: boolean;
+      project_id: string;
+      next_project_id: string | null;
+    }>(`/api/projects/${project_id}`, {
+      method: 'DELETE',
+    });
   },
   async getProject(project_id) {
     return requestJson<ProjectState>(`/api/projects/${project_id}`);

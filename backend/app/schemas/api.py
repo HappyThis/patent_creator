@@ -29,6 +29,21 @@ class ProjectSummary(BaseModel):
     active_session_context: "ContextUsageSummary | None" = None
 
 
+class ProjectCreateRequest(BaseModel):
+    project_name: str = Field(min_length=1, max_length=120)
+    disclosure_title: str | None = Field(default=None, max_length=200)
+
+
+class ProjectUpdateRequest(BaseModel):
+    project_name: str = Field(min_length=1, max_length=120)
+
+
+class ProjectDeleteResponse(BaseModel):
+    deleted: bool
+    project_id: str
+    next_project_id: str | None = None
+
+
 class ContextUsageSummary(BaseModel):
     max_tokens: int
     used_tokens: int

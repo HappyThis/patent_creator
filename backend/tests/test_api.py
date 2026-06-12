@@ -242,6 +242,95 @@ async def collect_session_stream_events(
 
 
 @pytest.mark.anyio
+async def test_create_project_separates_project_name_and_disclosure_title(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        create_response = await client.post(
+            "/api/projects",
+            json={
+                "project_name": "A2UI 动态交互工作区",
+                "disclosure_title": "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法",
+            },
+        )
+        assert create_response.status_code == 200
+        project = create_response.json()
+        assert project["title"] == "A2UI 动态交互工作区"
+
+        render_response = await client.get(f"/api/projects/{project['project_id']}/render")
+        assert render_response.status_code == 200
+        assert (
+            render_response.json()["render_ast"]["title"]
+            == "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法"
+        )
+
+        default_title_response = await client.post(
+            "/api/projects",
+            json={"project_name": "只作为首页管理名的项目"},
+        )
+        assert default_title_response.status_code == 200
+        default_project = default_title_response.json()
+        default_render_response = await client.get(f"/api/projects/{default_project['project_id']}/render")
+        assert default_render_response.status_code == 200
+        assert default_render_response.json()["render_ast"]["title"] != default_project["title"]
+
+        rename_response = await client.patch(
+            f"/api/projects/{project['project_id']}",
+            json={"project_name": "A2UI 项目管理名已修改"},
+        )
+        assert rename_response.status_code == 200
+        assert rename_response.json()["title"] == "A2UI 项目管理名已修改"
+
+        renamed_render_response = await client.get(f"/api/projects/{project['project_id']}/render")
+        assert renamed_render_response.status_code == 200
+        assert (
+            renamed_render_response.json()["render_ast"]["title"]
+            == "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法"
+        )
+
+
+@pytest.mark.anyio
+async def test_delete_project_removes_project_from_workspace(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        create_response = await client.post("/api/projects", json={"project_name": "待删除项目"})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+        assert services.store.project_dir(project_id).exists()
+
+        delete_response = await client.delete(f"/api/projects/{project_id}")
+        assert delete_response.status_code == 200
+        assert delete_response.json()["deleted"] is True
+        assert delete_response.json()["project_id"] == project_id
+        assert not services.store.project_dir(project_id).exists()
+
+        missing_response = await client.get(f"/api/projects/{project_id}")
+        assert missing_response.status_code == 404
+
+        projects_response = await client.get("/api/projects")
+        assert projects_response.status_code == 200
+        project_ids = [project["project_id"] for project in projects_response.json()["projects"]]
+        assert project_id not in project_ids
+
+
+@pytest.mark.anyio
 async def test_project_chat_and_export(tmp_path: Path) -> None:
     settings = Settings(
         data_dir=tmp_path / "data",
@@ -257,7 +346,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         create_response = await client.post("/api/projects", json={"title": "一种图像检测方法"})
-        assert create_response.status_code == 405
+        assert create_response.status_code == 422
 
         projects_response = await client.get("/api/projects")
         assert projects_response.status_code == 200

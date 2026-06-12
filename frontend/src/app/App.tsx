@@ -95,6 +95,38 @@ function App() {
     setIsDisclosureOpen(false);
   }, []);
 
+  const handleProjectCreate = useCallback(
+    async (payload: { project_name: string; disclosure_title?: string | null }) => {
+      const project = await apiClient.createProject(payload);
+      setProjects((current) => [project, ...current.filter((item) => item.project_id !== project.project_id)]);
+      handleProjectSelect(project.project_id);
+    },
+    [handleProjectSelect],
+  );
+
+  const handleProjectDelete = useCallback(
+    async (projectId: string) => {
+      const response = await apiClient.deleteProject(projectId);
+      setProjects((current) => current.filter((project) => project.project_id !== projectId));
+      if (selectedProjectId === projectId) {
+        const nextPath = response.next_project_id
+          ? `/projects/${encodeURIComponent(response.next_project_id)}`
+          : '/';
+        window.history.pushState(null, '', nextPath);
+        setSelectedProjectId(response.next_project_id);
+        setIsKernelOpen(false);
+        setIsDisclosureOpen(false);
+      }
+      void loadProjects();
+    },
+    [loadProjects, selectedProjectId],
+  );
+
+  const handleProjectRename = useCallback(async (projectId: string, projectName: string) => {
+    const project = await apiClient.renameProject(projectId, { project_name: projectName });
+    setProjects((current) => current.map((item) => (item.project_id === project.project_id ? project : item)));
+  }, []);
+
   const beginResize = useCallback(
     (side: 'kernel' | 'disclosure', event: PointerEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -131,8 +163,10 @@ function App() {
           projects={projects}
           isLoading={projectsLoading}
           error={projectsError}
-          onRetry={loadProjects}
           onSelectProject={handleProjectSelect}
+          onCreateProject={handleProjectCreate}
+          onDeleteProject={handleProjectDelete}
+          onRenameProject={handleProjectRename}
         />
       </div>
     );
