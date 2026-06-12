@@ -1,13 +1,13 @@
 import { useCallback, useState } from 'react';
 import { hydrateEvents } from '../features/chat/chatEventTransforms';
 import { apiClient } from '../services/api/client';
-import type { ChatEvent, OutlineItem, ProjectState, RenderAst, SessionSummary } from '../types';
+import type { ChatEvent, ProjectState, RenderAst, SessionSummary } from '../types';
 
-const DEFAULT_PROJECT_TITLE = '一种图像检测方法';
+const EMPTY_DOCUMENT_TITLE = '未加载交底书';
 
 const emptyRenderAst: RenderAst = {
   type: 'document',
-  title: DEFAULT_PROJECT_TITLE,
+  title: EMPTY_DOCUMENT_TITLE,
   meta: {
     document_type: 'patent_disclosure',
     schema_version: 'v1',
@@ -31,16 +31,10 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
 
   const refreshRenderAst = useCallback(
     async (project_id: string, focus?: RenderFocus) => {
-      const [outlineResponse, renderResponse] = await Promise.all([
-        apiClient.getOutline(project_id),
-        apiClient.getRenderAst(project_id, focus),
-      ]);
-      setRenderAst({
-        ...renderResponse.render_ast,
-        outline: outlineResponse.sections as OutlineItem[],
-      });
+      const renderResponse = await apiClient.getRenderAst(project_id, focus);
+      setRenderAst(renderResponse.render_ast);
       syncActiveSection(
-        renderResponse.active_section_id || focus?.focus_section_id || outlineResponse.sections[0]?.id || '',
+        renderResponse.active_section_id || focus?.focus_section_id || renderResponse.render_ast.outline[0]?.id || '',
       );
     },
     [syncActiveSection],

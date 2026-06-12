@@ -104,7 +104,7 @@ export function ChatComposer({
         <div className="composer-toolbar">
           <div className="composer-toolbar-right">
             <ContextUsageBadge contextUsage={contextUsage} />
-            <div className="chat-header-actions composer-session-actions" ref={sessionSwitcherRef}>
+            <div className="composer-session-actions" ref={sessionSwitcherRef}>
               <button
                 className="session-export-button"
                 type="button"

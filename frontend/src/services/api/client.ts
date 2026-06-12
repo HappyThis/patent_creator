@@ -1,4 +1,4 @@
-import { OutlineItem, ProjectState, RenderAst, SessionEventRecord, SessionSummary } from '../../types';
+import { ProjectState, RenderAst, SessionEventRecord, SessionSummary } from '../../types';
 import { requestJson } from './http';
 
 export type ApiClient = {
@@ -11,7 +11,6 @@ export type ApiClient = {
     next_project_id: string | null;
   }>;
   getProject: (project_id: string) => Promise<ProjectState>;
-  getOutline: (project_id: string) => Promise<{ sections: OutlineItem[] }>;
   getRenderAst: (
     project_id: string,
     focus?: { focus_section_id?: string | null; focus_block_id?: string | null },
@@ -65,9 +64,6 @@ export const apiClient: ApiClient = {
   },
   async getProject(project_id) {
     return requestJson<ProjectState>(`/api/projects/${project_id}`);
-  },
-  async getOutline(project_id) {
-    return requestJson<{ sections: OutlineItem[] }>(`/api/projects/${project_id}/outline`);
   },
   async getRenderAst(project_id, focus) {
     const search = new URLSearchParams();

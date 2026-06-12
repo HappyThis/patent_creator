@@ -251,7 +251,7 @@ class ChatService:
                     await self.events.agent_output(project_id, state, tool_preamble)
 
                 for tool_call in tool_calls:
-                    result = await self._execute_tool_call(project_id, state, tool_call, caller_messages=messages)
+                    result = await self._execute_tool_call(project_id, state, tool_call)
 
                     if tool_call.tool in DOCUMENT_WRITE_TOOL_NAMES and result.get("status") == "success":
                         output = result["output"]
@@ -351,8 +351,6 @@ class ChatService:
         project_id: str,
         state: RoundState,
         tool_call: MainAgentToolCall,
-        *,
-        caller_messages: list[dict[str, Any]],
     ) -> dict[str, Any]:
         logger.info(
             "round tool_call id=%s tool=%s arguments=%s",
@@ -407,21 +405,6 @@ class ChatService:
             project_id,
             tool_call.tool,
             tool_call.arguments,
-            scope="main_agent",
-            session_id=state.session_id,
-            round_id=state.round_id,
-            message_id=state.message_id,
-            parent_call_id=tool_call.tool_call_id,
-            caller_messages=caller_messages,
-            on_tool_event=lambda event_name, event_payload: self.bus.publish(
-                (project_id, state.session_id),
-                event_name,
-                {
-                    **event_payload,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
-            ),
         )
         await self.events.tool_finished(
             project_id,

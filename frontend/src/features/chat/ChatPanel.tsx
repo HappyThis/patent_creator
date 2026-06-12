@@ -40,7 +40,7 @@ export function ChatPanel({
     const container = scrollRef.current;
     if (!container) return;
     container.scrollTop = container.scrollHeight;
-  }, [events, sessionTabs]);
+  }, [events]);
 
   return (
     <aside className="chat-panel">

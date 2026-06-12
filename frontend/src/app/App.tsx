@@ -15,16 +15,20 @@ type WorkspaceStyle = CSSProperties & {
   '--right-resizer-width': string;
 };
 
-const MIN_SIDE_WIDTH = 280;
-const MAX_SIDE_WIDTH = 620;
+const MIN_SIDE_WIDTH = 220;
+const MAX_SIDE_WIDTH = 980;
+const MIN_CHAT_WIDTH = 420;
+const RESIZER_WIDTH = 10;
 
 function readProjectIdFromPath(): string | null {
   const match = window.location.pathname.match(/^\/projects\/([^/]+)\/?$/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function clampSideWidth(value: number) {
-  const viewportLimit = Math.max(MIN_SIDE_WIDTH, Math.floor(window.innerWidth * 0.46));
+function clampSideWidth(value: number, otherSideWidth = 0) {
+  const resizerReserve = otherSideWidth > 0 ? RESIZER_WIDTH * 2 : RESIZER_WIDTH;
+  const availableWidth = window.innerWidth - otherSideWidth - resizerReserve - MIN_CHAT_WIDTH;
+  const viewportLimit = Math.max(MIN_SIDE_WIDTH, availableWidth);
   return Math.min(Math.max(value, MIN_SIDE_WIDTH), Math.min(MAX_SIDE_WIDTH, viewportLimit));
 }
 
@@ -107,7 +111,6 @@ function App() {
   const handleProjectDelete = useCallback(
     async (projectId: string) => {
       const response = await apiClient.deleteProject(projectId);
-      setProjects((current) => current.filter((project) => project.project_id !== projectId));
       if (selectedProjectId === projectId) {
         const nextPath = response.next_project_id
           ? `/projects/${encodeURIComponent(response.next_project_id)}`
@@ -127,15 +130,44 @@ function App() {
     setProjects((current) => current.map((item) => (item.project_id === project.project_id ? project : item)));
   }, []);
 
+  useEffect(() => {
+    const normalizeSideWidths = () => {
+      let nextKernelWidth = kernelWidth;
+      let nextDisclosureWidth = disclosureWidth;
+
+      if (isKernelOpen) {
+        nextKernelWidth = clampSideWidth(nextKernelWidth, isDisclosureOpen ? nextDisclosureWidth : 0);
+      }
+      if (isDisclosureOpen) {
+        nextDisclosureWidth = clampSideWidth(nextDisclosureWidth, isKernelOpen ? nextKernelWidth : 0);
+      }
+
+      if (nextKernelWidth !== kernelWidth) {
+        setKernelWidth(nextKernelWidth);
+      }
+      if (nextDisclosureWidth !== disclosureWidth) {
+        setDisclosureWidth(nextDisclosureWidth);
+      }
+    };
+
+    normalizeSideWidths();
+    window.addEventListener('resize', normalizeSideWidths);
+    return () => window.removeEventListener('resize', normalizeSideWidths);
+  }, [disclosureWidth, isDisclosureOpen, isKernelOpen, kernelWidth]);
+
   const beginResize = useCallback(
     (side: 'kernel' | 'disclosure', event: PointerEvent<HTMLDivElement>) => {
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = side === 'kernel' ? kernelWidth : disclosureWidth;
+      const otherSideWidth =
+        side === 'kernel'
+          ? isDisclosureOpen ? disclosureWidth : 0
+          : isKernelOpen ? kernelWidth : 0;
 
       const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
         const delta = side === 'kernel' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
-        const nextWidth = clampSideWidth(startWidth + delta);
+        const nextWidth = clampSideWidth(startWidth + delta, otherSideWidth);
         if (side === 'kernel') {
           setKernelWidth(nextWidth);
           return;
@@ -153,7 +185,7 @@ function App() {
       window.addEventListener('pointermove', handlePointerMove);
       window.addEventListener('pointerup', handlePointerUp);
     },
-    [disclosureWidth, kernelWidth],
+    [disclosureWidth, isDisclosureOpen, isKernelOpen, kernelWidth],
   );
 
   if (!selectedProjectId) {

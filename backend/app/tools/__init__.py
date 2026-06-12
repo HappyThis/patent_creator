@@ -6,10 +6,8 @@ from .catalog import (
     get_tool_declaration,
     render_tool_manual,
 )
-from .types import AgentScope
 
 __all__ = [
-    "AgentScope",
     "DOCUMENT_WRITE_TOOL_NAMES",
     "MAIN_AGENT_TOOL_NAMES",
     "ToolDeclaration",

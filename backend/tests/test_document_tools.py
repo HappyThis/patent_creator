@@ -6,23 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from app.agents.runtime.openai_compat import OpenAICompatibleClient
 from app.core.command_platform import current_command_platform
-from app.core.config import Settings
-from app.runtime import ContextManager, ExecutorEngine
+from app.runtime import ExecutorEngine
 from app.storage.workspace_store import WorkspaceStore
-
-
-class DummyLLMClient(OpenAICompatibleClient):
-    def __init__(self) -> None:
-        pass
 
 
 def make_executor(tmp_path: Path) -> tuple[ExecutorEngine, str]:
     store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
     project = store.create_project("一种图像检测方法")
-    settings = Settings(data_dir=tmp_path / "data", git_user_name="Test User", git_user_email="test@example.com")
-    return ExecutorEngine(store, ContextManager(store, settings), DummyLLMClient(), settings), project.project_id
+    return ExecutorEngine(store), project.project_id
 
 
 def section_id(executor: ExecutorEngine, project_id: str, section_type: str) -> str:
@@ -36,10 +28,8 @@ def run_tool(
     project_id: str,
     tool_name: str,
     arguments: dict[str, Any],
-    *,
-    scope: str = "main_agent",
 ) -> dict[str, Any]:
-    return asyncio.run(executor.execute_tool(project_id, tool_name, arguments, scope=scope))  # type: ignore[arg-type]
+    return asyncio.run(executor.execute_tool(project_id, tool_name, arguments))
 
 
 def test_document_read_and_edit_protocol(tmp_path: Path) -> None:
@@ -317,7 +307,7 @@ def test_document_write_tools_generate_section_ids_and_reject_agent_ids(tmp_path
     assert rejected_standard_child["output"]["code"] == "invalid_tool_arguments"
 
 
-def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path) -> None:
+def test_exec_command_runs_shell_commands(tmp_path: Path) -> None:
     executor, project_id = make_executor(tmp_path)
     profile = current_command_platform()
 
@@ -403,11 +393,6 @@ def test_exec_command_runs_shell_commands_and_permission_checked(tmp_path: Path)
     assert zero_timeout["status"] == "failed"
     assert zero_timeout["output"]["code"] == "invalid_operation"
     assert zero_timeout["output"]["message"] == "timeout 必须大于 0。"
-
-    denied_scope = run_tool(executor, project_id, "exec_command", {"command": "pwd"}, scope="unknown")
-    assert denied_scope["status"] == "failed"
-    assert denied_scope["output"]["code"] == "permission_denied"
-
 
 def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
     executor, project_id = make_executor(tmp_path)

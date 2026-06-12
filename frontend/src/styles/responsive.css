@@ -14,11 +14,6 @@
     gap: 0;
   }
 
-  .document-workspace {
-    grid-template-columns: 204px minmax(380px, 1fr);
-    gap: 16px;
-  }
-
   .document-card {
     padding-inline: 44px;
   }
@@ -33,11 +28,6 @@
     grid-template-columns: 1fr;
     height: auto;
     min-height: calc(100vh - 28px);
-  }
-
-  .document-workspace {
-    min-height: 680px;
-    grid-template-columns: 200px minmax(360px, 1fr);
   }
 
   .chat-panel {
