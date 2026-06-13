@@ -47,6 +47,15 @@ Patent Creator 的核心体验可以概括为：Agent do anything。
 
 当前工作台围绕这个模式提供交底书预览、技术内核面板、多轮会话、文档章节读写、过程记录和基础排版能力。目标体验是：用户像指挥一个专利写作助理一样工作，而不是自己在表单、编辑器和材料之间来回搬运内容。
 
+## 工程亮点
+
+Patent Creator 不只是在做一层聊天界面，也在围绕 agent 的可验证工作流建设工程底座。
+
+- Benchmark-driven：用固定 case、重复运行、LLM judge 和结果快照来评估技术内核/技术方案质量，让 prompt、工具和上下文策略的改进有可比较的分数依据。
+- Evaluation harness：benchmark harness 会准备测试材料、运行 subject agent、抽取交底书产物、调用 judge、记录轨迹并发布结果，用一套端到端流程衡量 agent 的实际写作能力。
+- Agent loop：主 agent 在多轮循环中读取上下文、选择工具、观察结果、继续决策，并把过程记录、工具输出和最终文档状态沉淀下来。
+- Loop engineering：项目把“让 agent 自己持续推进任务”作为工程问题处理，而不是只依赖一次 prompt；上下文压缩、工具预算、执行状态、过程折叠和 benchmark 反馈共同构成迭代闭环。
+
 ## 技术内核挖掘能力
 
 Patent Creator 把“能否挖掘出好的技术内核”视为核心能力之一。
