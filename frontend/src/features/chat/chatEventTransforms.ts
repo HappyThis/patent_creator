@@ -4,6 +4,7 @@ type ToolState = {
   id: string;
   kind: 'tool_call';
   timestamp?: string;
+  timestamp_ms?: number;
   round_id?: string;
   message_id?: string;
   seq?: number;
@@ -21,6 +22,14 @@ export function formatTimestamp(value?: string): string {
     return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function timestampMs(value?: string): number {
+  if (!value) {
+    return Date.now();
+  }
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
 function formatToolDetail(payload: unknown): string {
@@ -42,6 +51,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         role: 'user',
         text: String(event.payload.text ?? ''),
         timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
@@ -56,6 +66,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         role: 'assistant',
         text: String(event.payload.text ?? ''),
         timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
@@ -63,16 +74,17 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       continue;
     }
 
-    if (event.type === 'context_summary') {
+    if (event.type === 'context_summary' || event.type === 'context_pruned') {
       events.push({
         id: event.id,
         kind: 'context_status',
         timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
         status: 'done',
-        summary: '上下文压缩已完成',
+        summary: event.type === 'context_summary' ? '上下文压缩已完成' : '上下文已裁剪',
       });
       continue;
     }
@@ -86,6 +98,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         id: event.call_id || event.id,
         kind: 'tool_call',
         timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
@@ -113,6 +126,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       id: toolId,
       kind: 'tool_call',
       timestamp: formatTimestamp(event.ts),
+      timestamp_ms: timestampMs(event.ts),
       round_id: event.round_id,
       message_id: event.message_id,
       seq: event.seq,
@@ -153,6 +167,7 @@ export function applyContextCompressionEvent(
     id,
     kind: 'context_status',
     timestamp: formatTimestamp(),
+    timestamp_ms: Date.now(),
     round_id: roundId,
     message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
     status,
@@ -178,6 +193,7 @@ export function applyRunningToolEvent(
     id: toolId,
     kind: 'tool_call',
     timestamp: formatTimestamp(),
+    timestamp_ms: Date.now(),
     round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
     message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
     parent_call_id: typeof payload.parent_call_id === 'string' ? payload.parent_call_id : null,
@@ -223,6 +239,7 @@ export function applyAssistantDelta(
         role: 'assistant',
         text: delta,
         timestamp,
+        timestamp_ms: Date.now(),
         round_id: roundId,
         message_id: sourceMessageId,
       },
@@ -286,6 +303,7 @@ export function finalizeRoundEvents(
         ...streamMessage,
         text: reply,
         timestamp: streamMessage.timestamp || timestamp,
+        timestamp_ms: streamMessage.timestamp_ms ?? Date.now(),
         round_id: streamMessage.round_id ?? roundId,
         message_id: streamMessage.message_id ?? sourceMessageId,
       };
@@ -301,6 +319,7 @@ export function finalizeRoundEvents(
       role: 'assistant',
       text: reply,
       timestamp,
+      timestamp_ms: Date.now(),
       round_id: roundId,
       message_id: sourceMessageId,
     },

@@ -1,4 +1,4 @@
 from .context import ContextManager
-from .executor import AgentScope, ExecutorEngine
+from .executor import ExecutorEngine
 
-__all__ = ["AgentScope", "ContextManager", "ExecutorEngine"]
+__all__ = ["ContextManager", "ExecutorEngine"]

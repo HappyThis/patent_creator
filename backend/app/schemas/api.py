@@ -29,6 +29,21 @@ class ProjectSummary(BaseModel):
     active_session_context: "ContextUsageSummary | None" = None
 
 
+class ProjectCreateRequest(BaseModel):
+    project_name: str = Field(min_length=1, max_length=120)
+    disclosure_title: str | None = Field(default=None, max_length=200)
+
+
+class ProjectUpdateRequest(BaseModel):
+    project_name: str = Field(min_length=1, max_length=120)
+
+
+class ProjectDeleteResponse(BaseModel):
+    deleted: bool
+    project_id: str
+    next_project_id: str | None = None
+
+
 class ContextUsageSummary(BaseModel):
     max_tokens: int
     used_tokens: int
@@ -77,6 +92,13 @@ class ChatMessageResponse(BaseModel):
     first_user_text: str
 
 
+class InnovationKernelRecord(BaseModel):
+    exists: bool = False
+    kernel_markdown: str = ""
+    updated_at: str | None = None
+    source: Literal["create", "recreate"] | None = None
+
+
 class SessionEvent(BaseModel):
     id: str
     ts: str
@@ -87,6 +109,7 @@ class SessionEvent(BaseModel):
         "tool_call",
         "tool_result",
         "context_summary",
+        "context_pruned",
     ]
     seq: int
     scope: str

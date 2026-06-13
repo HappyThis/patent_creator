@@ -4,6 +4,7 @@ export type ChatMessageEvent = {
   role: 'user' | 'assistant';
   text: string;
   timestamp: string;
+  timestamp_ms?: number;
   round_id?: string;
   message_id?: string;
   seq?: number;
@@ -16,6 +17,7 @@ export type ToolCallEvent = {
   id: string;
   kind: 'tool_call';
   timestamp?: string;
+  timestamp_ms?: number;
   round_id?: string;
   message_id?: string;
   seq?: number;
@@ -32,6 +34,7 @@ export type RoundStatusEvent = {
   id: string;
   kind: 'round_status';
   timestamp?: string;
+  timestamp_ms?: number;
   round_id?: string;
   message_id?: string;
   seq?: number;
@@ -44,6 +47,7 @@ export type ContextStatusEvent = {
   id: string;
   kind: 'context_status';
   timestamp?: string;
+  timestamp_ms?: number;
   round_id?: string;
   message_id?: string;
   seq?: number;
@@ -58,7 +62,14 @@ export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent | Con
 export type SessionEventRecord = {
   id: string;
   ts: string;
-  type: 'user_input' | 'agent_message' | 'agent_output' | 'tool_call' | 'tool_result' | 'context_summary';
+  type:
+    | 'user_input'
+    | 'agent_message'
+    | 'agent_output'
+    | 'tool_call'
+    | 'tool_result'
+    | 'context_summary'
+    | 'context_pruned';
   seq: number;
   scope: string;
   round_id: string;

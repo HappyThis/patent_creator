@@ -24,6 +24,23 @@ class StubLLMClient:
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> str:
+        if "<innovation_kernel>" in user_prompt:
+            return (
+                "<analysis>生成测试创新内核。</analysis>\n"
+                "<innovation_kernel>\n"
+                "# 创新内核\n\n"
+                "## 1. 核心问题\n"
+                "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
+                "## 2. 创新构思\n"
+                "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
+                "## 3. 关键技术机制\n"
+                "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
+                "## 4. 技术效果\n"
+                "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
+                "## 5. 待确认边界\n"
+                "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
+                "</innovation_kernel>"
+            )
         message_count = len(messages or [])
         return (
             "<analysis>测试压缩。</analysis>\n"
@@ -71,7 +88,37 @@ class StubLLMClient:
                 if message.get("role") == "user"
             ]
             user_message = user_messages[-1] if user_messages else ""
-            if "技术效果" in user_message:
+            if "<innovation_kernel>" in user_message:
+                kernel_text = (
+                    "# 创新内核\n\n"
+                    "## 1. 核心问题\n"
+                    "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
+                    "## 2. 创新构思\n"
+                    "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
+                    "## 3. 关键技术机制\n"
+                    "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
+                    "## 4. 技术效果\n"
+                    "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
+                    "## 5. 待确认边界\n"
+                    "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
+                )
+                return {
+                    "type": "respond",
+                    "text": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
+                    "assistant_message": {
+                        "role": "assistant",
+                        "content": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
+                    },
+                }
+            if "创新内核" in user_message:
+                tool_calls = [
+                    {
+                        "tool": "innovation_kernel_kit",
+                        "arguments": {"action": "create"},
+                        "tool_call_id": "stub_call_kernel",
+                    }
+                ]
+            elif "技术效果" in user_message:
                 tool_calls = [
                     {
                         "tool": "document_replace_section_blocks",
@@ -242,6 +289,95 @@ async def collect_session_stream_events(
 
 
 @pytest.mark.anyio
+async def test_create_project_separates_project_name_and_disclosure_title(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        create_response = await client.post(
+            "/api/projects",
+            json={
+                "project_name": "A2UI 动态交互工作区",
+                "disclosure_title": "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法",
+            },
+        )
+        assert create_response.status_code == 200
+        project = create_response.json()
+        assert project["title"] == "A2UI 动态交互工作区"
+
+        render_response = await client.get(f"/api/projects/{project['project_id']}/render")
+        assert render_response.status_code == 200
+        assert (
+            render_response.json()["render_ast"]["title"]
+            == "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法"
+        )
+
+        default_title_response = await client.post(
+            "/api/projects",
+            json={"project_name": "只作为首页管理名的项目"},
+        )
+        assert default_title_response.status_code == 200
+        default_project = default_title_response.json()
+        default_render_response = await client.get(f"/api/projects/{default_project['project_id']}/render")
+        assert default_render_response.status_code == 200
+        assert default_render_response.json()["render_ast"]["title"] != default_project["title"]
+
+        rename_response = await client.patch(
+            f"/api/projects/{project['project_id']}",
+            json={"project_name": "A2UI 项目管理名已修改"},
+        )
+        assert rename_response.status_code == 200
+        assert rename_response.json()["title"] == "A2UI 项目管理名已修改"
+
+        renamed_render_response = await client.get(f"/api/projects/{project['project_id']}/render")
+        assert renamed_render_response.status_code == 200
+        assert (
+            renamed_render_response.json()["render_ast"]["title"]
+            == "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法"
+        )
+
+
+@pytest.mark.anyio
+async def test_delete_project_removes_project_from_workspace(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        create_response = await client.post("/api/projects", json={"project_name": "待删除项目"})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+        assert services.store.project_dir(project_id).exists()
+
+        delete_response = await client.delete(f"/api/projects/{project_id}")
+        assert delete_response.status_code == 200
+        assert delete_response.json()["deleted"] is True
+        assert delete_response.json()["project_id"] == project_id
+        assert not services.store.project_dir(project_id).exists()
+
+        missing_response = await client.get(f"/api/projects/{project_id}")
+        assert missing_response.status_code == 404
+
+        projects_response = await client.get("/api/projects")
+        assert projects_response.status_code == 200
+        project_ids = [project["project_id"] for project in projects_response.json()["projects"]]
+        assert project_id not in project_ids
+
+
+@pytest.mark.anyio
 async def test_project_chat_and_export(tmp_path: Path) -> None:
     settings = Settings(
         data_dir=tmp_path / "data",
@@ -257,7 +393,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         create_response = await client.post("/api/projects", json={"title": "一种图像检测方法"})
-        assert create_response.status_code == 405
+        assert create_response.status_code == 422
 
         projects_response = await client.get("/api/projects")
         assert projects_response.status_code == 200
@@ -278,16 +414,23 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert render_response.status_code == 200
         assert render_response.json()["render_ast"]["title"] == "一种图像检测方法"
 
+        kernel_events = await collect_stream_events(
+            client,
+            project_id,
+            {"message": "请先生成创新内核。"},
+        )
+        assert "innovation_kernel_changed" in [name for name, _ in kernel_events]
+        session_id = kernel_events[0][1]["session_id"]
+
         sse_events = await collect_stream_events(
             client,
             project_id,
-            {"message": "请补充技术效果章节，强调低算力实时性的收益。"},
+            {"session_id": session_id, "message": "请补充技术效果章节，强调低算力实时性的收益。"},
         )
         event_names = [name for name, _ in sse_events]
         assert event_names[0] == "round_started"
         assert "document_changed" in event_names
         assert event_names[-1] == "round_finished"
-        session_id = sse_events[0][1]["session_id"]
 
         session_events = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/events")
         assert session_events.status_code == 200
@@ -350,6 +493,52 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
             json={"session_id": "sess_missing", "message": "继续写。"},
         )
         assert missing_session_response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_innovation_kernel_api_and_stream_update_current_kernel(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+        round_step_delay=0.01,
+        round_finish_delay=0.01,
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        projects_response = await client.get("/api/projects")
+        assert projects_response.status_code == 200
+        project_id = projects_response.json()["projects"][0]["project_id"]
+
+        sse_events = await collect_stream_events(
+            client,
+            project_id,
+            {"message": "请基于当前材料生成创新内核。"},
+        )
+
+        event_names = [name for name, _ in sse_events]
+        assert event_names[0] == "round_started"
+        assert "innovation_kernel_changed" in event_names
+        assert event_names[-1] == "round_finished"
+
+        kernel_payload = next(payload for name, payload in sse_events if name == "innovation_kernel_changed")
+        assert kernel_payload["exists"] is True
+        assert kernel_payload["source"] == "create"
+        assert "确认" in kernel_payload["user_confirmation_reminder"]
+        assert "低算力终端" in kernel_payload["kernel_markdown"]
+
+        session_id = sse_events[0][1]["session_id"]
+        kernel_response = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/innovation-kernel")
+        assert kernel_response.status_code == 200
+        assert kernel_response.json()["kernel_markdown"] == kernel_payload["kernel_markdown"]
+
+        session_events_response = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/events")
+        assert session_events_response.status_code == 200
+        assert all(event["type"] != "innovation_kernel" for event in session_events_response.json()["events"])
 
 
 @pytest.mark.anyio

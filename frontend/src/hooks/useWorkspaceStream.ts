@@ -9,7 +9,7 @@ import {
 import { upsertActiveSessionSummary } from '../features/chat/sessionTabs';
 import { sseClient } from '../services/sse/client';
 import type { ChatStreamHandle, ChatStreamPayload } from '../services/sse/client';
-import type { ChatEvent, ProjectState, SessionSummary } from '../types';
+import type { ChatEvent, InnovationKernelState, ProjectState, SessionSummary } from '../types';
 
 type DocumentChangePayload = {
   changed_section_ids?: string[];
@@ -24,6 +24,7 @@ type WorkspaceStreamArgs = {
   setEvents: Dispatch<SetStateAction<ChatEvent[]>>;
   setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
   setSelectedSessionId: Dispatch<SetStateAction<string | null>>;
+  setInnovationKernel: Dispatch<SetStateAction<InnovationKernelState>>;
   setIsCancelling: Dispatch<SetStateAction<boolean>>;
   refreshProject: (project_id: string) => Promise<ProjectState>;
   refreshSessions: (project_id: string, preferred_session_id?: string | null) => Promise<SessionSummary[]>;
@@ -41,6 +42,7 @@ export function useWorkspaceStream({
   setEvents,
   setSessions,
   setSelectedSessionId,
+  setInnovationKernel,
   setIsCancelling,
   refreshProject,
   refreshSessions,
@@ -178,6 +180,16 @@ export function useWorkspaceStream({
         return;
       }
 
+      if (eventName === 'innovation_kernel_changed') {
+        setInnovationKernel({
+          exists: payload.exists === true,
+          kernel_markdown: typeof payload.kernel_markdown === 'string' ? payload.kernel_markdown : '',
+          updated_at: typeof payload.updated_at === 'string' ? payload.updated_at : null,
+          source: payload.source === 'create' || payload.source === 'recreate' ? payload.source : null,
+        });
+        return;
+      }
+
       if (eventName === 'round_finished') {
         setIsCancelling(false);
         closeStream();
@@ -263,6 +275,7 @@ export function useWorkspaceStream({
       refreshRenderAst,
       refreshSessions,
       setEvents,
+      setInnovationKernel,
       setIsCancelling,
       setProject,
       setSelectedSessionId,

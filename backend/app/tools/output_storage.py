@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 from uuid import uuid4
 
 from ..storage.workspace_store import WorkspaceStore
@@ -43,8 +42,4 @@ def write_tool_output(
     path = output_dir / name
     if not path.exists():
         path.write_text(content, encoding="utf-8")
-    return path.relative_to(store.project_dir(project_id)).as_posix()
-
-
-def project_relative_path(store: WorkspaceStore, project_id: str, path: Path) -> str:
     return path.relative_to(store.project_dir(project_id)).as_posix()

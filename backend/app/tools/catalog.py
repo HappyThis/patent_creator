@@ -15,9 +15,9 @@ from .builtin.document import (
     document_replace_section_blocks,
 )
 from .builtin.filesystem import file_glob, file_read, file_search
+from .builtin.innovation_kernel import innovation_kernel_kit
 from .builtin.shell import exec_command
 from .metadata import ToolFunctionMetadata, get_tool_metadata
-from .types import AgentScope
 
 SummaryStarted = Callable[[dict[str, Any]], str]
 SummaryFinished = Callable[[dict[str, Any], dict[str, Any]], str]
@@ -27,7 +27,6 @@ SummaryFinished = Callable[[dict[str, Any], dict[str, Any]], str]
 class ToolDeclaration:
     function: Callable[..., Any]
     metadata: ToolFunctionMetadata
-    scopes: frozenset[AgentScope]
     mutates_document: bool = False
     summary_started: SummaryStarted | None = None
     summary_finished: SummaryFinished | None = None
@@ -65,9 +64,6 @@ class ToolDeclaration:
                 "parameters": self.parameters,
             },
         }
-
-    def can_use(self, scope: AgentScope) -> bool:
-        return scope in self.scopes
 
     def started_summary(self, arguments: dict[str, Any]) -> str:
         if self.summary_started is not None:
@@ -226,10 +222,24 @@ def _file_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> st
     return "文件读取已完成"
 
 
+def _innovation_kernel_started(arguments: dict[str, Any]) -> str:
+    action = arguments.get("action")
+    if action == "read_all":
+        return "开始读取创新内核"
+    if action == "recreate":
+        return "开始重做创新内核"
+    return "开始生成创新内核"
+
+
+def _innovation_kernel_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    if arguments.get("action") == "read_all":
+        return "创新内核已读取"
+    return "创新内核已更新"
+
+
 @dataclass(frozen=True, slots=True)
 class _ToolRegistration:
     function: Callable[..., Any]
-    scopes: frozenset[AgentScope]
     mutates_document: bool = False
     summary_started: SummaryStarted | None = None
     summary_finished: SummaryFinished | None = None
@@ -242,7 +252,6 @@ def _build_tool_registry(registrations: tuple[_ToolRegistration, ...]) -> dict[s
         registry[metadata.name] = ToolDeclaration(
             function=registration.function,
             metadata=metadata,
-            scopes=registration.scopes,
             mutates_document=registration.mutates_document,
             summary_started=registration.summary_started,
             summary_finished=registration.summary_finished,
@@ -250,65 +259,59 @@ def _build_tool_registry(registrations: tuple[_ToolRegistration, ...]) -> dict[s
     return registry
 
 
-_MAIN: frozenset[AgentScope] = frozenset({"main_agent"})
-
 _TOOL_REGISTRATIONS = (
     _ToolRegistration(
         document_read,
-        _MAIN,
         summary_started=_document_read_started,
         summary_finished=_document_read_finished,
     ),
     _ToolRegistration(
         document_replace_section_blocks,
-        _MAIN,
         mutates_document=True,
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
     _ToolRegistration(
         document_append_block,
-        _MAIN,
         mutates_document=True,
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
     _ToolRegistration(
         document_replace_block,
-        _MAIN,
         mutates_document=True,
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
     _ToolRegistration(
         document_append_child_section,
-        _MAIN,
         mutates_document=True,
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
     _ToolRegistration(
         document_clear_section_blocks,
-        _MAIN,
         mutates_document=True,
         summary_started=_document_write_started,
         summary_finished=_document_write_finished,
     ),
-    _ToolRegistration(file_glob, _MAIN, summary_started=_file_glob_started, summary_finished=_file_glob_finished),
+    _ToolRegistration(file_glob, summary_started=_file_glob_started, summary_finished=_file_glob_finished),
     _ToolRegistration(
         file_search,
-        _MAIN,
         summary_started=_file_search_started,
         summary_finished=_file_search_finished,
     ),
-    _ToolRegistration(file_read, _MAIN, summary_started=_file_read_started, summary_finished=_file_read_finished),
-    _ToolRegistration(exec_command, _MAIN, summary_started=_exec_started, summary_finished=_exec_finished),
+    _ToolRegistration(file_read, summary_started=_file_read_started, summary_finished=_file_read_finished),
+    _ToolRegistration(
+        innovation_kernel_kit,
+        summary_started=_innovation_kernel_started,
+        summary_finished=_innovation_kernel_finished,
+    ),
+    _ToolRegistration(exec_command, summary_started=_exec_started, summary_finished=_exec_finished),
 )
 _TOOL_REGISTRY = _build_tool_registry(_TOOL_REGISTRATIONS)
 
 DOCUMENT_WRITE_TOOL_NAMES = tuple(
     declaration.name for declaration in _TOOL_REGISTRY.values() if declaration.mutates_document
 )
-MAIN_AGENT_TOOL_NAMES = tuple(
-    declaration.name for declaration in _TOOL_REGISTRY.values() if declaration.can_use("main_agent")
-)
+MAIN_AGENT_TOOL_NAMES = tuple(_TOOL_REGISTRY)

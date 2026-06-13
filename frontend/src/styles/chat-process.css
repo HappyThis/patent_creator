@@ -1,8 +1,9 @@
 .process-group {
-  padding: 12px 12px 13px;
-  border: 1px solid rgba(92, 82, 68, 0.1);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.22);
+  margin: 6px 0 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--chat-muted);
 }
 
@@ -12,9 +13,20 @@
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  color: #6d6860;
+  color: #aaa397;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.2;
+  transform: translateX(-2px);
+}
+
+.process-summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(127, 153, 184, 0.54);
+  box-shadow: 0 0 0 4px var(--paper-shell);
 }
 
 .process-summary::-webkit-details-marker {
@@ -23,14 +35,14 @@
 
 .process-summary-meta {
   font-weight: 400;
-  color: #9a9387;
+  color: #b7afa3;
 }
 
 .process-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 10px;
+  padding: 10px 0 0 16px;
 }
 
 .command-item {
@@ -58,8 +70,8 @@
 }
 
 .round-status {
-  border-top: 1px solid var(--chat-line);
-  padding-top: 12px;
+  border-top: 1px solid var(--chat-soft-line);
+  padding-top: 14px;
   color: var(--chat-muted);
   font-size: 12px;
   line-height: 1.6;
@@ -223,13 +235,13 @@
 }
 
 .command-title {
-  color: #465056;
+  color: #4f5658;
   font-weight: 600;
   line-height: 1.35;
 }
 
 .command-description {
-  color: #9a9387;
+  color: #a69e92;
   font-size: 11px;
   line-height: 1.35;
 }
@@ -242,10 +254,10 @@
 
 .command-output-shell {
   margin: 8px 0 0 17px;
-  border: 1px solid var(--chat-line);
+  border: 1px solid var(--chat-soft-line);
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.32);
 }
 
 .command-output-header {

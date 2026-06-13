@@ -1,17 +1,18 @@
 .chat-scroll {
   flex: 1;
   min-height: 0;
-  padding: 14px 18px 12px;
+  padding: 10px 18px 8px;
   background: transparent;
 }
 
 .chat-thread {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0;
 }
 
 .message-row {
+  position: relative;
   display: flex;
   flex-direction: column;
   max-width: 100%;
@@ -29,23 +30,26 @@
 }
 
 .message-bubble {
-  line-height: 1.55;
+  line-height: 1.66;
   font-size: 14px;
 }
 
 .message-bubble.user {
-  max-width: 82%;
-  padding: 9px 14px;
-  border-radius: 16px;
-  background: #f8f4ed;
-  border: 1px solid rgba(92, 82, 68, 0.15);
-  color: #2b3438;
+  max-width: 78%;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.7);
+  border: 1px solid rgba(62, 55, 45, 0.12);
+  color: #2b2f31;
+  text-align: right;
+  box-shadow: 0 8px 22px rgba(56, 48, 38, 0.035);
 }
 
 .message-bubble.assistant {
-  padding: 0 0 0 10px;
-  background: linear-gradient(90deg, rgba(199, 159, 87, 0.18), rgba(199, 159, 87, 0)) left top / 2px 100% no-repeat;
-  color: #2b3438;
+  max-width: 900px;
+  padding: 0 0 0 14px;
+  background: linear-gradient(90deg, rgba(181, 149, 95, 0.14), rgba(181, 149, 95, 0)) left top / 1px 100% no-repeat;
+  color: #25231f;
   border: 0;
 }
 
@@ -56,7 +60,7 @@
 
 .markdown-body {
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.66;
   word-wrap: break-word;
 }
 
@@ -69,7 +73,7 @@
 }
 
 .markdown-body p {
-  margin: 0 0 8px;
+  margin: 0 0 9px;
   white-space: pre-wrap;
 }
 
@@ -84,8 +88,9 @@
 .markdown-body h5,
 .markdown-body h6 {
   margin: 14px 0 6px;
-  font-weight: 600;
+  font-weight: 680;
   line-height: 1.3;
+  color: #25231f;
 }
 
 .markdown-body h1 {
@@ -93,7 +98,7 @@
 }
 
 .markdown-body h2 {
-  font-size: 16px;
+  font-size: 17px;
 }
 
 .markdown-body h3 {
@@ -108,12 +113,12 @@
 
 .markdown-body ul,
 .markdown-body ol {
-  margin: 4px 0 8px;
-  padding-left: 22px;
+  margin: 8px 0 12px;
+  padding-left: 20px;
 }
 
 .markdown-body li {
-  margin: 2px 0;
+  margin: 3px 0;
 }
 
 .markdown-body li>p {
@@ -121,11 +126,11 @@
 }
 
 .markdown-body blockquote {
-  margin: 6px 0;
-  padding: 4px 12px;
-  border-left: 3px solid #d0c8b8;
-  color: #5a6268;
-  background: rgba(0, 0, 0, 0.02);
+  margin: 8px 0;
+  padding: 5px 12px;
+  border-left: 2px solid rgba(111, 141, 130, 0.32);
+  color: #5f5b52;
+  background: rgba(255, 255, 255, 0.24);
 }
 
 .markdown-body code {
@@ -161,26 +166,28 @@
 
 .markdown-body table {
   border-collapse: collapse;
-  margin: 8px 0;
+  margin: 10px 0 12px;
   font-size: 13px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid #d7d1c4;
-  padding: 4px 8px;
+  border: 1px solid rgba(62, 55, 45, 0.12);
+  padding: 7px 10px;
   text-align: left;
 }
 
 .markdown-body th {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(255, 255, 255, 0.34);
   font-weight: 600;
 }
 
 .markdown-body hr {
   border: 0;
-  border-top: 1px solid #d7d1c4;
-  margin: 10px 0;
+  border-top: 1px solid rgba(62, 55, 45, 0.12);
+  margin: 16px 0;
 }
 
 .markdown-body img {
@@ -193,15 +200,90 @@
 }
 
 .message-row time {
+  position: absolute;
+  bottom: -17px;
   font-size: 11px;
   color: var(--chat-muted);
   padding: 0 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.message-row.user:hover time,
+.message-row.user:focus-within time,
+.message-row.assistant.show-round-time time {
+  opacity: 0.72;
 }
 
 .message-row.user time {
-  align-self: flex-end;
+  right: 2px;
 }
 
 .message-row.assistant time {
-  align-self: flex-start;
+  left: 14px;
+}
+
+.assistant-round {
+  max-width: 900px;
+}
+
+.assistant-round-trace {
+  margin: 0 0 8px 14px;
+  color: var(--chat-muted);
+}
+
+.assistant-round-trace > summary {
+  width: fit-content;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #a59d91;
+  font-size: 12px;
+  line-height: 1.2;
+  user-select: none;
+}
+
+.assistant-round-trace > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-round-trace > summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(127, 153, 184, 0.48);
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.assistant-round-trace[open] > summary::before {
+  background: rgba(111, 141, 130, 0.72);
+  transform: scale(1.08);
+}
+
+.assistant-round-trace > summary small {
+  color: #b7afa3;
+  font-size: 12px;
+}
+
+.assistant-round-trace-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-left: 14px;
+  border-left: 1px solid rgba(62, 55, 45, 0.08);
+}
+
+.trace-message {
+  color: #5c5f5d;
+  font-size: 13px;
+}
+
+.trace-message .markdown-body {
+  font-size: 13px;
+  line-height: 1.58;
 }

@@ -3,11 +3,11 @@ import { apiClient } from '../services/api/client';
 import type { ChatEvent } from '../types';
 import { formatTimestamp } from '../features/chat/chatEventTransforms';
 import { buildSessionTabs } from '../features/chat/sessionTabs';
-import { useWorkspaceData } from './useWorkspaceData';
+import { emptyInnovationKernel, useWorkspaceData } from './useWorkspaceData';
 import { useWorkspaceSelection } from './useWorkspaceSelection';
 import { useWorkspaceStream } from './useWorkspaceStream';
 
-export function useWorkspace() {
+export function useWorkspace(projectId: string | null) {
   const [composer, setComposer] = useState('');
   const [isCancelling, setIsCancelling] = useState(false);
   const {
@@ -17,7 +17,6 @@ export function useWorkspace() {
     recentBlockIds,
     previewFocusTarget,
     setActiveSectionId,
-    selectSection,
     syncActiveSection,
     focusDocumentChange,
     resetRecent,
@@ -28,6 +27,8 @@ export function useWorkspace() {
     renderAst,
     events,
     setEvents,
+    innovationKernel,
+    setInnovationKernel,
     sessions,
     setSessions,
     selectedSessionId,
@@ -37,8 +38,10 @@ export function useWorkspace() {
     refreshRenderAst,
     refreshProject,
     refreshSessions,
+    refreshInnovationKernel,
     loadSessionEvents,
-    ensureProject,
+    clearWorkspace,
+    loadProject,
   } = useWorkspaceData(syncActiveSection);
   const { closeStream, trackOptimisticMessage, startChatMessageStream } = useWorkspaceStream({
     project,
@@ -46,6 +49,7 @@ export function useWorkspace() {
     setEvents,
     setSessions,
     setSelectedSessionId,
+    setInnovationKernel,
     setIsCancelling,
     refreshProject,
     refreshSessions,
@@ -56,8 +60,17 @@ export function useWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!projectId) {
+      closeStream();
+      clearWorkspace();
+      setIsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     setIsLoading(true);
-    ensureProject()
+    loadProject(projectId)
       .catch((error: unknown) => {
         if (cancelled) {
           return;
@@ -79,11 +92,11 @@ export function useWorkspace() {
         }
       });
 
-    return () => {
-      cancelled = true;
-      closeStream();
-    };
-  }, [closeStream, ensureProject]);
+      return () => {
+        cancelled = true;
+        closeStream();
+      };
+  }, [clearWorkspace, closeStream, loadProject, projectId, setEvents, setIsLoading]);
 
   const handleSessionSelect = useCallback(
     async (session_id: string) => {
@@ -94,8 +107,9 @@ export function useWorkspace() {
       setSelectedSessionId(session_id);
       resetRecent();
       await loadSessionEvents(project.project_id, session_id);
+      await refreshInnovationKernel(project.project_id, session_id);
     },
-    [closeStream, loadSessionEvents, project, resetRecent, selectedSessionId],
+    [closeStream, loadSessionEvents, project, refreshInnovationKernel, resetRecent, selectedSessionId],
   );
 
   const handleNewSession = useCallback(() => {
@@ -106,6 +120,7 @@ export function useWorkspace() {
     setSelectedSessionId(null);
     resetRecent();
     setEvents([]);
+    setInnovationKernel(emptyInnovationKernel);
     trackOptimisticMessage(null);
     setProject((current) =>
       current
@@ -115,7 +130,7 @@ export function useWorkspace() {
           }
         : current,
     );
-  }, [closeStream, project, resetRecent, trackOptimisticMessage]);
+  }, [closeStream, project, resetRecent, setInnovationKernel, trackOptimisticMessage]);
 
   const submitMessage = useCallback(async () => {
     const message = composer.trim();
@@ -259,8 +274,10 @@ export function useWorkspace() {
 
   return {
     renderAst,
+    innovationKernel,
     events,
     composer,
+    isLoading,
     isBusy: project?.is_busy ?? isLoading,
     isCancelling,
     canCancelRound,
@@ -273,7 +290,6 @@ export function useWorkspace() {
     recentBlockIds,
     setComposer,
     setActiveSectionId,
-    selectSection,
     submitMessage,
     cancelCurrentRound,
     exportMarkdown,

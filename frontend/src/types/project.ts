@@ -34,3 +34,10 @@ export type SessionTab = SessionSummary & {
   subtitle?: string;
   active: boolean;
 };
+
+export type InnovationKernelState = {
+  exists: boolean;
+  kernel_markdown: string;
+  updated_at: string | null;
+  source: 'create' | 'recreate' | null;
+};

@@ -13,16 +13,6 @@ export function useWorkspaceSelection() {
   const [recentBlockIds, setRecentBlockIds] = useState<string[]>([]);
   const [previewFocusTarget, setPreviewFocusTarget] = useState<PreviewFocusTarget | null>(null);
 
-  const selectSection = useCallback((sectionId: string) => {
-    setActiveSectionId(sectionId);
-    setActiveBlockId(null);
-    setPreviewFocusTarget({
-      sectionId,
-      blockId: null,
-      nonce: Date.now(),
-    });
-  }, []);
-
   const syncActiveSection = useCallback((sectionId: string | null | undefined) => {
     if (sectionId) {
       setActiveSectionId(sectionId);
@@ -63,7 +53,6 @@ export function useWorkspaceSelection() {
     recentBlockIds,
     previewFocusTarget,
     setActiveSectionId,
-    selectSection,
     syncActiveSection,
     focusDocumentChange,
     resetRecent,

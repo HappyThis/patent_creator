@@ -11,6 +11,31 @@ from app.services import AppServices
 from helpers import ScriptedLLMClient, create_project, make_settings, tool_call, wait_until_idle
 
 
+def create_kernel_session(services: AppServices, project_id: str, session_id: str = "sess_with_kernel") -> str:
+    services.store.append_session_event(
+        project_id,
+        session_id,
+        event_type="user_input",
+        scope="main",
+        round_id="round_seed",
+        message_id="msg_seed",
+        payload={"text": "seed innovation kernel"},
+    )
+    services.store.save_innovation_kernel(
+        project_id,
+        session_id,
+        kernel_markdown=(
+            "# Innovation Kernel\n\n"
+            "## Core Problem\n"
+            "A reliable kernel must exist before disclosure text is edited.\n\n"
+            "## Technical Direction\n"
+            "Use the kernel as the factual basis for document writing."
+        ),
+        source="create",
+    )
+    return session_id
+
+
 @pytest.mark.anyio
 async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     """覆盖 read -> document_replace_section_blocks -> respond 的主 agent-only 链路。"""
@@ -48,12 +73,12 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     llm = ScriptedLLMClient([step_read, step_edit, step_respond])
     services = AppServices(make_settings(tmp_path), llm_client=llm)
     project_id = await create_project(services)
+    session_id = create_kernel_session(services, project_id)
 
     response = await services.chat.start_round(
         project_id,
-        ChatMessageRequest(message="请补充技术效果。"),
+        ChatMessageRequest(session_id=session_id, message="请补充技术效果。"),
     )
-    session_id = response.session_id
     await wait_until_idle(services, project_id)
 
     events = services.store.read_session_events(project_id, session_id)
@@ -80,6 +105,90 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     disclosure = services.store.get_disclosure(project_id)
     technical_effects = next(s for s in disclosure["sections"] if s["type"] == "technical_effects")
     assert len(technical_effects["blocks"]) >= 1
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_blocks_document_write_without_innovation_kernel(tmp_path: Path) -> None:
+    def step_write_without_kernel(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "document_replace_section_blocks",
+                    {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "should not write"}]},
+                    "call_write_without_kernel",
+                )
+            ],
+        }
+
+    def step_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "innovation_kernel_required"
+        assert "innovation_kernel_kit" in result["output"]["message"]
+        return {"type": "respond", "text": "Need an innovation kernel first."}
+
+    llm = ScriptedLLMClient([step_write_without_kernel, step_recover])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="Write the disclosure."))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    failed_tool_result = next(
+        event
+        for event in events
+        if event.type == "tool_result" and event.call_id == "call_write_without_kernel"
+    )
+    assert failed_tool_result.payload["status"] == "failed"
+    assert failed_tool_result.payload["output"]["code"] == "innovation_kernel_required"
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    names = [name for name, _ in bus_events]
+    assert "document_changed" not in names
+    assert names[-1] == "round_finished"
+    assert bus_events[-1][1]["changed"] is False
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_allows_document_write_with_current_innovation_kernel(tmp_path: Path) -> None:
+    def step_write_with_kernel(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "document_replace_section_blocks",
+                    {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "allowed write"}]},
+                    "call_write_with_kernel",
+                )
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert result["status"] == "success"
+        return {"type": "respond", "text": "Updated with current innovation kernel."}
+
+    llm = ScriptedLLMClient([step_write_with_kernel, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+    session_id = create_kernel_session(services, project_id, "sess_current_kernel")
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=session_id, message="Write the disclosure."))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, session_id)
+    tool_result = next(event for event in events if event.type == "tool_result" and event.call_id == "call_write_with_kernel")
+    assert tool_result.payload["status"] == "success"
+
+    bus_events, _ = await services.bus.subscribe((project_id, session_id))
+    names = [name for name, _ in bus_events]
+    assert "document_changed" in names
+    assert names[-1] == "round_finished"
+    assert bus_events[-1][1]["changed"] is True
 
 @pytest.mark.anyio
 async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_message(tmp_path: Path) -> None:
