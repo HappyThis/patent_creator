@@ -101,7 +101,15 @@ async def innovation_kernel_kit(
         kernel_markdown=kernel_markdown,
         source=action,
     )
-    return tool_success(record.model_dump())
+    return tool_success(
+        {
+            **record.model_dump(),
+            "user_confirmation_reminder": (
+                "创新内核已生成或更新。若用户有交底书写作需求，"
+                "请提醒用户先确认当前技术内核是否准确，再基于该内核继续写作。"
+            ),
+        }
+    )
 
 
 def _caller_prefix_messages(caller_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

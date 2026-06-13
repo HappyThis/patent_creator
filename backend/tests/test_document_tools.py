@@ -460,3 +460,43 @@ def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
     )
     assert external_search["status"] == "success"
     assert external_search["output"]["matches"][0]["path"] == str(external_file)
+
+
+def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    many_dir = workspace / "many"
+    many_dir.mkdir()
+    for index in range(10):
+        (many_dir / f"{index:02d}.txt").write_text("ok", encoding="utf-8")
+
+    glob_result = run_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"path": "many", "pattern": "*", "limit": 100, "max_scanned_paths": 3},
+    )
+
+    assert glob_result["status"] == "success"
+    assert glob_result["output"]["stop_reason"] == "scan_budget_exceeded"
+    assert glob_result["output"]["truncated"] is True
+    assert glob_result["output"]["scanned"] == 3
+    assert glob_result["output"]["scan_budget"] == 3
+    assert glob_result["output"]["total_is_lower_bound"] is True
+
+
+def test_file_glob_skips_heavy_directories_during_scan(tmp_path: Path) -> None:
+    executor, project_id = make_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    source_dir = workspace / "src"
+    source_dir.mkdir()
+    (source_dir / "visible.py").write_text("print('visible')\n", encoding="utf-8")
+    vendor_dir = workspace / "node_modules"
+    vendor_dir.mkdir()
+    (vendor_dir / "hidden.py").write_text("print('hidden')\n", encoding="utf-8")
+
+    glob_result = run_tool(executor, project_id, "file_glob", {"pattern": "**/*.py", "limit": 100})
+
+    assert glob_result["status"] == "success"
+    assert glob_result["output"]["matches"] == ["src/visible.py"]
+    assert "node_modules" in glob_result["output"]["skipped_dirs"]

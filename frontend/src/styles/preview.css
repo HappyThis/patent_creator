@@ -77,14 +77,14 @@
 }
 
 .preview-empty-hint {
-  margin: -1px 0 8px 50px;
-  color: rgba(77, 72, 64, 0.42);
-  font-size: 13px;
-  line-height: 1.6;
+  margin: -4px 0 10px 52px;
+  color: rgba(77, 72, 64, 0.34);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .preview-section.empty {
-  opacity: 0.58;
+  opacity: 0.66;
 }
 
 .preview-section.empty h2,

@@ -34,6 +34,13 @@
     min-height: 520px;
   }
 
+  .chat-stage .chat-thread,
+  .chat-stage .composer-inline,
+  .chat-workspace.side-panel-open .chat-stage .chat-thread,
+  .chat-workspace.side-panel-open .chat-stage .composer-inline {
+    width: calc(100% - 76px);
+  }
+
   .chat-workspace {
     grid-template-columns: 1fr;
     height: auto;

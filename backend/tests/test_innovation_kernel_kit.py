@@ -137,6 +137,7 @@ def test_innovation_kernel_kit_create_read_and_recreate_current_only(tmp_path: P
     created = run_kernel_tool(executor, project_id, session_id, llm, settings, "create")
     assert created["status"] == "success"
     assert created["output"]["source"] == "create"
+    assert "确认" in created["output"]["user_confirmation_reminder"]
     assert "旧问题" in created["output"]["kernel_markdown"]
 
     read = run_kernel_tool(executor, project_id, session_id, llm, settings, "read_all")
@@ -146,6 +147,7 @@ def test_innovation_kernel_kit_create_read_and_recreate_current_only(tmp_path: P
     recreated = run_kernel_tool(executor, project_id, session_id, llm, settings, "recreate")
     assert recreated["status"] == "success"
     assert recreated["output"]["source"] == "recreate"
+    assert "确认" in recreated["output"]["user_confirmation_reminder"]
     assert "新问题" in recreated["output"]["kernel_markdown"]
     assert "旧问题" not in store.get_innovation_kernel(project_id, session_id).kernel_markdown
     assert llm.prompts[-1]["system_prompt"] == "MAIN_SYSTEM_PROMPT"

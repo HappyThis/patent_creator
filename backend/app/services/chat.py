@@ -398,6 +398,22 @@ class ChatService:
                 result.get("status"),
             )
             return result
+        if tool_call.tool in DOCUMENT_WRITE_TOOL_NAMES and not self._session_has_innovation_kernel(project_id, state.session_id):
+            result = self._innovation_kernel_required_result()
+            await self.events.failed_tool_result(
+                project_id,
+                state,
+                tool=tool_call.tool,
+                call_id=tool_call.tool_call_id,
+                result=result,
+            )
+            logger.info(
+                "round tool_call id=%s tool=%s status=%s reason=innovation_kernel_required",
+                tool_call.tool_call_id,
+                tool_call.tool,
+                result.get("status"),
+            )
+            return result
         try:
             declaration = get_tool_declaration(tool_call.tool)
         except KeyError:
@@ -460,6 +476,21 @@ class ChatService:
     @staticmethod
     def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
         return tool_failed("invalid_tool_arguments_json", message)
+
+    @staticmethod
+    def _innovation_kernel_required_result() -> dict[str, Any]:
+        return tool_failed(
+            "innovation_kernel_required",
+            (
+                "当前 session 尚无可依赖的创新内核，不能写入或改写交底书正文。"
+                "请先基于当前上下文调用 innovation_kernel_kit 的 create action 生成创新内核；"
+                "如果已有内核但需要调整，请调用 innovation_kernel_kit 的 recreate action。"
+            ),
+        )
+
+    def _session_has_innovation_kernel(self, project_id: str, session_id: str) -> bool:
+        kernel = self.store.get_innovation_kernel(project_id, session_id)
+        return bool(kernel and kernel.kernel_markdown.strip())
 
     async def _commit(self, project_id: str, changed_payload: dict[str, Any]) -> tuple[bool, dict[str, str] | None]:
         return await asyncio.to_thread(

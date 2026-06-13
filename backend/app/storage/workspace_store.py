@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import stat
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -59,7 +61,7 @@ class WorkspaceStore:
         if project.is_busy or project.running_session_id or project.running_round_id:
             raise ApiError(409, "project_busy", "项目正在运行，不能删除。")
 
-        shutil.rmtree(self.project_dir(project_id))
+        shutil.rmtree(self.project_dir(project_id), onerror=_make_writable_and_retry)
 
         pointer_path = self.root_dir / CURRENT_PROJECT_POINTER
         next_project_id: str | None = None
@@ -363,3 +365,8 @@ class WorkspaceStore:
         ]
         for command in commands:
             subprocess.run(command, cwd=workspace, capture_output=True, text=True, check=False)
+
+
+def _make_writable_and_retry(function: Any, path: str, _exc_info: Any) -> None:
+    os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+    function(path)

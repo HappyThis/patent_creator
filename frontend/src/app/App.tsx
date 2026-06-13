@@ -40,8 +40,10 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => readProjectIdFromPath());
   const [isKernelOpen, setIsKernelOpen] = useState(false);
   const [isDisclosureOpen, setIsDisclosureOpen] = useState(false);
+  const [hasUnseenKernelUpdate, setHasUnseenKernelUpdate] = useState(false);
   const [kernelWidth, setKernelWidth] = useState(340);
   const [disclosureWidth, setDisclosureWidth] = useState(460);
+  const previousKernelUpdateRef = useRef<string | null>(null);
   const {
     renderAst,
     events,
@@ -65,6 +67,8 @@ function App() {
     handleNewSession,
   } = useWorkspace(selectedProjectId);
   const documentStats = buildDocumentStats(renderAst);
+  const activeSessionId = sessionTabs.find((tab) => tab.active)?.session_id ?? null;
+  const hasInnovationKernel = innovationKernel.exists && innovationKernel.kernel_markdown.trim().length > 0;
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -92,6 +96,41 @@ function App() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    previousKernelUpdateRef.current = null;
+    setHasUnseenKernelUpdate(false);
+  }, [activeSessionId, selectedProjectId]);
+
+  useEffect(() => {
+    const updateKey = innovationKernel.updated_at ?? (hasInnovationKernel ? innovationKernel.kernel_markdown : null);
+    if (!updateKey) {
+      previousKernelUpdateRef.current = null;
+      setHasUnseenKernelUpdate(false);
+      return;
+    }
+
+    if (previousKernelUpdateRef.current === null) {
+      previousKernelUpdateRef.current = updateKey;
+      if (!isKernelOpen && isBusy) {
+        setHasUnseenKernelUpdate(true);
+      }
+      return;
+    }
+
+    if (previousKernelUpdateRef.current !== updateKey) {
+      previousKernelUpdateRef.current = updateKey;
+      if (!isKernelOpen) {
+        setHasUnseenKernelUpdate(true);
+      }
+    }
+  }, [hasInnovationKernel, innovationKernel.kernel_markdown, innovationKernel.updated_at, isBusy, isKernelOpen]);
+
+  useEffect(() => {
+    if (isKernelOpen) {
+      setHasUnseenKernelUpdate(false);
+    }
+  }, [isKernelOpen]);
 
   const handleProjectSelect = useCallback((projectId: string) => {
     window.history.pushState(null, '', `/projects/${encodeURIComponent(projectId)}`);
@@ -211,11 +250,22 @@ function App() {
     '--left-resizer-width': isKernelOpen ? '10px' : '0px',
     '--right-resizer-width': isDisclosureOpen ? '10px' : '0px',
   };
+  const kernelToggleLabel = hasUnseenKernelUpdate
+    ? '技术内核已更新，点击查看'
+    : isKernelOpen
+      ? '收起技术内核'
+      : '展开技术内核';
 
   return (
     <div className="app-shell workspace-shell">
       <main
-        className={`workspace chat-workspace ${isKernelOpen || isDisclosureOpen ? 'side-panel-open' : 'no-side-panels'}`}
+        className={[
+          'workspace',
+          'chat-workspace',
+          isKernelOpen || isDisclosureOpen ? 'side-panel-open' : 'no-side-panels',
+          isKernelOpen ? 'kernel-open' : '',
+          isDisclosureOpen ? 'disclosure-open' : '',
+        ].filter(Boolean).join(' ')}
         style={workspaceStyle}
       >
         {isKernelOpen ? (
@@ -235,23 +285,44 @@ function App() {
 
         <section className="chat-stage">
           <button
-            className={`workspace-edge-toggle workspace-edge-toggle-left ${isKernelOpen ? 'active' : ''}`}
+            className={[
+              'workspace-edge-toggle',
+              'workspace-edge-toggle-left',
+              'workspace-edge-toggle-kernel',
+              isKernelOpen ? 'active' : '',
+              hasInnovationKernel ? 'has-content' : 'empty',
+              hasUnseenKernelUpdate ? 'has-unseen-update' : '',
+            ].filter(Boolean).join(' ')}
             type="button"
             onClick={() => setIsKernelOpen((current) => !current)}
             aria-pressed={isKernelOpen}
-            aria-label={isKernelOpen ? '收起创新内核' : '展开创新内核'}
-            title={isKernelOpen ? '收起创新内核' : '展开创新内核'}
+            aria-label={kernelToggleLabel}
+            title={kernelToggleLabel}
           >
             <span className="workspace-panel-icon workspace-panel-icon-left" aria-hidden="true" />
           </button>
 
           <button
-            className={`workspace-edge-toggle workspace-edge-toggle-right ${isDisclosureOpen ? 'active' : ''}`}
+            className={[
+              'workspace-edge-toggle',
+              'workspace-edge-toggle-right',
+              'workspace-edge-toggle-disclosure',
+              isDisclosureOpen ? 'active' : '',
+              hasInnovationKernel ? 'kernel-ready' : 'requires-kernel',
+            ].filter(Boolean).join(' ')}
             type="button"
             onClick={() => setIsDisclosureOpen((current) => !current)}
             aria-pressed={isDisclosureOpen}
-            aria-label={isDisclosureOpen ? '收起交底书' : '展开交底书预览'}
-            title={isDisclosureOpen ? '收起交底书' : '展开交底书'}
+            aria-label={
+              isDisclosureOpen
+                ? '收起交底书预览'
+                : '预览交底书'
+            }
+            title={
+              isDisclosureOpen
+                ? '收起交底书预览'
+                : '预览交底书'
+            }
           >
             <span className="workspace-panel-icon workspace-panel-icon-right" aria-hidden="true" />
           </button>

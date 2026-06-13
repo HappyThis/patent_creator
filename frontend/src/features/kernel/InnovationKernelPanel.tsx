@@ -17,7 +17,7 @@ export function InnovationKernelPanel({ innovationKernel }: InnovationKernelPane
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
           </article>
         ) : (
-          <div className="kernel-empty">当前 session 暂无创新内核</div>
+          <div className="kernel-empty">暂无内容</div>
         )}
       </div>
     </section>

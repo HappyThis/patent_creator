@@ -3,13 +3,14 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  color: #253239;
 }
 
 .kernel-scroll {
   min-height: 0;
   flex: 1;
   overflow: auto;
-  padding: 18px 20px 46px;
+  padding: 20px 22px 46px;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -53,10 +54,8 @@
 }
 
 .kernel-empty {
-  padding: 16px;
-  border: 1px solid rgba(92, 82, 68, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.42);
-  color: #7c8585;
-  font-size: 14px;
+  padding: 2px 0;
+  color: rgba(91, 101, 101, 0.52);
+  font-size: 13px;
+  line-height: 1.5;
 }

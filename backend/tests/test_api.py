@@ -414,16 +414,23 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert render_response.status_code == 200
         assert render_response.json()["render_ast"]["title"] == "一种图像检测方法"
 
+        kernel_events = await collect_stream_events(
+            client,
+            project_id,
+            {"message": "请先生成创新内核。"},
+        )
+        assert "innovation_kernel_changed" in [name for name, _ in kernel_events]
+        session_id = kernel_events[0][1]["session_id"]
+
         sse_events = await collect_stream_events(
             client,
             project_id,
-            {"message": "请补充技术效果章节，强调低算力实时性的收益。"},
+            {"session_id": session_id, "message": "请补充技术效果章节，强调低算力实时性的收益。"},
         )
         event_names = [name for name, _ in sse_events]
         assert event_names[0] == "round_started"
         assert "document_changed" in event_names
         assert event_names[-1] == "round_finished"
-        session_id = sse_events[0][1]["session_id"]
 
         session_events = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/events")
         assert session_events.status_code == 200
@@ -521,6 +528,7 @@ async def test_innovation_kernel_api_and_stream_update_current_kernel(tmp_path: 
         kernel_payload = next(payload for name, payload in sse_events if name == "innovation_kernel_changed")
         assert kernel_payload["exists"] is True
         assert kernel_payload["source"] == "create"
+        assert "确认" in kernel_payload["user_confirmation_reminder"]
         assert "低算力终端" in kernel_payload["kernel_markdown"]
 
         session_id = sse_events[0][1]["session_id"]

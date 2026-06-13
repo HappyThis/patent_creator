@@ -18,16 +18,16 @@
   --text-soft: #7d7a73;
   --accent: #7f99b8;
   --accent-soft: rgba(127, 153, 184, 0.14);
-  --paper-shell: #f4efe7;
+  --paper-shell: #f4f0e9;
   --paper-sidebar: #f4efe7;
   --paper-border: #e2dacd;
   --paper: #f4efe7;
   --paper-text: #162132;
   --recent: #d7a34a;
-  --chat-panel: #f4f0e8;
-  --chat-muted: #8a857b;
-  --chat-line: rgba(92, 82, 68, 0.14);
-  --chat-soft-line: rgba(92, 82, 68, 0.09);
+  --chat-panel: #f4f0e9;
+  --chat-muted: #8b8377;
+  --chat-line: rgba(62, 55, 45, 0.13);
+  --chat-soft-line: rgba(62, 55, 45, 0.08);
 }
 
 * {
