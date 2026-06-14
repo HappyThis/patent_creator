@@ -403,14 +403,14 @@ agent 不需要执行：
 
 1. runner 通过完整主 agent 对话接口提交输入。
 2. 主 agent 本轮结束后，runner 读取当前交底书文档。
-3. runner 只抽取 `technical_solution` 章节，生成 `evaluated_artifact.md`。
+3. runner 只抽取标题为“技术方案”的章节，生成 `evaluated_artifact.md`。
 4. judge 仅基于 `evaluated_artifact.md`、隐藏参考方案和 rubric 评分。
 
 最终聊天回复、工具调用轨迹、session event、文档 diff 等不作为评分输入。它们可以用于 runner 调试和失败排查，但不能参与正式评分。
 
-runner 应在工具层限制文档写入工具的目标章节：正式评测中只允许写入 `technical_solution`。如果主 agent 尝试编辑技术领域、背景技术、现有技术方案、技术问题、技术效果等其他章节，工具应返回失败结果，促使主 agent 回到技术方案章节。
+runner 应在工具层限制文档写入工具的目标章节：正式评测中只允许写入标题为“技术方案”的章节。如果主 agent 尝试编辑技术领域、背景技术、现有技术方案、技术问题、技术效果等其他章节，工具应返回失败结果，促使主 agent 回到技术方案章节。
 
-如果 `technical_solution` 章节为空，或内容明显不是技术方案，runner 可以继续向同一主 agent 会话发送固定补充指令，要求继续充实技术方案章节。补充次数由 runner 配置控制；超过次数后仍未形成有效技术方案的 case 记为 `skipped_no_solution_artifact`，不得使用最终聊天回复兜底评分。
+如果“技术方案”章节为空，或内容明显不是技术方案，runner 可以继续向同一主 agent 会话发送固定补充指令，要求继续充实技术方案章节。补充次数由 runner 配置控制；超过次数后仍未形成有效技术方案的 case 记为 `skipped_no_solution_artifact`，不得使用最终聊天回复兜底评分。
 
 ## 评分维度
 

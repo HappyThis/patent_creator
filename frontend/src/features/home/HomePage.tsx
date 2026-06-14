@@ -132,14 +132,13 @@ export function HomePage({
         <div className="home-heading">
           <div>
             <h1 id="home-title">选择项目</h1>
-            <p className="home-kicker">{projects.length} 个项目</p>
+            {projects.length > 0 ? <p className="home-kicker">{projects.length} 个项目</p> : null}
           </div>
         </div>
 
         {error ? <div className="home-error">{error}</div> : null}
         {formError ? <div className="home-error">{formError}</div> : null}
         {isLoading ? <div className="home-empty">正在加载项目...</div> : null}
-        {!isLoading && projects.length === 0 && !error ? <div className="home-empty">暂无可用项目</div> : null}
 
         {projects.length > 0 ? (
           <div className="project-list">

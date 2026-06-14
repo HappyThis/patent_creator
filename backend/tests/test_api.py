@@ -13,6 +13,13 @@ from app.core.config import Settings
 from app.services import AppServices
 
 
+def section_by_title(disclosure: dict[str, Any], title: str) -> dict[str, Any]:
+    for section in disclosure["sections"]:
+        if section["title"]["text"] == title:
+            return section
+    raise AssertionError(f"section not found: {title}")
+
+
 class StubLLMClient:
     async def generate_text(
         self,
@@ -121,81 +128,82 @@ class StubLLMClient:
             elif "技术效果" in user_message:
                 tool_calls = [
                     {
-                        "tool": "document_replace_section_blocks",
+                        "tool": "disclosure_edit",
                         "arguments": {
                             "section_id": "sec_000010",
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
-                                },
-                                {
-                                    "type": "list",
-                                    "ordered": False,
-                                    "items": [
-                                        "缩短端到端检测时延，提升实时响应能力。",
-                                        "在有限算力预算下保持检测稳定性。",
-                                        "降低持续运行时的能耗和温升压力。",
-                                    ],
-                                },
-                            ],
+                            "operation": "insert_block",
+                            "position": {"mode": "end"},
+                            "block": {
+                                "type": "paragraph",
+                                "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
+                            },
                         },
-                        "tool_call_id": "stub_call_2",
-                    }
+                        "tool_call_id": "stub_call_2a",
+                    },
+                    {
+                        "tool": "disclosure_edit",
+                        "arguments": {
+                            "section_id": "sec_000010",
+                            "operation": "insert_block",
+                            "position": {"mode": "end"},
+                            "block": {
+                                "type": "list",
+                                "ordered": False,
+                                "items": [
+                                    "缩短端到端检测时延，提升实时响应能力。",
+                                    "在有限算力预算下保持检测稳定性。",
+                                    "降低持续运行时的能耗和温升压力。",
+                                ],
+                            },
+                        },
+                        "tool_call_id": "stub_call_2b",
+                    },
                 ]
             else:
                 tool_calls = [
                     {
-                        "tool": "document_replace_section_blocks",
+                        "tool": "disclosure_edit",
                         "arguments": {
                             "section_id": "sec_000007",
-                            "blocks": [
-                                {
-                                    "type": "paragraph",
-                                    "text": "本节补充适用于低算力终端的整体方案说明。",
-                                },
-                                {
-                                    "type": "paragraph",
-                                    "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
-                                },
-                            ],
+                            "operation": "insert_block",
+                            "position": {"mode": "end"},
+                            "block": {
+                                "type": "paragraph",
+                                "text": "本节补充适用于低算力终端的整体方案说明。",
+                            },
                         },
-                        "tool_call_id": "stub_call_2",
+                        "tool_call_id": "stub_call_2a",
                     },
                     {
-                        "tool": "document_append_child_section",
+                        "tool": "disclosure_edit",
                         "arguments": {
-                            "parent_section_id": "sec_000007",
-                            "title": "整体架构",
-                            "blocks": [
-                                {
-                                    "type": "table",
-                                    "columns": ["模块", "职责"],
-                                    "rows": [
-                                        ["预处理模块", "完成缩放、归一化和候选区域粗筛"],
-                                        ["推理模块", "仅对高价值候选区域执行完整检测"],
-                                    ],
-                                }
-                            ],
+                            "section_id": "sec_000007",
+                            "operation": "insert_block",
+                            "position": {"mode": "end"},
+                            "block": {
+                                "type": "paragraph",
+                                "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
+                            },
+                        },
+                        "tool_call_id": "stub_call_2b",
+                    },
+                    {
+                        "tool": "disclosure_edit",
+                        "arguments": {
+                            "section_id": "sec_000007",
+                            "operation": "insert_section",
+                            "position": {"mode": "end"},
+                            "section": {"title": "整体架构"},
                         },
                         "tool_call_id": "stub_call_3",
                     },
                     {
-                        "tool": "document_append_child_section",
+                        "tool": "disclosure_edit",
                         "arguments": {
-                            "parent_section_id": "sec_000007",
-                            "title": "处理流程",
-                            "blocks": [
-                                {
-                                    "type": "list",
-                                    "ordered": True,
-                                    "items": [
-                                        "获取当前帧图像并复用上一帧稳定特征。",
-                                        "筛出满足阈值的候选区域。",
-                                        "对候选区域执行轻量化检测与结果校正。",
-                                    ],
-                                }
-                            ],
+                            "section_id": "sec_000007",
+                            "operation": "insert_section",
+                            "position": {"mode": "end"},
+                            "section": {"title": "处理流程"},
                         },
                         "tool_call_id": "stub_call_4",
                     },
@@ -374,7 +382,7 @@ async def test_delete_project_removes_project_from_workspace(tmp_path: Path) -> 
         projects_response = await client.get("/api/projects")
         assert projects_response.status_code == 200
         project_ids = [project["project_id"] for project in projects_response.json()["projects"]]
-        assert project_id not in project_ids
+        assert project_ids == []
 
 
 @pytest.mark.anyio
@@ -395,11 +403,15 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         create_response = await client.post("/api/projects", json={"title": "一种图像检测方法"})
         assert create_response.status_code == 422
 
-        projects_response = await client.get("/api/projects")
-        assert projects_response.status_code == 200
-        projects = projects_response.json()["projects"]
-        assert len(projects) == 1
-        project = projects[0]
+        create_response = await client.post(
+            "/api/projects",
+            json={
+                "project_name": "图像检测项目",
+                "disclosure_title": "一种图像检测方法",
+            },
+        )
+        assert create_response.status_code == 200
+        project = create_response.json()
         project_id = project["project_id"]
 
         second_projects_response = await client.get("/api/projects")
@@ -452,13 +464,9 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200
-        technical_effects = next(
-            section for section in document_response.json()["sections"] if section["type"] == "technical_effects"
-        )
+        technical_effects = section_by_title(document_response.json(), "技术效果")
         assert len(technical_effects["blocks"]) == 2
-        technical_solution = next(
-            section for section in document_response.json()["sections"] if section["type"] == "technical_solution"
-        )
+        technical_solution = section_by_title(document_response.json(), "技术方案")
         assert technical_solution["blocks"] == []
 
         export_response = await client.post(f"/api/projects/{project_id}/export/markdown")
@@ -481,12 +489,9 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200
-        technical_solution = next(
-            section for section in document_response.json()["sections"] if section["type"] == "technical_solution"
-        )
+        technical_solution = section_by_title(document_response.json(), "技术方案")
         assert len(technical_solution["blocks"]) == 2
-        assert technical_solution["children"][0]["type"] == "custom"
-        assert technical_solution["children"][0]["title"] == "整体架构"
+        assert technical_solution["sections"][0]["title"]["text"] == "整体架构"
 
         missing_session_response = await client.post(
             f"/api/projects/{project_id}/chat/messages",
@@ -510,9 +515,12 @@ async def test_innovation_kernel_api_and_stream_update_current_kernel(tmp_path: 
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        projects_response = await client.get("/api/projects")
-        assert projects_response.status_code == 200
-        project_id = projects_response.json()["projects"][0]["project_id"]
+        create_response = await client.post(
+            "/api/projects",
+            json={"project_name": "创新内核项目", "disclosure_title": "一种图像检测方法"},
+        )
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
 
         sse_events = await collect_stream_events(
             client,
@@ -553,7 +561,7 @@ async def test_session_stream_can_attach_to_running_round(tmp_path: Path) -> Non
     app = create_app(settings, services=services)
     transport = httpx.ASGITransport(app=app)
 
-    project = services.store.ensure_current_project()
+    project = services.store.create_project("resume stream project")
     project_id = project.project_id
     session_id = "sess_resume"
     round_id = "round_resume"
@@ -615,7 +623,7 @@ async def test_running_round_can_be_cancelled(tmp_path: Path) -> None:
     app = create_app(settings, services=services)
     transport = httpx.ASGITransport(app=app)
 
-    project = services.store.ensure_current_project()
+    project = services.store.create_project("cancellable project")
     project_id = project.project_id
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:

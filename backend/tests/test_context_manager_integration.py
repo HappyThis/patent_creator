@@ -176,7 +176,7 @@ async def test_context_manager_rechecks_context_before_each_tool_followup(tmp_pa
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "sec_000003"}, "call_read")
+                tool_call("disclosure_read_section", {"section_id": "sec_000003"}, "call_read")
             ],
         }
 

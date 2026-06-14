@@ -13,7 +13,6 @@ from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..schemas import InnovationKernelRecord, ProjectRecord, SessionEvent, SessionSummary
 
-DEFAULT_PROJECT_TITLE = "一种图像检测方法"
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
 CURRENT_PROJECT_POINTER = "current_project_id"
 
@@ -98,9 +97,21 @@ class WorkspaceStore:
         return projects
 
     def list_projects_with_current_first(self) -> list[ProjectRecord]:
-        current = self.ensure_current_project()
         projects = self.list_projects()
-        return [current, *(project for project in projects if project.project_id != current.project_id)]
+        pointer_path = self.root_dir / CURRENT_PROJECT_POINTER
+        if not projects:
+            if pointer_path.exists():
+                pointer_path.unlink()
+            return []
+
+        if pointer_path.exists():
+            current_project_id = pointer_path.read_text(encoding="utf-8").strip()
+            current = next((project for project in projects if project.project_id == current_project_id), None)
+            if current:
+                return [current, *(project for project in projects if project.project_id != current.project_id)]
+
+        pointer_path.write_text(projects[0].project_id + "\n", encoding="utf-8")
+        return projects
 
     def recover_interrupted_projects(self) -> list[ProjectRecord]:
         recovered: list[ProjectRecord] = []
@@ -157,11 +168,9 @@ class WorkspaceStore:
                     pass
 
         projects = self.list_projects()
-        current = (
-            projects[0]
-            if projects
-            else self.create_project(DEFAULT_PROJECT_TITLE, disclosure_title=DEFAULT_PROJECT_TITLE)
-        )
+        if not projects:
+            raise ApiError(404, "project_not_found", "暂无可用项目。")
+        current = projects[0]
         pointer_path.write_text(current.project_id + "\n", encoding="utf-8")
         return current
 

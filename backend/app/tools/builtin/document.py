@@ -6,15 +6,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ...domain.document_reading import read_document
+from ...domain.document_reading import disclosure_outline as read_disclosure_outline
+from ...domain.document_reading import disclosure_read_section as read_disclosure_section
+from ...domain.document_reading import disclosure_search as search_disclosure
 from ...domain.document_tool_results import tool_failed
-from ...domain.document_writing import (
-    append_block,
-    append_child_section,
-    clear_section_blocks,
-    replace_block,
-    replace_section_blocks,
-)
+from ...domain.document_writing import edit_disclosure
 from ...storage.workspace_store import WorkspaceStore
 from ..argument_normalization import normalize_stringified_json_arguments
 from ..metadata import agent_tool
@@ -22,25 +18,34 @@ from ..metadata import agent_tool
 logger = logging.getLogger(__name__)
 
 
-class DocumentReadArguments(BaseModel):
-    action: Literal["get_meta", "get_project_context", "get_outline", "get_section", "get_block", "search_blocks"] = Field(
-        description="读取动作。get_project_context 返回标题和完整目录树；get_section 按章节 id；get_block 按 block id；search_blocks 按关键词搜索正文。"
-    )
-    section_id: str | None = Field(default=None, description="系统生成的章节 id，例如 sec_000007。action=get_section 时必填；action=search_blocks 时可选，用于限制搜索范围。标准章节语义看 outline 中的 type。")
-    block_id: str | None = Field(default=None, description="block id。action=get_block 时必填。")
-    query: str | None = Field(default=None, description="搜索关键词。action=search_blocks 时必填。")
-    include_children: bool | None = Field(default=None, description="action=get_section 时是否同时返回子章节；未提供时默认为 false。")
-
-
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DisclosureOutlineArguments(_StrictModel):
+    limit: int = Field(default=100, ge=1, le=300, description="最多返回多少个 outline item，默认 100，最大 300。")
+    offset: int = Field(default=0, ge=0, description="分页偏移，从 0 开始。")
+
+
+class DisclosureSearchArguments(_StrictModel):
+    query: str = Field(description="搜索关键词；regex=true 时作为正则表达式。搜索固定大小写不敏感。")
+    regex: bool = Field(default=False, description="是否把 query 当作正则表达式，默认 false。")
+    limit: int = Field(default=50, ge=1, le=200, description="最多返回多少个匹配 block，默认 50，最大 200。")
+    offset: int = Field(default=0, ge=0, description="分页偏移，从 0 开始。")
+
+
+class DisclosureReadSectionArguments(_StrictModel):
+    section_id: str = Field(description="要精读的 section_id。")
+    limit: int = Field(default=20, ge=1, le=100, description="最多返回多少个直接 block，默认 20，最大 100。")
+    offset: int = Field(default=0, ge=0, description="block 分页偏移，从 0 开始；title block 固定为 index=0。")
+    block_ids: list[str] | None = Field(default=None, description="只读取该 section 下指定的直接 block；提供后忽略 limit/offset。")
+
+
 class BlockArguments(_StrictModel):
-    type: Literal["paragraph", "list", "image", "table"] = Field(
-        description="block 类型。paragraph 使用 text；list 使用 ordered 和 items；image 使用 src，可选 caption/alt；table 使用 columns 和 rows。"
+    type: Literal["title", "paragraph", "list", "image", "table"] = Field(
+        description="block 类型。title/paragraph 使用 text；list 使用 ordered 和 items；image 使用 src，可选 caption/alt；table 使用 columns 和 rows。"
     )
-    text: str | None = Field(default=None, description="type=paragraph 时必填，段落正文。")
+    text: str | None = Field(default=None, description="type=title 或 paragraph 时必填。")
     ordered: bool | None = Field(default=None, description="type=list 时必填，是否为有序列表。")
     items: list[str] | None = Field(default=None, description="type=list 时必填，列表项文本。")
     src: str | None = Field(default=None, description="type=image 时必填，图片资源路径或 URL。")
@@ -50,226 +55,148 @@ class BlockArguments(_StrictModel):
     rows: list[list[str]] | None = Field(default=None, description="type=table 时必填，表格行。")
 
 
-class ReplaceSectionBlocksArguments(_StrictModel):
-    section_id: str = Field(description="要替换正文 blocks 的 section_id，例如 sec_000007。")
-    blocks: list[BlockArguments] = Field(
-        description="新的 blocks 列表。单次正文写入总量不得超过 1500 字；长内容必须拆成多次小步写入。"
+class PositionArguments(_StrictModel):
+    mode: Literal["start", "end", "index", "before", "after"] = Field(default="end", description="插入位置。")
+    index: int | None = Field(default=None, description="mode=index 时使用；block index 按 title=0、正文从 1 开始。")
+    block_id: str | None = Field(default=None, description="插入 block 时 mode=before/after 的锚点 block_id。")
+    section_id: str | None = Field(default=None, description="插入 section 时 mode=before/after 的锚点子 section_id。")
+
+
+class SectionInsertArguments(_StrictModel):
+    title: str = Field(description="新子章节标题。正文后续通过 insert_block 小步写入。")
+
+
+class DisclosureEditArguments(_StrictModel):
+    section_id: str = Field(description="编辑工作区 section_id；只能操作该 section 的直接 block 或直接子 section。")
+    operation: Literal["replace_block", "delete_block", "insert_block", "insert_section", "delete_section"] = Field(
+        description="编辑操作。改标题使用 replace_block 替换 title block；不提供整章重写。"
     )
+    block_id: str | None = Field(default=None, description="replace_block/delete_block 的目标 block_id。")
+    target_section_id: str | None = Field(default=None, description="delete_section 的目标直接子 section_id。")
+    position: PositionArguments | None = Field(default=None, description="insert_block/insert_section 的插入位置。")
+    block: BlockArguments | None = Field(default=None, description="replace_block/insert_block 的 block 内容。")
+    section: SectionInsertArguments | None = Field(default=None, description="insert_section 的子章节内容，仅包含 title。")
 
 
-class AppendBlockArguments(_StrictModel):
-    section_id: str = Field(description="要追加 block 的 section_id，例如 sec_000007。")
-    block: BlockArguments = Field(description="要追加的单个 block。")
-
-
-class ReplaceBlockArguments(_StrictModel):
-    block_id: str = Field(description="要替换的 block_id，例如 blk_000001。")
-    block: BlockArguments = Field(description="替换后的 block。工具会保留原 block_id。")
-
-
-class AppendChildSectionArguments(_StrictModel):
-    parent_section_id: str = Field(description="父章节 section_id，例如技术方案章节 sec_000007。")
-    title: str = Field(description="新增子章节标题。")
-    blocks: list[BlockArguments] = Field(
-        description="新增子章节正文 blocks。子章节 type 由工具固定为 custom，section_id 由系统生成，不能自行提供 id。"
-    )
-
-
-class ClearSectionBlocksArguments(_StrictModel):
-    section_id: str = Field(description="要清空正文 blocks 的 section_id。只清空 blocks，不删除章节节点或子章节。")
-
-
-@agent_tool(
-    args_model=DocumentReadArguments,
-)
-def document_read(
+@agent_tool(args_model=DisclosureOutlineArguments)
+def disclosure_outline(
     store: WorkspaceStore,
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """按 section_id、block_id 或关键词读取当前交底书的部分正文。
+    """读取交底书目录索引，按深度优先列出 section 和直接 block，block 只返回 preview。
 
     Returns:
-        返回读取结果；失败时返回 failed，并包含 code 和 message。
+        返回 items、returned、total、offset、next_offset、truncated；每个 item 带 locator。
 
     Rules:
-        - 默认上下文不包含完整文档；需要结构时先读取 get_project_context。
-        - 目录中的 id 是系统生成 section_id；目录中的 type 才是技术方案、技术效果等章节语义。
-        - 不知道概念在哪一节时，先用 search_blocks 搜索，再读取命中的章节或 block。
+        - 本工具用于定位，不返回正文全文。
+        - title 是 block，作为 section.title 返回；普通正文 block 从 index=1 开始。
+        - 结果分页返回；truncated 为 true 时用 next_offset 继续读取。
 
     Examples:
-        - 读取项目上下文: {"action":"get_project_context"}
-        - 读取章节: {"action":"get_section","section_id":"sec_000007","include_children":true}
-        - 搜索正文: {"action":"search_blocks","query":"消息平台"}
+        - 查看目录索引: {"limit":100,"offset":0}
     """
-    return read_document(store.get_disclosure(project_id), arguments)
-
-
-@agent_tool(
-    args_model=ReplaceSectionBlocksArguments,
-    name="document_replace_section_blocks",
-)
-def document_replace_section_blocks(
-    store: WorkspaceStore,
-    project_id: str,
-    arguments: dict[str, Any],
-) -> dict[str, Any]:
-    """替换指定章节的正文 blocks，不改变章节标题和子章节。
-
-    Returns:
-        返回编辑后的摘要；失败时返回 failed，并包含 code、message 和可选 retry_hint。正文写入超过 1500 字时返回 edit_too_large。
-
-    Rules:
-        - 适合写入根章节总述或重写某章节的短 blocks。
-        - 单次正文写入总量不得超过 1500 字；长内容必须拆成多次调用。
-        - 段落正文只能放在 paragraph block 的 text 字段，不要使用 content 字段。
-
-    Examples:
-        - 替换章节正文: {"section_id":"sec_000007","blocks":[{"type":"paragraph","text":"这里写入新的段落正文。"}]}
-    """
-    parsed = _validate_tool_arguments(ReplaceSectionBlocksArguments, arguments)
+    parsed = _validate_tool_arguments(DisclosureOutlineArguments, arguments)
     if parsed["status"] == "failed":
         return parsed
     payload = parsed["output"]["arguments"]
-    return _apply_document_write(
-        store,
-        project_id,
-        lambda disclosure: replace_section_blocks(disclosure, payload["section_id"], payload["blocks"]),
-    )
+    return read_disclosure_outline(store.get_disclosure(project_id), limit=payload["limit"], offset=payload["offset"])
 
 
-@agent_tool(
-    args_model=AppendBlockArguments,
-    name="document_append_block",
-)
-def document_append_block(
+@agent_tool(args_model=DisclosureSearchArguments)
+def disclosure_search(
     store: WorkspaceStore,
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """向指定章节末尾追加一个 block。
+    """全文搜索交底书 block，支持普通关键词或正则，固定大小写不敏感。
 
     Returns:
-        返回编辑后的摘要；失败时返回 failed，并包含 code、message 和可选 retry_hint。正文写入超过 1500 字时返回 edit_too_large。
+        返回 matches、returned、total、offset、next_offset、truncated；命中单位固定为 block。
 
     Rules:
-        - 一次只追加一个 block；需要多段正文时多次调用。
-        - 段落正文只能放在 paragraph block 的 text 字段，不要使用 content 字段。
+        - 只用于定位命中的 block，不返回全文。
+        - 不支持 section 范围过滤和 block 类型过滤；找到结果后用 disclosure_read_section 精读。
+        - 结果分页返回；truncated 为 true 时用 next_offset 继续搜索。
 
     Examples:
-        - 追加段落: {"section_id":"sec_000007","block":{"type":"paragraph","text":"这里写入追加段落。"}}
+        - 搜索关键词: {"query":"创新内核","regex":false,"limit":50,"offset":0}
     """
-    parsed = _validate_tool_arguments(AppendBlockArguments, arguments)
+    parsed = _validate_tool_arguments(DisclosureSearchArguments, arguments)
     if parsed["status"] == "failed":
         return parsed
     payload = parsed["output"]["arguments"]
-    return _apply_document_write(
-        store,
-        project_id,
-        lambda disclosure: append_block(disclosure, payload["section_id"], payload["block"]),
+    return search_disclosure(
+        store.get_disclosure(project_id),
+        query=payload["query"],
+        regex=payload["regex"],
+        limit=payload["limit"],
+        offset=payload["offset"],
     )
 
 
-@agent_tool(
-    args_model=ReplaceBlockArguments,
-    name="document_replace_block",
-)
-def document_replace_block(
+@agent_tool(args_model=DisclosureReadSectionArguments)
+def disclosure_read_section(
     store: WorkspaceStore,
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """替换指定 block 的内容，并保留原 block_id。
+    """精读一个交底书 section 的直接内容，可按 block 分页或读取指定直接 block。
 
     Returns:
-        返回编辑后的摘要；失败时返回 failed，并包含 code、message 和可选 retry_hint。正文写入超过 1500 字时返回 edit_too_large。
+        返回 section、returned、total、offset、next_offset、truncated；section.sections 只包含直接子 section 摘要。
 
     Rules:
-        - 适合小范围改写已有段落、列表、图片或表格。
-        - 不要在 block 参数中提供 id；工具会保留原 block_id。
+        - block_ids 必须属于该 section 的直接 block；读子 section 内容必须改用子 section_id 再调用。
+        - 分页对象是 title block + 当前 section 的直接 blocks，不展开子 section 正文。
+        - title block 固定 index=0；正文 block 从 index=1 开始。
 
     Examples:
-        - 替换段落: {"block_id":"blk_000001","block":{"type":"paragraph","text":"替换后的段落正文。"}}
+        - 精读章节: {"section_id":"sec_000007","limit":20,"offset":0}
+        - 精读指定 block: {"section_id":"sec_000007","block_ids":["blk_000012"]}
     """
-    parsed = _validate_tool_arguments(ReplaceBlockArguments, arguments)
+    parsed = _validate_tool_arguments(DisclosureReadSectionArguments, arguments)
     if parsed["status"] == "failed":
         return parsed
     payload = parsed["output"]["arguments"]
-    return _apply_document_write(
-        store,
-        project_id,
-        lambda disclosure: replace_block(disclosure, payload["block_id"], payload["block"]),
+    return read_disclosure_section(
+        store.get_disclosure(project_id),
+        section_id=payload["section_id"],
+        limit=payload["limit"],
+        offset=payload["offset"],
+        block_ids=payload.get("block_ids"),
     )
 
 
-@agent_tool(
-    args_model=AppendChildSectionArguments,
-    name="document_append_child_section",
-)
-def document_append_child_section(
+@agent_tool(args_model=DisclosureEditArguments)
+def disclosure_edit(
     store: WorkspaceStore,
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """在指定父章节下追加一个 custom 子章节。
+    """小步编辑交底书；只能操作指定 section 的直接 block 或直接子 section。
 
     Returns:
-        返回编辑后的摘要；失败时返回 failed，并包含 code、message 和可选 retry_hint。正文写入超过 1500 字时返回 edit_too_large。
+        返回 changed_section_ids、changed_block_ids、primary_section_id、primary_block_id、change_scope；失败时返回 code、message 和可选 retry_hint。
 
     Rules:
-        - 只需要提供 parent_section_id、title 和 blocks；不要提供 section、id、type 或 children。
-        - 子章节 type 固定为 custom，section_id 由系统生成。
-        - 适合技术方案中的“整体架构”“处理流程”“关键模块”等短子章节。
+        - 没有整章重写；重写章节必须拆成删除、插入 section、逐个 insert/replace block。
+        - 改章节标题使用 replace_block 替换该 section 的 title block。
+        - title block 只能 replace，不能 delete，也不能在其前方 insert block。
+        - insert_section 只创建子章节标题；正文后续通过 insert_block 小步写入。
+        - 单次新增/替换文本总量不得超过 1500 字。
 
     Examples:
-        - 追加子章节: {"parent_section_id":"sec_000007","title":"关键模块","blocks":[{"type":"paragraph","text":"这里写入子章节正文。"}]}
+        - 替换段落: {"section_id":"sec_000007","operation":"replace_block","block_id":"blk_000012","block":{"type":"paragraph","text":"替换后的段落。"}}
+        - 插入段落: {"section_id":"sec_000007","operation":"insert_block","position":{"mode":"end"},"block":{"type":"paragraph","text":"新增段落。"}}
+        - 新增子章节: {"section_id":"sec_000007","operation":"insert_section","position":{"mode":"end"},"section":{"title":"创新内核门禁机制"}}
     """
-    parsed = _validate_tool_arguments(AppendChildSectionArguments, arguments)
+    parsed = _validate_tool_arguments(DisclosureEditArguments, arguments)
     if parsed["status"] == "failed":
         return parsed
     payload = parsed["output"]["arguments"]
-    return _apply_document_write(
-        store,
-        project_id,
-        lambda disclosure: append_child_section(
-            disclosure,
-            payload["parent_section_id"],
-            payload["title"],
-            payload["blocks"],
-        ),
-    )
-
-
-@agent_tool(
-    args_model=ClearSectionBlocksArguments,
-    name="document_clear_section_blocks",
-)
-def document_clear_section_blocks(
-    store: WorkspaceStore,
-    project_id: str,
-    arguments: dict[str, Any],
-) -> dict[str, Any]:
-    """清空指定章节的正文 blocks，不删除章节节点和子章节。
-
-    Returns:
-        返回编辑后的摘要；失败时返回 failed，并包含 code、message 和可选 retry_hint。
-
-    Rules:
-        - 仅用于清空正文 blocks；不会删除 section，也不会删除 children。
-        - 如果要替换为空以外的新正文，优先使用 document_replace_section_blocks。
-
-    Examples:
-        - 清空章节正文: {"section_id":"sec_000007"}
-    """
-    parsed = _validate_tool_arguments(ClearSectionBlocksArguments, arguments)
-    if parsed["status"] == "failed":
-        return parsed
-    payload = parsed["output"]["arguments"]
-    return _apply_document_write(
-        store,
-        project_id,
-        lambda disclosure: clear_section_blocks(disclosure, payload["section_id"]),
-    )
+    return _apply_disclosure_edit(store, project_id, lambda disclosure: edit_disclosure(disclosure, payload))
 
 
 def _validate_tool_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> dict[str, Any]:
@@ -291,7 +218,7 @@ def _validate_tool_arguments(args_model: type[BaseModel], arguments: dict[str, A
     return {"status": "success", "output": {"arguments": parsed.model_dump(exclude_none=True)}}
 
 
-def _apply_document_write(
+def _apply_disclosure_edit(
     store: WorkspaceStore,
     project_id: str,
     writer: Callable[[dict[str, Any]], dict[str, Any]],
@@ -301,7 +228,7 @@ def _apply_document_write(
     if result["status"] == "failed":
         result["output"].setdefault(
             "retry_hint",
-            "请改用当前文档编辑工具的小步参数重新调用；长内容拆成多次短正文写入。",
+            "请先用 disclosure_outline / disclosure_search / disclosure_read_section 定位，再用 disclosure_edit 小步修改。",
         )
     if result["status"] == "success":
         store.save_disclosure(project_id, disclosure)

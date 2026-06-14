@@ -32,7 +32,7 @@
   "scope": "main",
   "call_id": "call_001",
   "payload": {
-    "tool": "document_read",
+    "tool": "disclosure_outline",
     "arguments": {}
   }
 }
@@ -46,7 +46,7 @@
   "scope": "main",
   "call_id": "call_001",
   "payload": {
-    "tool": "document_read",
+    "tool": "disclosure_outline",
     "status": "success",
     "output": {}
   }

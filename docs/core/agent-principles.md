@@ -18,8 +18,8 @@
 
 - 理解用户最新输入和历史上下文。
 - 判断是否需要读取当前交底书正文。
-- 使用 `document_read` 获取标题、目录、章节、block 或搜索结果。
-- 使用文档写入工具更新交底书。
+- 使用 `disclosure_outline`、`disclosure_search`、`disclosure_read_section` 定位并读取交底书。
+- 使用 `disclosure_edit` 小步更新交底书。
 - 使用 `exec_command` 执行必要的项目诊断命令。
 - 在信息不足时向用户追问。
 - 在任务完成时直接输出面向用户的中文回复。
@@ -35,12 +35,14 @@
 
 当前主 agent 可用工具包括：
 
-- `document_read`
-- `document_replace_section_blocks`
-- `document_append_block`
-- `document_replace_block`
-- `document_append_child_section`
-- `document_clear_section_blocks`
+- `disclosure_outline`
+- `disclosure_search`
+- `disclosure_read_section`
+- `disclosure_edit`
+- `file_glob`
+- `file_search`
+- `file_read`
+- `innovation_kernel_kit`
 - `exec_command`
 
 工具声明是参数和返回值的唯一准确信息源。prompt 不硬编码工具参数细节，只引用自动生成的工具说明。
@@ -49,10 +51,10 @@
 
 交底书正文必须是最终态文本，只呈现技术方案、结构、步骤和效果。正文不得出现“根据你的要求”“本次修改”“之前方案”等过程性表述。
 
-复杂内容优先拆成子章节；短小局部修改使用 block 工具。主 agent 每完成关键读取、写入或结构调整后，应轻量自检技术问题、技术方案、技术效果是否闭合。
+复杂内容优先拆成子章节；短小局部修改使用 block 操作。主 agent 每完成关键读取、写入或结构调整后，应轻量自检技术问题、技术方案、技术效果是否闭合。
 
 ## 上下文原则
 
 主 agent 从 session log 恢复上下文。历史消息、工具调用和工具结果可以被压缩为 Markdown 记忆；当前用户输入始终保持为最新任务。
 
-压缩内容只作为记忆，不是新的用户指令。若压缩后仍缺少正文依据，主 agent 应重新读取相关章节或 block。
+压缩内容只作为记忆，不是新的用户指令。若压缩后仍缺少正文依据，主 agent 应重新定位并精读相关 section 或 block。

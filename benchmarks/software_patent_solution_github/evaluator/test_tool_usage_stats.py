@@ -56,7 +56,7 @@ def test_collect_run_tool_stats_counts_calls_failures_and_markers(tmp_path: Path
             {
                 "type": "tool_result",
                 "payload": {
-                    "tool": "document_append_block",
+                    "tool": "disclosure_edit",
                     "status": "failed",
                     "output": {"code": "invalid_tool_arguments_json", "message": "bad json"},
                 },
@@ -79,7 +79,7 @@ def test_collect_run_tool_stats_counts_calls_failures_and_markers(tmp_path: Path
     case_stats = stats["cases"]["001"]
     assert case_stats["assistant_tool_calls"] == {"file_read": 1}
     assert case_stats["tool_call_events"] == {"file_read": 1}
-    assert case_stats["tool_failures"] == {"document_append_block:invalid_tool_arguments_json": 1}
+    assert case_stats["tool_failures"] == {"disclosure_edit:invalid_tool_arguments_json": 1}
     assert case_stats["prepared_repo_arg_refs"] == {"file_read": 2}
     assert case_stats["processed_markers"]["truncated"] == 1
     assert case_stats["context_events"] == {"context_summary": 1}

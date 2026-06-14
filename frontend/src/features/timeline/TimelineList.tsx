@@ -102,8 +102,10 @@ function renderToolNode(node: ToolNode) {
 
 function describeTool(toolName: string): string {
   const descriptions: Record<string, string> = {
-    document_read: '读取参考文档与章节内容',
-    document_edit: '写回并优化交底书正文',
+    disclosure_outline: '读取交底书目录',
+    disclosure_search: '搜索交底书内容',
+    disclosure_read_section: '读取交底书章节',
+    disclosure_edit: '编辑交底书',
     execute_subagent: '调度专业子任务',
     exec_command: '执行本地或网络检索命令',
     analysis: '结构化关键信息',

@@ -64,11 +64,11 @@ benchmark runner 根据 `snapshot.json` 拉取仓库并 checkout 到指定 commi
 
 评估对象只有一个：主 agent 写入 `disclosure.json` 的技术方案章节内容。
 
-评估器应在主 agent 写作结束后读取当前交底书文档，抽取 `technical_solution` 章节，生成 `evaluated_artifact.md` 并交给评分器。最终聊天回复、工具调用轨迹、session event、文档 diff 等不作为评分输入。
+评估器应在主 agent 写作结束后读取当前交底书文档，抽取标题为“技术方案”的章节，生成 `evaluated_artifact.md` 并交给评分器。最终聊天回复、工具调用轨迹、session event、文档 diff 等不作为评分输入。
 
-评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能从 `disclosure.json` 中提取有效的 `technical_solution` 内容，就进入内容评分。
+评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能从 `disclosure.json` 中提取有效的“技术方案”章节内容，就进入内容评分。
 
-如果 `technical_solution` 章节为空，或内容明显不是技术方案，评估器可以继续向同一主 agent 会话发送固定补充指令，要求“继续充实技术方案章节”。补充次数由 runner 配置控制；超过次数后仍未形成有效技术方案的 case 记为 `skipped_no_solution_artifact`，不对聊天回复进行兜底评分。
+如果“技术方案”章节为空，或内容明显不是技术方案，评估器可以继续向同一主 agent 会话发送固定补充指令，要求“继续充实技术方案章节”。补充次数由 runner 配置控制；超过次数后仍未形成有效技术方案的 case 记为 `skipped_no_solution_artifact`，不对聊天回复进行兜底评分。
 
 ## 运行评估器
 
@@ -140,7 +140,7 @@ benchmarks/software_patent_solution_github/bench.py status
 benchmarks/software_patent_solution_github/bench.py status <run_id> --case 001
 ```
 
-运行产物写入 `runs/<run_id>/`，该目录不进入版本控制。评估器会根据 `snapshot.json` 准备项目快照，将绝对路径注入给完整主 agent 对话接口；主 agent 完成后只抽取 `disclosure.json` 的 `technical_solution` 章节作为 `evaluated_artifact.md`。评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能提取有效技术方案，就进入内容评分。
+运行产物写入 `runs/<run_id>/`，该目录不进入版本控制。评估器会根据 `snapshot.json` 准备项目快照，将绝对路径注入给完整主 agent 对话接口；主 agent 完成后只抽取 `disclosure.json` 中标题为“技术方案”的章节作为 `evaluated_artifact.md`。评估器不限制主 agent 是否编辑其他章节，也不把中途可恢复的工具错误计入评分；只要最终能提取有效技术方案，就进入内容评分。
 
 Codex-as-judge 使用本机 `codex exec`，在同一个项目快照目录中以只读方式阅读源码并打分。
 

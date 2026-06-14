@@ -6,6 +6,13 @@ export type OutlineItem = {
   children?: OutlineItem[];
 };
 
+export type TitleNode = {
+  type: 'title';
+  id: string;
+  section_id: string;
+  text: string;
+};
+
 export type ParagraphNode = {
   type: 'paragraph';
   id: string;
@@ -41,14 +48,13 @@ export type TableNode = {
 export type SectionNode = {
   type: 'section';
   id: string;
-  section_type?: string;
   title: string;
   level: number;
   anchor: string;
   children: RenderNode[];
 };
 
-export type RenderNode = ParagraphNode | ListNode | ImageNode | TableNode | SectionNode;
+export type RenderNode = TitleNode | ParagraphNode | ListNode | ImageNode | TableNode | SectionNode;
 
 export type RenderAst = {
   type: 'document';

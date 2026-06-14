@@ -68,7 +68,7 @@ function countNodeText(node: RenderNode): number {
   if (node.type === 'section') {
     return 0;
   }
-  if (node.type === 'paragraph') {
+  if (node.type === 'title' || node.type === 'paragraph') {
     return countText(node.text);
   }
   if (node.type === 'list') {
@@ -77,7 +77,10 @@ function countNodeText(node: RenderNode): number {
   if (node.type === 'table') {
     return countText([...node.columns, ...node.rows.flat()].join(''));
   }
-  return countText(`${node.caption ?? ''}${node.alt ?? ''}`);
+  if (node.type === 'image') {
+    return countText(`${node.caption ?? ''}${node.alt ?? ''}`);
+  }
+  return 0;
 }
 
 function countText(value: string): number {

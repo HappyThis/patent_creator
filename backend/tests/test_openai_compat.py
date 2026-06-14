@@ -174,8 +174,8 @@ def test_generate_with_tools_stream_writes_payload_trace_when_enabled(tmp_path: 
                 {
                     "type": "function",
                     "function": {
-                        "name": "document_read",
-                        "description": "读取文档",
+                        "name": "disclosure_outline",
+                        "description": "读取交底书目录",
                         "parameters": {"type": "object", "properties": {}},
                     },
                 }
@@ -199,7 +199,7 @@ def test_generate_with_tools_stream_writes_payload_trace_when_enabled(tmp_path: 
     assert payload["metadata"]["project_id"] == "proj_test"
     assert payload["metadata"]["step_index"] == 3
     assert payload["request_payload"]["messages"][0] == {"role": "system", "content": "system prompt"}
-    assert payload["request_payload"]["tools"][0]["function"]["name"] == "document_read"
+    assert payload["request_payload"]["tools"][0]["function"]["name"] == "disclosure_outline"
     assert "api_key" not in json.dumps(payload, ensure_ascii=False).lower()
 
     index_lines = (trace_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()

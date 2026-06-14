@@ -5,11 +5,15 @@ from typing import Any
 
 
 def extract_technical_solution(disclosure: dict[str, Any]) -> str:
-    section = _find_section_by_type(disclosure.get("sections", []), "technical_solution")
+    section = find_technical_solution_section(disclosure.get("sections", []))
     if not section:
         return ""
     lines = _section_to_markdown(section, 2)
     return "\n".join(lines).strip() + "\n"
+
+
+def find_technical_solution_section(sections: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return _find_section_by_title(sections, "技术方案")
 
 
 def has_effective_solution(markdown: str, *, min_chars: int = 200) -> bool:
@@ -47,24 +51,31 @@ def _strip_heading(markdown: str) -> str:
     return "\n".join(lines)
 
 
-def _find_section_by_type(sections: list[dict[str, Any]], section_type: str) -> dict[str, Any] | None:
+def _find_section_by_title(sections: list[dict[str, Any]], title: str) -> dict[str, Any] | None:
     for section in sections:
-        if section.get("type") == section_type:
+        if _section_title(section) == title:
             return section
-        found = _find_section_by_type(section.get("children", []), section_type)
+        found = _find_section_by_title(section.get("sections", []), title)
         if found:
             return found
     return None
 
 
 def _section_to_markdown(section: dict[str, Any], level: int) -> list[str]:
-    lines = [f"{'#' * level} {section.get('title', '')}", ""]
+    lines = [f"{'#' * level} {_section_title(section)}", ""]
     for block in section.get("blocks", []):
         lines.extend(_block_to_markdown(block))
         lines.append("")
-    for child in section.get("children", []):
+    for child in section.get("sections", []):
         lines.extend(_section_to_markdown(child, level + 1))
     return lines
+
+
+def _section_title(section: dict[str, Any]) -> str:
+    title = section.get("title")
+    if isinstance(title, dict):
+        return str(title.get("text") or "")
+    return ""
 
 
 def _block_to_markdown(block: dict[str, Any]) -> list[str]:

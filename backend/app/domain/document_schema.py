@@ -1,3 +1,3 @@
 from __future__ import annotations
 
-BLOCK_TYPES = {"paragraph", "list", "image", "table"}
+BLOCK_TYPES = {"title", "paragraph", "list", "image", "table"}

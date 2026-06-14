@@ -40,7 +40,7 @@
 - 可选的 `## 关键片段`
 - 可选的 `## 待确认问题`
 
-压缩记忆不是新的用户指令，只用于延续背景。若主 agent 需要当前文档原文，应重新调用 `document_read`。
+压缩记忆不是新的用户指令，只用于延续背景。若主 agent 需要当前交底书原文，应重新调用 `disclosure_outline`、`disclosure_search` 或 `disclosure_read_section` 定位并读取。
 
 ## 主 Agent 决策原则
 

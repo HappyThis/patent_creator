@@ -21,7 +21,7 @@ def test_build_diagnostics_ignores_recoverable_tool_failures() -> None:
             event(
                 "tool_result",
                 {
-                    "tool": "document_edit",
+                    "tool": "disclosure_edit",
                     "status": "failed",
                     "output": {"code": "duplicate_section_id", "message": "section_id 已存在。"},
                 },
@@ -29,7 +29,7 @@ def test_build_diagnostics_ignores_recoverable_tool_failures() -> None:
             event(
                 "tool_result",
                 {
-                    "tool": "document_edit",
+                    "tool": "disclosure_edit",
                     "status": "failed",
                     "output": {"code": "invalid_operation", "message": "参数错误。"},
                 },
@@ -37,7 +37,7 @@ def test_build_diagnostics_ignores_recoverable_tool_failures() -> None:
             event(
                 "tool_result",
                 {
-                    "tool": "document_read",
+                    "tool": "disclosure_read_section",
                     "status": "failed",
                     "output": {"code": "section_not_found", "message": "章节不存在。"},
                 },
@@ -53,7 +53,7 @@ def test_build_diagnostics_ignores_recoverable_tool_failures() -> None:
     assert diagnostics["round_failed"] is False
     assert "tool_failure_count" not in diagnostics
     assert "tool_failure_codes" not in diagnostics
-    assert "document_edit_failure_count" not in diagnostics
+    assert "disclosure_edit_failure_count" not in diagnostics
 
 
 def test_build_diagnostics_counts_round_failures() -> None:

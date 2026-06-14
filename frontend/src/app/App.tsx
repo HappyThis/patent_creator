@@ -88,6 +88,20 @@ function App() {
   }, [loadProjects]);
 
   useEffect(() => {
+    if (projectsLoading || projectsError || !selectedProjectId) {
+      return;
+    }
+    const selectedProjectExists = projects.some((project) => project.project_id === selectedProjectId);
+    if (selectedProjectExists) {
+      return;
+    }
+    window.history.replaceState(null, '', '/');
+    setSelectedProjectId(null);
+    setIsKernelOpen(false);
+    setIsDisclosureOpen(false);
+  }, [projects, projectsError, projectsLoading, selectedProjectId]);
+
+  useEffect(() => {
     const handlePopState = () => {
       setSelectedProjectId(readProjectIdFromPath());
       setIsKernelOpen(false);

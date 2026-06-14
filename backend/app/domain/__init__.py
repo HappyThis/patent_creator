@@ -5,33 +5,25 @@ from .disclosure import (
     disclosure_to_markdown,
     find_block,
     find_section,
-    find_section_by_type,
+    find_section_parent,
     next_block_id,
     next_section_id,
 )
-from .document_reading import read_document
-from .document_writing import (
-    append_block,
-    append_child_section,
-    clear_section_blocks,
-    replace_block,
-    replace_section_blocks,
-)
+from .document_reading import disclosure_outline, disclosure_read_section, disclosure_search
+from .document_writing import edit_disclosure
 
 __all__ = [
-    "append_block",
-    "append_child_section",
     "build_initial_disclosure",
     "build_outline_items",
     "build_render_ast",
-    "clear_section_blocks",
+    "disclosure_outline",
+    "disclosure_read_section",
+    "disclosure_search",
     "disclosure_to_markdown",
+    "edit_disclosure",
     "find_block",
     "find_section",
-    "find_section_by_type",
+    "find_section_parent",
     "next_block_id",
     "next_section_id",
-    "read_document",
-    "replace_block",
-    "replace_section_blocks",
 ]

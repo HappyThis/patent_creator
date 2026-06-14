@@ -7,12 +7,10 @@ import json
 from typing import Any
 
 from .builtin.document import (
-    document_append_block,
-    document_append_child_section,
-    document_clear_section_blocks,
-    document_read,
-    document_replace_block,
-    document_replace_section_blocks,
+    disclosure_edit,
+    disclosure_outline,
+    disclosure_read_section,
+    disclosure_search,
 )
 from .builtin.filesystem import file_glob, file_read, file_search
 from .builtin.innovation_kernel import innovation_kernel_kit
@@ -172,22 +170,22 @@ def _compact_json(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _document_read_started(arguments: dict[str, Any]) -> str:
-    section_id = arguments.get("section_id") or arguments.get("block_id") or ""
-    return f"开始读取 {section_id}" if section_id else "开始读取章节"
+def _disclosure_read_started(arguments: dict[str, Any]) -> str:
+    section_id = arguments.get("section_id") or ""
+    return f"开始读取交底书 {section_id}" if section_id else "开始读取交底书"
 
 
-def _document_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
-    section_id = arguments.get("section_id") or arguments.get("block_id") or ""
-    return f"{section_id} 已读取" if section_id else "章节已读取"
+def _disclosure_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    section_id = arguments.get("section_id") or ""
+    return f"{section_id} 已读取" if section_id else "交底书已读取"
 
 
-def _document_write_started(arguments: dict[str, Any]) -> str:
-    return "开始写入文档"
+def _disclosure_write_started(arguments: dict[str, Any]) -> str:
+    return "开始编辑交底书"
 
 
-def _document_write_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
-    return "文档更新已完成"
+def _disclosure_write_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    return "交底书更新已完成"
 
 
 def _exec_started(arguments: dict[str, Any]) -> str:
@@ -261,39 +259,25 @@ def _build_tool_registry(registrations: tuple[_ToolRegistration, ...]) -> dict[s
 
 _TOOL_REGISTRATIONS = (
     _ToolRegistration(
-        document_read,
-        summary_started=_document_read_started,
-        summary_finished=_document_read_finished,
+        disclosure_outline,
+        summary_started=_disclosure_read_started,
+        summary_finished=_disclosure_read_finished,
     ),
     _ToolRegistration(
-        document_replace_section_blocks,
-        mutates_document=True,
-        summary_started=_document_write_started,
-        summary_finished=_document_write_finished,
+        disclosure_search,
+        summary_started=_disclosure_read_started,
+        summary_finished=_disclosure_read_finished,
     ),
     _ToolRegistration(
-        document_append_block,
-        mutates_document=True,
-        summary_started=_document_write_started,
-        summary_finished=_document_write_finished,
+        disclosure_read_section,
+        summary_started=_disclosure_read_started,
+        summary_finished=_disclosure_read_finished,
     ),
     _ToolRegistration(
-        document_replace_block,
+        disclosure_edit,
         mutates_document=True,
-        summary_started=_document_write_started,
-        summary_finished=_document_write_finished,
-    ),
-    _ToolRegistration(
-        document_append_child_section,
-        mutates_document=True,
-        summary_started=_document_write_started,
-        summary_finished=_document_write_finished,
-    ),
-    _ToolRegistration(
-        document_clear_section_blocks,
-        mutates_document=True,
-        summary_started=_document_write_started,
-        summary_finished=_document_write_finished,
+        summary_started=_disclosure_write_started,
+        summary_finished=_disclosure_write_finished,
     ),
     _ToolRegistration(file_glob, summary_started=_file_glob_started, summary_finished=_file_glob_finished),
     _ToolRegistration(

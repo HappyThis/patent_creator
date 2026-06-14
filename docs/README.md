@@ -61,8 +61,9 @@
 ## 当前实现口径
 
 1. 系统采用单主 agent 架构。
-2. 交底书文档定位使用 `section_id` 和 `block_id`。
-3. 文档读取统一通过 `document_read`。
-4. 文档写入统一通过专用文档写入工具。
-5. 文档变更事件使用 `changed_section_ids` 和 `changed_block_ids`。
-6. `render_ast` 使用 id 体系支撑前端定位、高亮和滚动。
+2. 交底书采用 v3 section/block 树结构，title 也是 block。
+3. 交底书定位使用 `section_id`、`block_id` 和 section id path。
+4. 交底书读取通过 `disclosure_outline`、`disclosure_search`、`disclosure_read_section`。
+5. 交底书写入统一通过 `disclosure_edit`。
+6. 文档变更事件使用 `changed_section_ids` 和 `changed_block_ids`。
+7. `render_ast` 使用 id 体系支撑前端定位、高亮和滚动。

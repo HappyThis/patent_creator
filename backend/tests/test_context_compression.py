@@ -146,7 +146,7 @@ def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_
                     {
                         "id": "call_big",
                         "type": "function",
-                        "function": {"name": "document_read", "arguments": "{}"},
+                        "function": {"name": "disclosure_outline", "arguments": "{}"},
                     }
                 ],
             },
@@ -163,7 +163,7 @@ def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_
         round_id=round_id,
         message_id=message_id,
         call_id="call_big",
-        payload={"tool": "document_read", "status": "success", "output": {"text": "x" * 180000}},
+        payload={"tool": "disclosure_outline", "status": "success", "output": {"text": "x" * 180000}},
     )
 
     manager = ContextManager(
@@ -205,7 +205,7 @@ def test_tool_result_turn_budget_stops_when_largest_result_is_already_processed(
             "content": "",
             "tool_calls": [
                 {"id": "call_processed", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
-                {"id": "call_raw", "type": "function", "function": {"name": "document_read", "arguments": "{}"}},
+                {"id": "call_raw", "type": "function", "function": {"name": "disclosure_outline", "arguments": "{}"}},
             ],
         },
         {
@@ -253,7 +253,7 @@ def test_restore_main_chat_messages_injects_compressed_markdown_memory() -> None
             round_id="round_1",
             message_id="msg_1",
             call_id="call_read_outline",
-            payload={"tool": "document_read", "arguments": {"action": "get_outline"}},
+            payload={"tool": "disclosure_outline", "arguments": {}},
         ),
         SessionEvent(
             id="evt_3",
@@ -264,7 +264,7 @@ def test_restore_main_chat_messages_injects_compressed_markdown_memory() -> None
             round_id="round_1",
             message_id="msg_1",
             call_id="call_read_outline",
-            payload={"tool": "document_read", "status": "success", "output": {"sections": ["技术方案"]}},
+            payload={"tool": "disclosure_outline", "status": "success", "output": {"sections": ["技术方案"]}},
         ),
         SessionEvent(
             id="evt_4",
@@ -298,8 +298,8 @@ def test_restore_main_chat_messages_does_not_duplicate_current_user_after_tool_r
                 "id": "call_read",
                 "type": "function",
                 "function": {
-                    "name": "document_read",
-                    "arguments": json.dumps({"action": "get_outline"}, ensure_ascii=False),
+                    "name": "disclosure_outline",
+                    "arguments": json.dumps({}, ensure_ascii=False),
                 },
             }
         ],
@@ -334,7 +334,7 @@ def test_restore_main_chat_messages_does_not_duplicate_current_user_after_tool_r
             round_id="round_1",
             message_id="msg_1",
             call_id="call_read",
-            payload={"tool": "document_read", "status": "success"},
+            payload={"tool": "disclosure_outline", "status": "success"},
         ),
     ]
 
@@ -354,8 +354,8 @@ def test_restore_main_chat_messages_uses_saved_agent_message_reasoning() -> None
                 "id": "call_read_outline",
                 "type": "function",
                 "function": {
-                    "name": "document_read",
-                    "arguments": json.dumps({"action": "get_outline"}, ensure_ascii=False),
+                    "name": "disclosure_outline",
+                    "arguments": json.dumps({}, ensure_ascii=False),
                 },
             }
         ],
@@ -380,7 +380,7 @@ def test_restore_main_chat_messages_uses_saved_agent_message_reasoning() -> None
             round_id="round_1",
             message_id="msg_1",
             call_id="call_read_outline",
-            payload={"tool": "document_read", "status": "success"},
+            payload={"tool": "disclosure_outline", "status": "success"},
         ),
     ]
 
@@ -398,8 +398,8 @@ def test_project_main_event_segments_keeps_assistant_tool_call_and_result_togeth
                 "id": "call_read",
                 "type": "function",
                 "function": {
-                    "name": "document_read",
-                    "arguments": json.dumps({"action": "get_outline"}, ensure_ascii=False),
+                    "name": "disclosure_outline",
+                    "arguments": json.dumps({}, ensure_ascii=False),
                 },
             }
         ],
@@ -434,7 +434,7 @@ def test_project_main_event_segments_keeps_assistant_tool_call_and_result_togeth
             round_id="round_1",
             message_id="msg_1",
             call_id="call_read",
-            payload={"tool": "document_read", "arguments": {"action": "get_outline"}},
+            payload={"tool": "disclosure_outline", "arguments": {}},
         ),
         SessionEvent(
             id="evt_4",
@@ -445,7 +445,7 @@ def test_project_main_event_segments_keeps_assistant_tool_call_and_result_togeth
             round_id="round_1",
             message_id="msg_1",
             call_id="call_read",
-            payload={"tool": "document_read", "status": "success"},
+            payload={"tool": "disclosure_outline", "status": "success"},
         ),
     ]
 
@@ -466,8 +466,8 @@ def test_project_main_event_segments_stops_before_incomplete_tool_call() -> None
                 "id": "call_read",
                 "type": "function",
                 "function": {
-                    "name": "document_read",
-                    "arguments": json.dumps({"action": "get_outline"}, ensure_ascii=False),
+                    "name": "disclosure_outline",
+                    "arguments": json.dumps({}, ensure_ascii=False),
                 },
             }
         ],

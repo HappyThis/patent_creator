@@ -21,7 +21,7 @@ DEFAULT_REFINEMENT_INSTRUCTION = (
 if str(EVALUATOR_DIR) not in sys.path:
     sys.path.insert(0, str(EVALUATOR_DIR))
 
-from artifact import extract_technical_solution, has_effective_solution, write_artifact  # noqa: E402
+from artifact import extract_technical_solution, find_technical_solution_section, has_effective_solution, write_artifact  # noqa: E402
 from codex_judge import run_codex_judge  # noqa: E402
 from prepare_env import prepare_exploration_environment  # noqa: E402
 from run_metadata import build_run_manifest  # noqa: E402
@@ -147,7 +147,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             "request.md",
         ],
         "evaluated_artifact": str(artifact_path),
-        "artifact_source": "disclosure.technical_solution",
+        "artifact_source": "disclosure.sections[title=技术方案]",
         "subject_status": subject_status,
         "subject_reused": subject_reused,
         "max_refinement_rounds": max_refinements,
@@ -222,7 +222,6 @@ async def run_subject_agent(
         sys.path.insert(0, str(backend_dir))
 
     from app.core import Settings, generate_id
-    from app.domain import find_section_by_type
     from app.schemas import ChatMessageRequest
     from app.services import AppServices
 
@@ -236,7 +235,7 @@ async def run_subject_agent(
     settings.llm_timeout = max(settings.llm_timeout, float(round_timeout))
     services = AppServices(settings)
     project = services.store.create_project_with_id(f"bench_{case_id}_{generate_id('proj')}", f"Benchmark {case_id}")
-    technical_solution = find_section_by_type(services.store.get_disclosure(project.project_id)["sections"], "technical_solution")
+    technical_solution = find_technical_solution_section(services.store.get_disclosure(project.project_id)["sections"])
     if not technical_solution:
         raise RuntimeError("技术方案章节不存在。")
     technical_solution_section_id = technical_solution["id"]

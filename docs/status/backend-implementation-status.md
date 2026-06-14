@@ -10,20 +10,24 @@
 - SSE round 事件流。
 - 主 agent OpenAI-compatible 工具调用 loop。
 - Markdown 上下文压缩与兜底裁剪。
-- 交底书文档读取工具。
-- 五个小步文档写入工具。
+- 交底书 v3 只读工具：outline、search、read_section。
+- 交底书 v3 小步编辑工具。
+- 创新内核工具和写作前门禁。
+- 文件探索工具。
 - `exec_command` 项目诊断工具。
 - 工作区 JSON 持久化与 git commit。
 - 后端回归测试。
 
 ## 当前工具集
 
-- `document_read`
-- `document_replace_section_blocks`
-- `document_append_block`
-- `document_replace_block`
-- `document_append_child_section`
-- `document_clear_section_blocks`
+- `disclosure_outline`
+- `disclosure_search`
+- `disclosure_read_section`
+- `disclosure_edit`
+- `file_glob`
+- `file_search`
+- `file_read`
+- `innovation_kernel_kit`
 - `exec_command`
 
 ## 测试状态

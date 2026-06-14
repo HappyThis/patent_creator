@@ -51,7 +51,7 @@ export function renderPreviewNodes({
     }
 
     const blockChanged = recentBlockIds.includes(node.id);
-    if (node.type === 'paragraph') {
+    if (node.type === 'title' || node.type === 'paragraph') {
       return (
         <p
           key={node.id}
@@ -107,15 +107,20 @@ export function renderPreviewNodes({
       );
     }
 
-    return (
-      <figure
-        key={node.id}
-        className={`preview-block preview-image ${blockChanged ? 'changed' : ''}`}
-        data-block-id={node.id}
-      >
-        <div className="image-placeholder">{node.alt ?? '示意图'}</div>
-        {node.caption ? <figcaption>{node.caption}</figcaption> : null}
-      </figure>
-    );
+    if (node.type === 'image') {
+      return (
+        <figure
+          key={node.id}
+          className={`preview-block preview-image ${blockChanged ? 'changed' : ''}`}
+          data-block-id={node.id}
+        >
+          <div className="image-placeholder">{node.alt ?? '示意图'}</div>
+          {node.caption ? <figcaption>{node.caption}</figcaption> : null}
+        </figure>
+      );
+    }
+
+    const exhaustive: never = node;
+    return exhaustive;
   });
 }

@@ -21,9 +21,10 @@ def test_main_agent_prompt_requires_reading_source_before_uncertain_document_ans
 
     assert "先判断用户任务是否依赖当前交底书正文" in prompt
     assert "缺的是当前正文依据" in prompt
-    assert "先读取相关章节或 block" in prompt
+    assert "先用 `disclosure_outline` 或 `disclosure_search` 定位" in prompt
+    assert "`disclosure_read_section` 精读相关 section" in prompt
     assert "先搜索" in prompt
-    assert "必要时包含子章节" in prompt
+    assert "关键词定位使用 `disclosure_search`" in prompt
 
 
 def test_main_agent_prompt_is_main_only() -> None:
@@ -119,10 +120,11 @@ def test_main_agent_prompt_defines_structured_section_and_final_text_rules() -> 
     assert "面向对话过程、修改过程或方案迭代过程的表述" in prompt
     assert "调整后的最终表述" in prompt
     assert "解释调整过程" in prompt
-    assert "章节负责结构，block 负责具体正文" in prompt
+    assert "v3 交底书中 section 负责结构，block 承接所有内容" in prompt
+    assert "标题也是 title block" in prompt
     assert "整体架构" in prompt
     assert "处理流程" in prompt
-    assert "复杂内容不要只用多个 paragraph block 平铺" in prompt
+    assert "优先考虑子章节结构" in prompt
 
 
 def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:
@@ -140,13 +142,16 @@ def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:
     assert "反思结论用于决定下一步行动，不写入交底书正文" in prompt
 
 
-def test_main_agent_document_read_supports_search_blocks() -> None:
-    document_read = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "document_read")
-    properties = document_read["function"]["parameters"]["properties"]
+def test_main_agent_registers_disclosure_read_tools() -> None:
+    tool_names = {tool["function"]["name"] for tool in MAIN_AGENT_TOOLS}
 
-    assert "search_blocks" in properties["action"]["enum"]
-    assert "get_project_context" in properties["action"]["enum"]
-    assert "query" in properties
+    assert {"disclosure_outline", "disclosure_search", "disclosure_read_section"} <= tool_names
+    assert "document_read" not in tool_names
+
+    search = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "disclosure_search")
+    search_properties = search["function"]["parameters"]["properties"]
+    assert set(search_properties) == {"query", "regex", "limit", "offset"}
+    assert "case_sensitive" not in search_properties
 
 
 def test_exec_command_metadata_comes_from_tool_docstring() -> None:
@@ -161,17 +166,17 @@ def test_exec_command_metadata_comes_from_tool_docstring() -> None:
     assert '执行诊断命令：{"command":"git status --short","timeout":30}' in prompt
 
 
-def test_append_child_section_protocol_is_single_shape() -> None:
+def test_disclosure_edit_protocol_is_single_shape() -> None:
     tool_names = [tool["function"]["name"] for tool in MAIN_AGENT_TOOLS]
     assert "document_edit" not in tool_names
-    assert "document_append_child_section" in tool_names
+    assert "document_append_child_section" not in tool_names
+    assert "disclosure_edit" in tool_names
 
-    append_child = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "document_append_child_section")
-    properties = append_child["function"]["parameters"]["properties"]
+    edit = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "disclosure_edit")
+    properties = edit["function"]["parameters"]["properties"]
 
-    assert set(properties) == {"parent_section_id", "title", "blocks"}
-    assert append_child["function"]["parameters"]["required"] == ["parent_section_id", "title", "blocks"]
-    assert "section" not in properties
+    assert set(properties) == {"section_id", "operation", "block_id", "target_section_id", "position", "block", "section"}
+    assert edit["function"]["parameters"]["required"] == ["section_id", "operation"]
     assert "operations" not in properties
     assert "op" not in properties
 
@@ -201,10 +206,11 @@ def test_main_agent_prompt_requires_small_document_edits() -> None:
         assert tool_name in tool_manual
     assert "document_edit" not in MAIN_AGENT_TOOL_NAMES
     assert "document_edit" not in tool_manual
+    assert DOCUMENT_WRITE_TOOL_NAMES == ("disclosure_edit",)
     assert "operations" not in tool_manual
-    assert "单次正文写入总量不得超过 1500 字" in tool_manual
-    assert "一次只追加一个 block" in tool_manual
-    assert "只需要提供 parent_section_id、title 和 blocks" in tool_manual
+    assert "单次新增/替换文本总量不得超过 1500 字" in tool_manual
+    assert "没有整章重写" in tool_manual
+    assert "insert_section 只创建子章节标题" in tool_manual
 
 
 def test_removed_subagent_tools_are_not_registered() -> None:

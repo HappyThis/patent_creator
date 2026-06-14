@@ -103,7 +103,7 @@
   "title": "未命名交底书",
   "created_at": "2026-04-23T18:00:00+08:00",
   "updated_at": "2026-04-23T18:00:00+08:00",
-  "schema_version": "v2"
+  "schema_version": "v3"
 }
 ```
 
@@ -186,97 +186,26 @@ sessions/
 {
   "meta": {
     "document_type": "patent_disclosure",
-    "schema_version": "v2",
-    "title": "未命名交底书",
-    "id_counters": {
-      "section": 12,
-      "block": 0
-    }
+    "schema_version": "v3",
+    "created_at": "2026-04-23T18:00:00+08:00",
+    "updated_at": "2026-04-23T18:00:00+08:00"
   },
   "sections": [
     {
       "id": "sec_000001",
-      "type": "title",
-      "title": "发明名称",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000002",
-      "type": "technical_field",
-      "title": "技术领域",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000003",
-      "type": "background_technology",
-      "title": "背景技术",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000004",
-      "type": "existing_solution",
-      "title": "现有技术方案",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000005",
-      "type": "existing_solution_defects",
-      "title": "现有技术缺陷",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000006",
-      "type": "technical_problem",
-      "title": "要解决的技术问题",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000007",
-      "type": "technical_solution",
-      "title": "技术方案",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000008",
-      "type": "key_innovations",
-      "title": "关键创新点",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000009",
-      "type": "embodiments",
-      "title": "具体实施方式",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000010",
-      "type": "technical_effects",
-      "title": "技术效果",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000011",
-      "type": "drawings",
-      "title": "附图说明",
-      "blocks": [],
-      "children": []
-    },
-    {
-      "id": "sec_000012",
-      "type": "claim_suggestions",
-      "title": "权利要求建议",
-      "blocks": [],
-      "children": []
+      "title": {
+        "id": "blk_000001",
+        "type": "title",
+        "text": "发明名称"
+      },
+      "blocks": [
+        {
+          "id": "blk_000002",
+          "type": "paragraph",
+          "text": "未命名交底书"
+        }
+      ],
+      "sections": []
     }
   ]
 }
@@ -287,7 +216,9 @@ sessions/
 - 前端目录区域可以立即渲染
 - 渲染区可以立即展示一份空骨架交底书
 - agent 一开始就能围绕标准章节工作
-- 标准章节 type 与工具、渲染和日志保持一致，section id 由系统生成并保持稳定
+- 标准章节名称、section id 和 title block id 由系统生成并保持稳定
+
+完整标准章节列表见 [专利交底书结构方案](patent-disclosure-structure.md)。
 
 ## 六、git 初始化规则
 

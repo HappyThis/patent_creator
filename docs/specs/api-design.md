@@ -47,8 +47,8 @@
   "event": "tool_call_started",
   "data": {
     "scope": "main",
-    "tool": "document_read",
-    "summary": "开始读取章节",
+    "tool": "disclosure_read_section",
+    "summary": "开始读取交底书章节",
     "round_id": "round_001",
     "message_id": "msg_001"
   }
@@ -60,8 +60,8 @@
   "event": "tool_call_finished",
   "data": {
     "scope": "main",
-    "tool": "document_read",
-    "summary": "章节已读取",
+    "tool": "disclosure_read_section",
+    "summary": "交底书章节已读取",
     "result": {
       "status": "success",
       "output": {}
@@ -72,4 +72,4 @@
 
 ## 文档变更
 
-任一文档写入工具成功后，服务层广播 `document_changed`，并在 round 结束时提交工作区 git commit。
+`disclosure_edit` 成功后，服务层广播 `document_changed`，并在 round 结束时提交工作区 git commit。

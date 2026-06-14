@@ -10,7 +10,7 @@ class ProjectRecord(BaseModel):
     title: str
     created_at: str
     updated_at: str
-    schema_version: str = "v2"
+    schema_version: str = "v3"
     active_session_id: str | None = None
     running_session_id: str | None = None
     running_round_id: str | None = None
@@ -59,7 +59,6 @@ class ProjectListResponse(BaseModel):
 
 class OutlineItem(BaseModel):
     id: str
-    type: str
     title: str
     level: int
     anchor: str

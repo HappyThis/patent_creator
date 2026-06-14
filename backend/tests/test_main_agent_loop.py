@@ -11,6 +11,13 @@ from app.services import AppServices
 from helpers import ScriptedLLMClient, create_project, make_settings, tool_call, wait_until_idle
 
 
+def section_by_title(disclosure: dict[str, Any], title: str) -> dict[str, Any]:
+    for section in disclosure["sections"]:
+        if section["title"]["text"] == title:
+            return section
+    raise AssertionError(f"section not found: {title}")
+
+
 def create_kernel_session(services: AppServices, project_id: str, session_id: str = "sess_with_kernel") -> str:
     services.store.append_session_event(
         project_id,
@@ -38,15 +45,15 @@ def create_kernel_session(services: AppServices, project_id: str, session_id: st
 
 @pytest.mark.anyio
 async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
-    """覆盖 read -> document_replace_section_blocks -> respond 的主 agent-only 链路。"""
+    """覆盖 disclosure_read_section -> disclosure_edit -> respond 的主 agent-only 链路。"""
 
     def step_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
             "tool_calls": [
                 tool_call(
-                    "document_read",
-                    {"action": "get_section", "section_id": "sec_000010", "include_children": True},
+                    "disclosure_read_section",
+                    {"section_id": "sec_000010", "limit": 20},
                     "call_1",
                 )
             ],
@@ -60,8 +67,13 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
             "type": "tool_calls",
             "tool_calls": [
                 tool_call(
-                    "document_replace_section_blocks",
-                    {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "正文占位。"}]},
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000010",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "正文占位。"},
+                    },
                     "call_2",
                 )
             ],
@@ -88,8 +100,8 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
         for event in events
         if event.type == "tool_call" and event.scope == "main"
     ]
-    assert main_tool_calls.count("document_read") == 1
-    assert main_tool_calls.count("document_replace_section_blocks") == 1
+    assert main_tool_calls.count("disclosure_read_section") == 1
+    assert main_tool_calls.count("disclosure_edit") == 1
     assert all(not event.scope.startswith("subagent:") for event in events)
     assert "agent_output" in event_types
     assert event_types[-1] == "agent_output"
@@ -103,7 +115,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     assert round_finished_payload["changed"] is True
 
     disclosure = services.store.get_disclosure(project_id)
-    technical_effects = next(s for s in disclosure["sections"] if s["type"] == "technical_effects")
+    technical_effects = section_by_title(disclosure, "技术效果")
     assert len(technical_effects["blocks"]) >= 1
 
 
@@ -114,8 +126,13 @@ async def test_main_agent_loop_blocks_document_write_without_innovation_kernel(t
             "type": "tool_calls",
             "tool_calls": [
                 tool_call(
-                    "document_replace_section_blocks",
-                    {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "should not write"}]},
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000010",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "should not write"},
+                    },
                     "call_write_without_kernel",
                 )
             ],
@@ -159,8 +176,13 @@ async def test_main_agent_loop_allows_document_write_with_current_innovation_ker
             "type": "tool_calls",
             "tool_calls": [
                 tool_call(
-                    "document_replace_section_blocks",
-                    {"section_id": "sec_000010", "blocks": [{"type": "paragraph", "text": "allowed write"}]},
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000010",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "allowed write"},
+                    },
                     "call_write_with_kernel",
                 )
             ],
@@ -196,8 +218,8 @@ async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_mess
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "call_a"),
-                tool_call("document_read", {"action": "get_section", "section_id": "sec_000003"}, "call_b"),
+                tool_call("disclosure_read_section", {"section_id": "sec_000002"}, "call_a"),
+                tool_call("disclosure_read_section", {"section_id": "sec_000003"}, "call_b"),
             ],
         }
 
@@ -219,7 +241,7 @@ async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_mess
     main_reads = [
         event
         for event in events
-        if event.type == "tool_call" and event.scope == "main" and event.payload.get("tool") == "document_read"
+        if event.type == "tool_call" and event.scope == "main" and event.payload.get("tool") == "disclosure_read_section"
     ]
     assert len(main_reads) == 2
 
@@ -229,7 +251,7 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "call_preamble")
+                tool_call("disclosure_read_section", {"section_id": "sec_000002"}, "call_preamble")
             ],
             "assistant_message": {
                 "role": "assistant",
@@ -239,9 +261,9 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
                         "id": "call_preamble",
                         "type": "function",
                         "function": {
-                            "name": "document_read",
+                            "name": "disclosure_read_section",
                             "arguments": json.dumps(
-                                {"action": "get_section", "section_id": "sec_000002"},
+                                {"section_id": "sec_000002"},
                                 ensure_ascii=False,
                             ),
                         },
@@ -278,14 +300,14 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
 
 @pytest.mark.anyio
 async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Path) -> None:
-    error_message = "document_append_block 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+    error_message = "disclosure_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
 
     def step_invalid_tool_arguments_json(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
             "tool_calls": [
                 {
-                    "tool": "document_append_block",
+                    "tool": "disclosure_edit",
                     "arguments": {},
                     "tool_call_id": "bad_call",
                     "arguments_error": error_message,
@@ -323,7 +345,7 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
         if event.type == "tool_result" and event.call_id == "bad_call"
     )
     assert failed_tool_result.payload == {
-        "tool": "document_append_block",
+        "tool": "disclosure_edit",
         "status": "failed",
         "output": {
             "code": "invalid_tool_arguments_json",
@@ -349,20 +371,20 @@ async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Pa
 
 @pytest.mark.anyio
 async def test_main_agent_loop_handles_invalid_arguments_inside_multiple_tool_calls(tmp_path: Path) -> None:
-    error_message = "document_append_block 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
+    error_message = "disclosure_edit 的 arguments 不是合法 JSON：Expecting ',' delimiter: line 1 column 48 (char 47)"
 
     def step_mixed_calls(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
             "tool_calls": [
-                tool_call("document_read", {"action": "get_section", "section_id": "sec_000002"}, "valid_call_1"),
+                tool_call("disclosure_read_section", {"section_id": "sec_000002"}, "valid_call_1"),
                 {
-                    "tool": "document_append_block",
+                    "tool": "disclosure_edit",
                     "arguments": {},
                     "tool_call_id": "bad_call",
                     "arguments_error": error_message,
                 },
-                tool_call("document_read", {"action": "get_section", "section_id": "sec_000003"}, "valid_call_2"),
+                tool_call("disclosure_read_section", {"section_id": "sec_000003"}, "valid_call_2"),
             ],
         }
 
@@ -405,7 +427,7 @@ async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path)
     def step_bad_read(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
-            "tool_calls": [tool_call("document_read", {"action": "get_section", "section_id": "not_exist_section"}, "call_fail")],
+            "tool_calls": [tool_call("disclosure_read_section", {"section_id": "not_exist_section"}, "call_fail")],
         }
 
     def step_recover(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -512,8 +534,8 @@ async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Pa
             "type": "tool_calls",
             "tool_calls": [
                 tool_call(
-                    "document_read",
-                    {"action": "get_section", "section_id": "sec_000002"},
+                    "disclosure_read_section",
+                    {"section_id": "sec_000002"},
                     "call_restore_read",
                 )
             ],
@@ -538,7 +560,7 @@ async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Pa
             if call.get("id") == "call_restore_read"
         ]
         assert restored_tool_calls
-        assert restored_tool_calls[0]["function"]["name"] == "document_read"
+        assert restored_tool_calls[0]["function"]["name"] == "disclosure_read_section"
 
         restored_tool = next(
             message
