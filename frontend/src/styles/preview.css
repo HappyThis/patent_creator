@@ -40,7 +40,7 @@
 .preview-section h3 {
   display: flex;
   align-items: baseline;
-  gap: 18px;
+  gap: 8px;
   margin: 34px 0 16px;
   color: #0d1624;
   line-height: 1.35;
@@ -62,7 +62,6 @@
 
 .preview-heading-index {
   flex: 0 0 auto;
-  min-width: 34px;
   color: #8a6426;
   font-variant-numeric: tabular-nums;
 }
@@ -74,6 +73,11 @@
   color: #2e3942;
   text-align: justify;
   overflow-wrap: anywhere;
+}
+
+.preview-paragraph {
+  margin-bottom: 12px;
+  text-indent: 2em;
 }
 
 .preview-empty-hint {

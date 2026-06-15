@@ -8,7 +8,7 @@
 .chat-thread {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 18px;
 }
 
 .message-row {
@@ -37,11 +37,12 @@
 .message-bubble.user {
   max-width: 78%;
   padding: 8px 14px;
-  border-radius: 999px;
+  border-radius: 18px;
   background: rgba(255, 253, 248, 0.7);
   border: 1px solid rgba(62, 55, 45, 0.12);
   color: #2b2f31;
-  text-align: right;
+  text-align: left;
+  overflow-wrap: anywhere;
   box-shadow: 0 8px 22px rgba(56, 48, 38, 0.035);
 }
 

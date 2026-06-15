@@ -313,7 +313,7 @@ function App() {
             aria-label={kernelToggleLabel}
             title={kernelToggleLabel}
           >
-            <span className="workspace-panel-icon workspace-panel-icon-left" aria-hidden="true" />
+            <PanelChevron direction={isKernelOpen ? 'left' : 'right'} />
           </button>
 
           <button
@@ -338,7 +338,7 @@ function App() {
                 : '预览交底书'
             }
           >
-            <span className="workspace-panel-icon workspace-panel-icon-right" aria-hidden="true" />
+            <PanelChevron direction={isDisclosureOpen ? 'right' : 'left'} />
           </button>
 
           <ChatPanel
@@ -382,6 +382,18 @@ function App() {
         ) : null}
       </main>
     </div>
+  );
+}
+
+function PanelChevron({ direction }: { direction: 'left' | 'right' }) {
+  const points = direction === 'left' ? '7.5 3 4.5 6 7.5 9' : '4.5 3 7.5 6 4.5 9';
+
+  return (
+    <span className="workspace-panel-icon" aria-hidden="true">
+      <svg viewBox="0 0 12 12" focusable="false">
+        <polyline points={points} />
+      </svg>
+    </span>
   );
 }
 

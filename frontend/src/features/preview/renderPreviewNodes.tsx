@@ -22,7 +22,9 @@ export function renderPreviewNodes({
       sectionIndex += 1;
       const indexPath = [...parentIndexPath, sectionIndex];
       const sectionChanged = recentSectionIds.includes(node.id);
-      const isEmpty = isSectionDirectlyEmpty(node);
+      const hasChildSections = node.children.some((child) => child.type === 'section');
+      const hasSubtreeContent = sectionStatusById[node.id]?.filled ?? !isSectionDirectlyEmpty(node);
+      const isEmpty = !hasChildSections && !hasSubtreeContent;
       const heading = (
         <>
           <span className="preview-heading-index">{indexPath.join('.')}.</span>
@@ -55,7 +57,11 @@ export function renderPreviewNodes({
       return (
         <p
           key={node.id}
-          className={`preview-block ${blockChanged ? 'changed' : ''}`}
+          className={[
+            'preview-block',
+            node.type === 'paragraph' ? 'preview-paragraph' : 'preview-title-block',
+            blockChanged ? 'changed' : '',
+          ].filter(Boolean).join(' ')}
           data-block-id={node.id}
         >
           {node.text}

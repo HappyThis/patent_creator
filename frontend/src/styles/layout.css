@@ -82,22 +82,19 @@
   position: absolute;
   top: 50%;
   z-index: 20;
-  width: 18px;
-  height: 66px;
+  width: 12px;
+  height: 72px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  border: 1px solid rgba(62, 55, 45, 0.16);
-  background: rgba(250, 248, 242, 0.72);
+  border: 1px solid rgba(62, 55, 45, 0.14);
+  background: rgba(250, 248, 242, 0.92);
   color: #8f877c;
   font-size: 0;
   font-weight: 700;
   line-height: 1;
-  backdrop-filter: blur(12px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 12px 30px rgba(54, 47, 38, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
   transform: translateY(-50%);
   transition:
     background 140ms ease,
@@ -109,59 +106,50 @@
 
 .workspace-edge-toggle-left {
   left: 0;
-  border-left: 0;
-  border-radius: 0 8px 8px 0;
+  border-radius: 999px;
 }
 
 .chat-workspace.kernel-open .workspace-edge-toggle-left {
-  left: -9px;
-  border-left: 1px solid rgba(62, 55, 45, 0.16);
-  border-radius: 8px;
+  left: -6px;
 }
 
 .workspace-edge-toggle-right {
   right: 0;
-  border-right: 0;
-  border-radius: 8px 0 0 8px;
+  border-radius: 999px;
 }
 
 .chat-workspace.disclosure-open .workspace-edge-toggle-right {
-  right: -9px;
-  border-right: 1px solid rgba(62, 55, 45, 0.16);
-  border-radius: 8px;
+  right: -6px;
 }
 
 .workspace-edge-toggle-kernel {
-  border-color: rgba(84, 117, 102, 0.25);
-  background: linear-gradient(90deg, rgba(111, 141, 130, 0.84) 0 3px, rgba(250, 248, 242, 0.78) 3px 100%);
-  color: #355f56;
+  border-color: rgba(62, 55, 45, 0.16);
+  background: rgba(250, 248, 242, 0.78);
+  color: #74736e;
 }
 
 .workspace-edge-toggle-kernel.empty {
-  border-color: rgba(84, 117, 102, 0.2);
-  background: linear-gradient(90deg, rgba(111, 141, 130, 0.58) 0 3px, rgba(250, 248, 242, 0.66) 3px 100%);
-  color: #5f756d;
+  border-color: rgba(62, 55, 45, 0.16);
+  background: rgba(250, 248, 242, 0.78);
+  color: #74736e;
 }
 
 .workspace-edge-toggle-disclosure {
-  border-color: rgba(77, 88, 94, 0.14);
-  background: linear-gradient(270deg, rgba(126, 120, 106, 0.36) 0 3px, rgba(250, 248, 242, 0.64) 3px 100%);
+  border-color: rgba(62, 55, 45, 0.16);
+  background: rgba(250, 248, 242, 0.78);
   color: #74736e;
 }
 
 .workspace-edge-toggle-disclosure.requires-kernel {
-  border-color: rgba(77, 88, 94, 0.12);
-  background: linear-gradient(270deg, rgba(126, 120, 106, 0.22) 0 2px, rgba(255, 253, 248, 0.5) 2px 100%);
-  color: #818785;
+  opacity: 0.72;
 }
 
 .workspace-edge-toggle:hover,
 .workspace-edge-toggle.active {
   border-color: rgba(59, 71, 77, 0.22);
   color: #1f211f;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    0 14px 34px rgba(55, 45, 30, 0.1);
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
 }
 
 .workspace-edge-toggle:hover {
@@ -174,33 +162,26 @@
 
 .workspace-edge-toggle-kernel:hover,
 .workspace-edge-toggle-kernel.active {
-  border-color: rgba(84, 117, 102, 0.3);
-  background: linear-gradient(90deg, rgba(85, 118, 105, 0.9) 0 3px, rgba(255, 253, 248, 0.88) 3px 100%);
-  color: #2f5d52;
+  border-color: rgba(59, 71, 77, 0.22);
+  color: #242424;
 }
 
 .workspace-edge-toggle-disclosure:hover,
 .workspace-edge-toggle-disclosure.active {
   border-color: rgba(59, 71, 77, 0.22);
-  background: linear-gradient(270deg, rgba(92, 92, 84, 0.48) 0 3px, rgba(255, 253, 248, 0.76) 3px 100%);
   color: #242424;
 }
 
 .workspace-edge-toggle.has-unseen-update {
-  border-color: rgba(177, 102, 24, 0.38);
-  color: #9b641b;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.76),
-    0 0 0 1px rgba(187, 112, 28, 0.12),
-    0 9px 20px rgba(70, 45, 15, 0.1);
+  color: #74736e;
 }
 
 .workspace-edge-toggle.has-unseen-update::before {
   content: "";
   position: absolute;
-  top: 10px;
-  width: 6px;
-  height: 6px;
+  top: 9px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   background: #b8741f;
   box-shadow:
@@ -209,21 +190,7 @@
 }
 
 .workspace-edge-toggle-left.has-unseen-update::before {
-  right: 5px;
-}
-
-.workspace-edge-toggle-left.has-unseen-update {
-  background: linear-gradient(90deg, #b8741f 0 3px, rgba(255, 248, 232, 0.95) 3px 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.68),
-    0 0 0 1px rgba(187, 112, 28, 0.12),
-    0 9px 20px rgba(70, 45, 15, 0.1);
-}
-
-.workspace-edge-toggle-left.has-unseen-update:hover {
-  border-color: rgba(139, 79, 18, 0.42);
-  background: linear-gradient(90deg, #a95f17 0 3px, rgba(255, 250, 238, 0.98) 3px 100%);
-  color: #7b4c13;
+  right: 2px;
 }
 
 .workspace-edge-toggle-left.has-unseen-update .workspace-panel-icon {
@@ -231,46 +198,32 @@
 }
 
 .workspace-edge-toggle-right.has-unseen-update::before {
-  left: 4px;
+  left: 2px;
 }
 
 .workspace-panel-icon {
-  position: relative;
-  flex: 0 0 8px;
-  width: 8px;
-  min-width: 8px;
-  height: 16px;
+  flex: 0 0 12px;
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
   display: block;
-  border: 0;
-  border-radius: 0;
   opacity: 0.92;
 }
 
-.workspace-panel-icon::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  border-top: 1.6px solid currentColor;
-  border-right: 1.6px solid currentColor;
-  border-radius: 1px;
-  transform-origin: center;
+.workspace-panel-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
-.workspace-panel-icon::after {
-  display: none;
-}
-
-.workspace-edge-toggle-left .workspace-panel-icon::before,
-.workspace-edge-toggle-right.active .workspace-panel-icon::before {
-  transform: translate(-48%, -50%) rotate(45deg);
-}
-
-.workspace-edge-toggle-right .workspace-panel-icon::before,
-.workspace-edge-toggle-left.active .workspace-panel-icon::before {
-  transform: translate(-52%, -50%) rotate(-135deg);
+.workspace-panel-icon polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  vector-effect: non-scaling-stroke;
 }
 
 .workspace-edge-toggle::after {
