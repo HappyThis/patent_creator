@@ -87,46 +87,38 @@ class StubLLMClient:
             for msg in messages[last_user_index + 1 :]
             if msg.get("role") == "tool"
         ]
+        user_messages = [
+            str(message.get("content") or "")
+            for message in messages
+            if message.get("role") == "user"
+        ]
+        user_message = user_messages[-1] if user_messages else ""
 
-        if not tool_results:
-            user_messages = [
-                str(message.get("content") or "")
-                for message in messages
-                if message.get("role") == "user"
-            ]
-            user_message = user_messages[-1] if user_messages else ""
-            if "<innovation_kernel>" in user_message:
-                kernel_text = (
-                    "# 创新内核\n\n"
-                    "## 1. 核心问题\n"
-                    "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
-                    "## 2. 创新构思\n"
-                    "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
-                    "## 3. 关键技术机制\n"
-                    "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
-                    "## 4. 技术效果\n"
-                    "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
-                    "## 5. 待确认边界\n"
-                    "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
-                )
-                return {
-                    "type": "respond",
-                    "text": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
-                    "assistant_message": {
-                        "role": "assistant",
-                        "content": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
-                    },
-                }
-            if "创新内核" in user_message:
-                tool_calls = [
-                    {
-                        "tool": "innovation_kernel_kit",
-                        "arguments": {"action": "create"},
-                        "tool_call_id": "stub_call_kernel",
-                    }
-                ]
-            elif "技术效果" in user_message:
-                tool_calls = [
+        def tool_calls_action(tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
+            return {
+                "type": "tool_calls",
+                "tool_calls": tool_calls,
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "主 agent 直接生成最终态正文并写入文档。",
+                    "tool_calls": [
+                        {
+                            "id": call["tool_call_id"],
+                            "type": "function",
+                            "function": {
+                                "name": call["tool"],
+                                "arguments": json.dumps(call["arguments"], ensure_ascii=False),
+                            },
+                        }
+                        for call in tool_calls
+                    ],
+                },
+            }
+
+        def disclosure_edit_tool_calls() -> list[dict[str, Any]]:
+            if "技术效果" in user_message:
+                return [
                     {
                         "tool": "disclosure_edit",
                         "arguments": {
@@ -159,75 +151,113 @@ class StubLLMClient:
                         "tool_call_id": "stub_call_2b",
                     },
                 ]
+            return [
+                {
+                    "tool": "disclosure_edit",
+                    "arguments": {
+                        "section_id": "sec_000007",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {
+                            "type": "paragraph",
+                            "text": "本节补充适用于低算力终端的整体方案说明。",
+                        },
+                    },
+                    "tool_call_id": "stub_call_2a",
+                },
+                {
+                    "tool": "disclosure_edit",
+                    "arguments": {
+                        "section_id": "sec_000007",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {
+                            "type": "paragraph",
+                            "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
+                        },
+                    },
+                    "tool_call_id": "stub_call_2b",
+                },
+                {
+                    "tool": "disclosure_edit",
+                    "arguments": {
+                        "section_id": "sec_000007",
+                        "operation": "insert_section",
+                        "position": {"mode": "end"},
+                        "section": {"title": "整体架构"},
+                    },
+                    "tool_call_id": "stub_call_3",
+                },
+                {
+                    "tool": "disclosure_edit",
+                    "arguments": {
+                        "section_id": "sec_000007",
+                        "operation": "insert_section",
+                        "position": {"mode": "end"},
+                        "section": {"title": "处理流程"},
+                    },
+                    "tool_call_id": "stub_call_4",
+                },
+            ]
+
+        if tool_results and tool_results[-1].get("tool_call_id") == "stub_call_kernel_read":
+            last_result = json.loads(str(tool_results[-1].get("content") or "{}"))
+            if last_result.get("status") == "success":
+                return tool_calls_action(disclosure_edit_tool_calls())
+
+        if not tool_results:
+            if "<innovation_kernel>" in user_message:
+                kernel_text = (
+                    "# 创新内核\n\n"
+                    "## 1. 核心问题\n"
+                    "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
+                    "## 2. 创新构思\n"
+                    "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
+                    "## 3. 关键技术机制\n"
+                    "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
+                    "## 4. 技术效果\n"
+                    "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
+                    "## 5. 待确认边界\n"
+                    "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
+                )
+                return {
+                    "type": "respond",
+                    "text": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
+                    "assistant_message": {
+                        "role": "assistant",
+                        "content": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
+                    },
+                }
+            if "创新内核" in user_message:
+                kernel_text = (
+                    "# 创新内核\n\n"
+                    "## 1. 核心问题\n"
+                    "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
+                    "## 2. 创新构思\n"
+                    "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
+                    "## 3. 关键技术机制\n"
+                    "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
+                    "## 4. 技术效果\n"
+                    "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
+                    "## 5. 待确认边界\n"
+                    "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
+                )
+                tool_calls = [
+                    {
+                        "tool": "innovation_kernel_kit",
+                        "arguments": {"action": "write", "kernel_markdown": kernel_text},
+                        "tool_call_id": "stub_call_kernel",
+                    }
+                ]
             else:
                 tool_calls = [
                     {
-                        "tool": "disclosure_edit",
-                        "arguments": {
-                            "section_id": "sec_000007",
-                            "operation": "insert_block",
-                            "position": {"mode": "end"},
-                            "block": {
-                                "type": "paragraph",
-                                "text": "本节补充适用于低算力终端的整体方案说明。",
-                            },
-                        },
-                        "tool_call_id": "stub_call_2a",
-                    },
-                    {
-                        "tool": "disclosure_edit",
-                        "arguments": {
-                            "section_id": "sec_000007",
-                            "operation": "insert_block",
-                            "position": {"mode": "end"},
-                            "block": {
-                                "type": "paragraph",
-                                "text": "系统通过候选区域筛选、轻量特征提取和时序校正协同完成实时检测。",
-                            },
-                        },
-                        "tool_call_id": "stub_call_2b",
-                    },
-                    {
-                        "tool": "disclosure_edit",
-                        "arguments": {
-                            "section_id": "sec_000007",
-                            "operation": "insert_section",
-                            "position": {"mode": "end"},
-                            "section": {"title": "整体架构"},
-                        },
-                        "tool_call_id": "stub_call_3",
-                    },
-                    {
-                        "tool": "disclosure_edit",
-                        "arguments": {
-                            "section_id": "sec_000007",
-                            "operation": "insert_section",
-                            "position": {"mode": "end"},
-                            "section": {"title": "处理流程"},
-                        },
-                        "tool_call_id": "stub_call_4",
+                        "tool": "innovation_kernel_kit",
+                        "arguments": {"action": "read"},
+                        "tool_call_id": "stub_call_kernel_read",
                     },
                 ]
-            return {
-                "type": "tool_calls",
-                "tool_calls": tool_calls,
-                "assistant_message": {
-                    "role": "assistant",
-                    "content": "",
-                    "reasoning_content": "主 agent 直接生成最终态正文并写入文档。",
-                    "tool_calls": [
-                        {
-                            "id": call["tool_call_id"],
-                            "type": "function",
-                            "function": {
-                                "name": call["tool"],
-                                "arguments": json.dumps(call["arguments"], ensure_ascii=False),
-                            },
-                        }
-                        for call in tool_calls
-                    ],
-                },
-            }
+            return tool_calls_action(tool_calls)
 
         reply = "已完成本轮修改。"
         if on_text_delta is not None:
@@ -535,8 +565,8 @@ async def test_innovation_kernel_api_and_stream_update_current_kernel(tmp_path: 
 
         kernel_payload = next(payload for name, payload in sse_events if name == "innovation_kernel_changed")
         assert kernel_payload["exists"] is True
-        assert kernel_payload["source"] == "create"
-        assert "确认" in kernel_payload["user_confirmation_reminder"]
+        assert kernel_payload["source"] == "write"
+        assert "user_confirmation_reminder" not in kernel_payload
         assert "低算力终端" in kernel_payload["kernel_markdown"]
 
         session_id = sse_events[0][1]["session_id"]

@@ -24,6 +24,44 @@ from .event_bus import SessionEventBus
 logger = logging.getLogger("patent_creator.chat")
 
 
+def _message_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_tool_calls = message.get("tool_calls")
+    return [item for item in raw_tool_calls if isinstance(item, dict)] if isinstance(raw_tool_calls, list) else []
+
+
+def _is_innovation_kernel_access_call(tool_call: dict[str, Any]) -> bool:
+    function = tool_call.get("function")
+    if not isinstance(function, dict) or function.get("name") != "innovation_kernel_kit":
+        return False
+    arguments = function.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            parsed_arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return False
+    elif isinstance(arguments, dict):
+        parsed_arguments = arguments
+    else:
+        return False
+    return parsed_arguments.get("action") in {"read", "write"}
+
+
+def _tool_result_has_kernel_markdown(content: Any) -> bool:
+    if isinstance(content, str):
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError:
+            return False
+    elif isinstance(content, dict):
+        result = content
+    else:
+        return False
+    if result.get("status") != "success":
+        return False
+    output = result.get("output")
+    return isinstance(output, dict) and bool(str(output.get("kernel_markdown") or "").strip())
+
+
 class ChatService:
     def __init__(
         self,
@@ -280,7 +318,7 @@ class ChatService:
                     if (
                         tool_call.tool == "innovation_kernel_kit"
                         and result.get("status") == "success"
-                        and tool_call.arguments.get("action") in {"create", "recreate"}
+                        and tool_call.arguments.get("action") == "write"
                     ):
                         await self.bus.publish(
                             key,
@@ -398,22 +436,39 @@ class ChatService:
                 result.get("status"),
             )
             return result
-        if tool_call.tool in DOCUMENT_WRITE_TOOL_NAMES and not self._session_has_innovation_kernel(project_id, state.session_id):
-            result = self._innovation_kernel_required_result()
-            await self.events.failed_tool_result(
-                project_id,
-                state,
-                tool=tool_call.tool,
-                call_id=tool_call.tool_call_id,
-                result=result,
-            )
-            logger.info(
-                "round tool_call id=%s tool=%s status=%s reason=innovation_kernel_required",
-                tool_call.tool_call_id,
-                tool_call.tool,
-                result.get("status"),
-            )
-            return result
+        if tool_call.tool in DOCUMENT_WRITE_TOOL_NAMES:
+            if not self._session_has_innovation_kernel(project_id, state.session_id):
+                result = self._innovation_kernel_required_result()
+                await self.events.failed_tool_result(
+                    project_id,
+                    state,
+                    tool=tool_call.tool,
+                    call_id=tool_call.tool_call_id,
+                    result=result,
+                )
+                logger.info(
+                    "round tool_call id=%s tool=%s status=%s reason=innovation_kernel_required",
+                    tool_call.tool_call_id,
+                    tool_call.tool,
+                    result.get("status"),
+                )
+                return result
+            if not self._caller_messages_have_innovation_kernel_access(caller_messages):
+                result = self._innovation_kernel_read_required_result()
+                await self.events.failed_tool_result(
+                    project_id,
+                    state,
+                    tool=tool_call.tool,
+                    call_id=tool_call.tool_call_id,
+                    result=result,
+                )
+                logger.info(
+                    "round tool_call id=%s tool=%s status=%s reason=innovation_kernel_read_required",
+                    tool_call.tool_call_id,
+                    tool_call.tool,
+                    result.get("status"),
+                )
+                return result
         try:
             declaration = get_tool_declaration(tool_call.tool)
         except KeyError:
@@ -483,14 +538,42 @@ class ChatService:
             "innovation_kernel_required",
             (
                 "当前 session 尚无可依赖的创新内核，不能写入或改写交底书正文。"
-                "请先基于当前上下文调用 innovation_kernel_kit 的 create action 生成创新内核；"
-                "如果已有内核但需要调整，请调用 innovation_kernel_kit 的 recreate action。"
+                "请先基于当前上下文整理完整创新内核，并调用 innovation_kernel_kit.write 写入。"
+                "后续修改交底书必须忠于创新内核，保持创新内核与交底书正文一致。"
+            ),
+        )
+
+    @staticmethod
+    def _innovation_kernel_read_required_result() -> dict[str, Any]:
+        return tool_failed(
+            "innovation_kernel_read_required",
+            (
+                "修改交底书前必须先读取当前完整创新内核。"
+                "请先调用 innovation_kernel_kit.read，评估本次修改是否必要，以及是否与创新内核一致；"
+                "若用户需求会改变发明核心，应先更新创新内核，再修改交底书。"
             ),
         )
 
     def _session_has_innovation_kernel(self, project_id: str, session_id: str) -> bool:
         kernel = self.store.get_innovation_kernel(project_id, session_id)
         return bool(kernel and kernel.kernel_markdown.strip())
+
+    @staticmethod
+    def _caller_messages_have_innovation_kernel_access(messages: list[dict[str, Any]]) -> bool:
+        kernel_call_ids: set[str] = set()
+        for message in messages:
+            if message.get("role") == "assistant":
+                for tool_call in _message_tool_calls(message):
+                    call_id = str(tool_call.get("id") or "")
+                    if call_id and _is_innovation_kernel_access_call(tool_call):
+                        kernel_call_ids.add(call_id)
+                continue
+            if message.get("role") != "tool":
+                continue
+            tool_call_id = str(message.get("tool_call_id") or "")
+            if tool_call_id in kernel_call_ids and _tool_result_has_kernel_markdown(message.get("content")):
+                return True
+        return False
 
     async def _commit(self, project_id: str, changed_payload: dict[str, Any]) -> tuple[bool, dict[str, str] | None]:
         return await asyncio.to_thread(

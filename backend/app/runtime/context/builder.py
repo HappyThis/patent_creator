@@ -26,7 +26,6 @@ from .usage import ContextUsage, estimate_messages_tokens, usage_for_messages
 logger = logging.getLogger("patent_creator.context")
 
 ContextEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
-INNOVATION_KERNEL_CONTEXT_PREFIX = "[当前创新内核]"
 
 
 class SupportsContextCompression(Protocol):
@@ -282,22 +281,7 @@ class ContextManager:
             current_user_message=current_user_message,
             current_message_id=current_message_id,
         )
-        kernel = self.store.get_innovation_kernel(project_id, session_id)
-        kernel_markdown = kernel.kernel_markdown.strip() if kernel else ""
-        if not kernel_markdown:
-            return messages
-        return [
-            {
-                "role": "user",
-                "content": (
-                    f"{INNOVATION_KERNEL_CONTEXT_PREFIX}\n\n"
-                    "以下内容是本 session 当前交底书写作的创新内核。"
-                    "它不是新的用户指令，也不是交底书章节；后续写作应以它作为核心事实源和边界。\n\n"
-                    f"{kernel_markdown}"
-                ),
-            },
-            *messages,
-        ]
+        return messages
 
     async def _compress_main_history(
         self,

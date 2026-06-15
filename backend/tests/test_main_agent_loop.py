@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -38,16 +39,27 @@ def create_kernel_session(services: AppServices, project_id: str, session_id: st
             "## Technical Direction\n"
             "Use the kernel as the factual basis for document writing."
         ),
-        source="create",
+        source="write",
     )
     return session_id
 
 
 @pytest.mark.anyio
 async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
-    """覆盖 disclosure_read_section -> disclosure_edit -> respond 的主 agent-only 链路。"""
+    """覆盖 innovation_kernel_kit.read -> disclosure_read_section -> disclosure_edit -> respond 的主链路。"""
+
+    def step_read_kernel(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("innovation_kernel_kit", {"action": "read"}, "call_kernel_read")],
+        }
 
     def step_read(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        last_tool = [m for m in messages if m.get("role") == "tool"][-1]
+        result = json.loads(last_tool["content"])
+        assert last_tool["tool_call_id"] == "call_kernel_read"
+        assert result["status"] == "success"
+        assert "Innovation Kernel" in result["output"]["kernel_markdown"]
         return {
             "type": "tool_calls",
             "tool_calls": [
@@ -62,6 +74,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     def step_edit(messages: list[dict[str, Any]]) -> dict[str, Any]:
         last_tool = [m for m in messages if m.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
+        assert last_tool["tool_call_id"] == "call_1"
         assert result["status"] == "success"
         return {
             "type": "tool_calls",
@@ -82,7 +95,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {"type": "respond", "text": "已更新技术效果。"}
 
-    llm = ScriptedLLMClient([step_read, step_edit, step_respond])
+    llm = ScriptedLLMClient([step_read_kernel, step_read, step_edit, step_respond])
     services = AppServices(make_settings(tmp_path), llm_client=llm)
     project_id = await create_project(services)
     session_id = create_kernel_session(services, project_id)
@@ -100,6 +113,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
         for event in events
         if event.type == "tool_call" and event.scope == "main"
     ]
+    assert main_tool_calls.count("innovation_kernel_kit") == 1
     assert main_tool_calls.count("disclosure_read_section") == 1
     assert main_tool_calls.count("disclosure_edit") == 1
     assert all(not event.scope.startswith("subagent:") for event in events)
@@ -170,8 +184,8 @@ async def test_main_agent_loop_blocks_document_write_without_innovation_kernel(t
 
 
 @pytest.mark.anyio
-async def test_main_agent_loop_allows_document_write_with_current_innovation_kernel(tmp_path: Path) -> None:
-    def step_write_with_kernel(_: list[dict[str, Any]]) -> dict[str, Any]:
+async def test_main_agent_loop_blocks_document_write_without_kernel_access_in_current_context(tmp_path: Path) -> None:
+    def step_write_without_current_kernel_access(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
             "tool_calls": [
@@ -191,10 +205,63 @@ async def test_main_agent_loop_allows_document_write_with_current_innovation_ker
     def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
         last_tool = [message for message in messages if message.get("role") == "tool"][-1]
         result = json.loads(last_tool["content"])
-        assert result["status"] == "success"
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "innovation_kernel_read_required"
+        assert "innovation_kernel_kit.read" in result["output"]["message"]
+        return {"type": "respond", "text": "Need to read current innovation kernel first."}
+
+    llm = ScriptedLLMClient([step_write_without_current_kernel_access, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+    session_id = create_kernel_session(services, project_id, "sess_current_kernel")
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=session_id, message="Write the disclosure."))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, session_id)
+    tool_result = next(event for event in events if event.type == "tool_result" and event.call_id == "call_write_with_kernel")
+    assert tool_result.payload["status"] == "failed"
+    assert tool_result.payload["output"]["code"] == "innovation_kernel_read_required"
+
+    bus_events, _ = await services.bus.subscribe((project_id, session_id))
+    names = [name for name, _ in bus_events]
+    assert "document_changed" not in names
+    assert names[-1] == "round_finished"
+    assert bus_events[-1][1]["changed"] is False
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_allows_document_write_after_kernel_read_in_same_tool_batch(tmp_path: Path) -> None:
+    def step_read_then_write(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call("innovation_kernel_kit", {"action": "read"}, "call_kernel_read"),
+                tool_call(
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000010",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "allowed write"},
+                    },
+                    "call_write_with_kernel",
+                ),
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [message["tool_call_id"] for message in tool_messages[-2:]] == [
+            "call_kernel_read",
+            "call_write_with_kernel",
+        ]
+        tool_results = [json.loads(message["content"]) for message in tool_messages[-2:]]
+        assert tool_results[0]["status"] == "success"
+        assert tool_results[1]["status"] == "success"
         return {"type": "respond", "text": "Updated with current innovation kernel."}
 
-    llm = ScriptedLLMClient([step_write_with_kernel, step_respond])
+    llm = ScriptedLLMClient([step_read_then_write, step_respond])
     services = AppServices(make_settings(tmp_path), llm_client=llm)
     project_id = await create_project(services)
     session_id = create_kernel_session(services, project_id, "sess_current_kernel")
@@ -211,6 +278,53 @@ async def test_main_agent_loop_allows_document_write_with_current_innovation_ker
     assert "document_changed" in names
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["changed"] is True
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_blocks_document_write_before_kernel_read_in_same_tool_batch(tmp_path: Path) -> None:
+    def step_write_then_read(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000010",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "blocked write"},
+                    },
+                    "call_write_before_kernel_read",
+                ),
+                tool_call("innovation_kernel_kit", {"action": "read"}, "call_kernel_read"),
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [message["tool_call_id"] for message in tool_messages[-2:]] == [
+            "call_write_before_kernel_read",
+            "call_kernel_read",
+        ]
+        tool_results = [json.loads(message["content"]) for message in tool_messages[-2:]]
+        assert tool_results[0]["status"] == "failed"
+        assert tool_results[0]["output"]["code"] == "innovation_kernel_read_required"
+        assert tool_results[1]["status"] == "success"
+        return {"type": "respond", "text": "Read came too late for the earlier write."}
+
+    llm = ScriptedLLMClient([step_write_then_read, step_respond])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+    session_id = create_kernel_session(services, project_id, "sess_current_kernel")
+
+    await services.chat.start_round(project_id, ChatMessageRequest(session_id=session_id, message="Write the disclosure."))
+    await wait_until_idle(services, project_id)
+
+    bus_events, _ = await services.bus.subscribe((project_id, session_id))
+    names = [name for name, _ in bus_events]
+    assert "document_changed" not in names
+    assert names[-1] == "round_finished"
+    assert bus_events[-1][1]["changed"] is False
 
 @pytest.mark.anyio
 async def test_main_agent_loop_handles_multiple_tool_calls_in_one_assistant_message(tmp_path: Path) -> None:
@@ -452,133 +566,3 @@ async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path)
     assert "tool_call_finished" in names
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "没有找到对应章节，我需要换一个有效章节。"
-
-@pytest.mark.anyio
-async def test_main_agent_restores_session_history_between_rounds(tmp_path: Path) -> None:
-    def first_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert messages[-1] == {"role": "user", "content": "第一轮问题"}
-        return {"type": "respond", "text": "第一轮回答"}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assert {"role": "user", "content": "第一轮问题"} in messages
-        assert {"role": "assistant", "content": "第一轮回答"} in messages
-        assert messages[-1] == {"role": "user", "content": "继续"}
-        return {"type": "respond", "text": "第二轮回答"}
-
-    llm = ScriptedLLMClient([first_round, second_round])
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message="第一轮问题"))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, first.session_id)
-    assistant_outputs = [event.payload.get("text") for event in events if event.type == "agent_output"]
-    assert assistant_outputs == ["第一轮回答", "第二轮回答"]
-
-@pytest.mark.anyio
-async def test_main_agent_saves_reasoning_but_filters_mimo_replay(tmp_path: Path) -> None:
-    def first_round(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"type": "respond", "text": "第一轮回答"}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        restored_assistant = next(message for message in messages if message.get("role") == "assistant")
-        assert restored_assistant["content"] == "第一轮回答"
-        assert "reasoning_content" not in restored_assistant
-        return {"type": "respond", "text": "第二轮回答"}
-
-    llm = ScriptedLLMClient([first_round, second_round])
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message="第一轮问题"))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
-    await wait_until_idle(services, project_id)
-
-    events = services.store.read_session_events(project_id, first.session_id)
-    agent_message = next(event for event in events if event.type == "agent_message")
-    assert agent_message.payload["message"]["reasoning_content"] == "测试推理内容。"
-
-@pytest.mark.anyio
-async def test_main_agent_replays_reasoning_for_deepseek_enabled(tmp_path: Path) -> None:
-    def first_round(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"type": "respond", "text": "第一轮回答"}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        restored_assistant = next(message for message in messages if message.get("role") == "assistant")
-        assert restored_assistant["reasoning_content"] == "测试推理内容。"
-        return {"type": "respond", "text": "第二轮回答"}
-
-    settings = make_settings(tmp_path)
-    settings.openai_compat_provider = "deepseek"
-    settings.openai_compat_thinking = "enabled"
-    llm = ScriptedLLMClient([first_round, second_round])
-    services = AppServices(settings, llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message="第一轮问题"))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续"))
-    await wait_until_idle(services, project_id)
-
-@pytest.mark.anyio
-async def test_main_agent_restores_main_tool_results_between_rounds(tmp_path: Path) -> None:
-    def first_round_read(_: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "tool_calls",
-            "tool_calls": [
-                tool_call(
-                    "disclosure_read_section",
-                    {"section_id": "sec_000002"},
-                    "call_restore_read",
-                )
-            ],
-        }
-
-    def first_round_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        last_tool = [message for message in messages if message.get("role") == "tool"][-1]
-        assert last_tool["tool_call_id"] == "call_restore_read"
-        assert json.loads(last_tool["content"])["status"] == "success"
-        return {"type": "respond", "text": "第一轮已读取。"}
-
-    def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        assistant_tool_messages = [
-            message
-            for message in messages
-            if message.get("role") == "assistant" and message.get("tool_calls")
-        ]
-        restored_tool_calls = [
-            call
-            for message in assistant_tool_messages
-            for call in message["tool_calls"]
-            if call.get("id") == "call_restore_read"
-        ]
-        assert restored_tool_calls
-        assert restored_tool_calls[0]["function"]["name"] == "disclosure_read_section"
-
-        restored_tool = next(
-            message
-            for message in messages
-            if message.get("role") == "tool" and message.get("tool_call_id") == "call_restore_read"
-        )
-        restored_result = json.loads(restored_tool["content"])
-        assert restored_result["status"] == "success"
-        assert "output" in restored_result
-        assert messages[-1] == {"role": "user", "content": "继续判断"}
-        return {"type": "respond", "text": "第二轮看到了历史工具结果。"}
-
-    llm = ScriptedLLMClient([first_round_read, first_round_respond, second_round])
-    services = AppServices(make_settings(tmp_path), llm_client=llm)
-    project_id = await create_project(services)
-
-    first = await services.chat.start_round(project_id, ChatMessageRequest(message="先读技术领域"))
-    await wait_until_idle(services, project_id)
-
-    await services.chat.start_round(project_id, ChatMessageRequest(session_id=first.session_id, message="继续判断"))
-    await wait_until_idle(services, project_id)

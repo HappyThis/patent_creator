@@ -6,77 +6,8 @@ from typing import Any
 
 from app.core.config import Settings
 from app.runtime import ContextManager, ExecutorEngine
-from app.runtime.context.builder import INNOVATION_KERNEL_CONTEXT_PREFIX
 from app.runtime.executor import ToolRuntimeContext
 from app.storage.workspace_store import WorkspaceStore
-from app.tools.builtin.innovation_kernel import extract_innovation_kernel
-
-
-class KernelLLMClient:
-    def __init__(self, outputs: list[str]) -> None:
-        self.outputs = list(outputs)
-        self.prompts: list[dict[str, Any]] = []
-
-    async def generate_text(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        messages: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
-        timeout: float | None = None,
-        trace_context: dict[str, Any] | None = None,
-    ) -> str:
-        self.prompts.append(
-            {
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "messages": list(messages or []),
-                "trace_context": trace_context or {},
-            }
-        )
-        if not self.outputs:
-            raise AssertionError("KernelLLMClient outputs exhausted")
-        return self.outputs.pop(0)
-
-    async def generate_with_tools_stream(
-        self,
-        *,
-        system_prompt: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        on_text_delta: Any = None,
-        response_format_json: bool = False,
-        trace_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        self.prompts.append(
-            {
-                "system_prompt": system_prompt,
-                "messages": list(messages),
-                "tools": list(tools),
-                "trace_context": trace_context or {},
-            }
-        )
-        if not self.outputs:
-            raise AssertionError("KernelLLMClient outputs exhausted")
-        output = self.outputs.pop(0)
-        if output == "__tool_call__":
-            return {
-                "type": "tool_calls",
-                "tool_calls": [
-                    {
-                        "tool": "innovation_kernel_kit",
-                        "arguments": {"action": "recreate"},
-                        "tool_call_id": "call_nested",
-                    }
-                ],
-                "assistant_message": {"role": "assistant", "content": "", "tool_calls": []},
-            }
-        return {
-            "type": "respond",
-            "text": output,
-            "assistant_message": {"role": "assistant", "content": output},
-        }
 
 
 def make_runtime(tmp_path: Path) -> tuple[WorkspaceStore, ExecutorEngine, ContextManager, str, str, Settings]:
@@ -99,99 +30,104 @@ def make_runtime(tmp_path: Path) -> tuple[WorkspaceStore, ExecutorEngine, Contex
 def run_kernel_tool(
     executor: ExecutorEngine,
     project_id: str,
-    session_id: str,
-    llm: KernelLLMClient,
-    settings: Settings,
-    action: str,
-    caller_messages: list[dict[str, Any]] | None = None,
+    session_id: str | None,
+    arguments: dict[str, Any],
 ) -> dict[str, Any]:
     return asyncio.run(
         executor.execute_tool(
             project_id,
             "innovation_kernel_kit",
-            {"action": action},
+            arguments,
             runtime_context=ToolRuntimeContext(
                 session_id=session_id,
                 round_id="round_1",
                 message_id="msg_1",
                 parent_call_id="call_kernel",
-                caller_messages=caller_messages or [{"role": "user", "content": "请生成交底书。"}],
-                system_prompt="MAIN_SYSTEM_PROMPT",
-                tools=[{"type": "function", "function": {"name": "same_order_tool"}}],
-                llm_client=llm,
-                settings=settings,
             ),
         )
     )
 
 
-def test_innovation_kernel_kit_create_read_and_recreate_current_only(tmp_path: Path) -> None:
-    store, executor, _manager, project_id, session_id, settings = make_runtime(tmp_path)
-    llm = KernelLLMClient(
-        [
-            "<analysis>x</analysis><innovation_kernel># 创新内核\n\n## 1. 核心问题\n旧问题</innovation_kernel>",
-            "<analysis>x</analysis><innovation_kernel># 创新内核\n\n## 1. 核心问题\n新问题</innovation_kernel>",
-        ]
+def test_innovation_kernel_kit_write_and_read_current_kernel(tmp_path: Path) -> None:
+    store, executor, _manager, project_id, session_id, _settings = make_runtime(tmp_path)
+
+    first = run_kernel_tool(
+        executor,
+        project_id,
+        session_id,
+        {"action": "write", "kernel_markdown": "  # 创新内核\n\n## 1. 核心问题\n旧问题  "},
     )
+    assert first["status"] == "success"
+    assert first["output"]["source"] == "write"
+    assert first["output"]["kernel_markdown"] == "# 创新内核\n\n## 1. 核心问题\n旧问题"
+    assert "user_confirmation_reminder" not in first["output"]
 
-    created = run_kernel_tool(executor, project_id, session_id, llm, settings, "create")
-    assert created["status"] == "success"
-    assert created["output"]["source"] == "create"
-    assert "确认" in created["output"]["user_confirmation_reminder"]
-    assert "旧问题" in created["output"]["kernel_markdown"]
-
-    read = run_kernel_tool(executor, project_id, session_id, llm, settings, "read_all")
+    read = run_kernel_tool(executor, project_id, session_id, {"action": "read"})
     assert read["status"] == "success"
-    assert read["output"]["kernel_markdown"] == created["output"]["kernel_markdown"]
+    assert read["output"]["kernel_markdown"] == first["output"]["kernel_markdown"]
 
-    recreated = run_kernel_tool(executor, project_id, session_id, llm, settings, "recreate")
-    assert recreated["status"] == "success"
-    assert recreated["output"]["source"] == "recreate"
-    assert "确认" in recreated["output"]["user_confirmation_reminder"]
-    assert "新问题" in recreated["output"]["kernel_markdown"]
+    second = run_kernel_tool(
+        executor,
+        project_id,
+        session_id,
+        {"action": "write", "kernel_markdown": "# 创新内核\n\n## 1. 核心问题\n新问题"},
+    )
+    assert second["status"] == "success"
+    assert "新问题" in second["output"]["kernel_markdown"]
     assert "旧问题" not in store.get_innovation_kernel(project_id, session_id).kernel_markdown
-    assert llm.prompts[-1]["system_prompt"] == "MAIN_SYSTEM_PROMPT"
-    assert llm.prompts[-1]["tools"] == [{"type": "function", "function": {"name": "same_order_tool"}}]
-    assert "<analysis>" in llm.prompts[-1]["messages"][-1]["content"]
-    assert "系统会剥离" in llm.prompts[-1]["messages"][-1]["content"]
-    assert "当前已有创新内核" in llm.prompts[-1]["messages"][-1]["content"]
-    assert "旧问题" in llm.prompts[-1]["messages"][-1]["content"]
 
     kernel_files = list((store.project_dir(project_id) / "sessions").glob("*.innovation_kernel.json"))
     assert len(kernel_files) == 1
 
 
-def test_innovation_kernel_kit_requires_current_kernel_for_recreate(tmp_path: Path) -> None:
-    _store, executor, _manager, project_id, session_id, settings = make_runtime(tmp_path)
-    result = run_kernel_tool(executor, project_id, session_id, KernelLLMClient([]), settings, "recreate")
+def test_innovation_kernel_kit_read_requires_current_kernel(tmp_path: Path) -> None:
+    _store, executor, _manager, project_id, session_id, _settings = make_runtime(tmp_path)
+
+    result = run_kernel_tool(executor, project_id, session_id, {"action": "read"})
 
     assert result["status"] == "failed"
     assert result["output"]["code"] == "innovation_kernel_not_found"
 
 
-def test_innovation_kernel_kit_rejects_nested_tool_call_output(tmp_path: Path) -> None:
-    store, executor, _manager, project_id, session_id, settings = make_runtime(tmp_path)
-    store.save_innovation_kernel(
-        project_id,
-        session_id,
-        kernel_markdown="# 创新内核\n\n## 1. 核心问题\n当前问题",
-        source="create",
-    )
+def test_innovation_kernel_kit_write_requires_non_empty_kernel_markdown(tmp_path: Path) -> None:
+    _store, executor, _manager, project_id, session_id, _settings = make_runtime(tmp_path)
 
-    result = run_kernel_tool(executor, project_id, session_id, KernelLLMClient(["__tool_call__"]), settings, "recreate")
+    missing = run_kernel_tool(executor, project_id, session_id, {"action": "write"})
+    blank = run_kernel_tool(executor, project_id, session_id, {"action": "write", "kernel_markdown": " \n\t "})
 
-    assert result["status"] == "failed"
-    assert result["output"]["code"] == "innovation_kernel_unexpected_tool_call"
-    assert store.get_innovation_kernel(project_id, session_id).kernel_markdown.endswith("当前问题")
+    assert missing["status"] == "failed"
+    assert missing["output"]["code"] == "innovation_kernel_empty_content"
+    assert blank["status"] == "failed"
+    assert blank["output"]["code"] == "innovation_kernel_empty_content"
 
 
-def test_context_manager_injects_current_kernel_without_event_history(tmp_path: Path) -> None:
+def test_innovation_kernel_kit_rejects_old_actions(tmp_path: Path) -> None:
+    _store, executor, _manager, project_id, session_id, _settings = make_runtime(tmp_path)
+
+    for action in ("create", "recreate", "read_all"):
+        result = run_kernel_tool(executor, project_id, session_id, {"action": action})
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "invalid_action"
+        assert "read 或 write" in result["output"]["message"]
+
+
+def test_innovation_kernel_kit_write_preserves_caller_content_without_parsing(tmp_path: Path) -> None:
+    _store, executor, _manager, project_id, session_id, _settings = make_runtime(tmp_path)
+    content = "<analysis>x</analysis><innovation_kernel># K</innovation_kernel>"
+
+    result = run_kernel_tool(executor, project_id, session_id, {"action": "write", "kernel_markdown": content})
+
+    assert result["status"] == "success"
+    assert result["output"]["kernel_markdown"] == content
+
+
+def test_context_manager_does_not_inject_current_kernel_without_tool_history(tmp_path: Path) -> None:
     store, _executor, manager, project_id, session_id, _settings = make_runtime(tmp_path)
     store.save_innovation_kernel(
         project_id,
         session_id,
         kernel_markdown="# 创新内核\n\n## 1. 核心问题\n当前问题",
-        source="create",
+        source="write",
     )
 
     messages = manager.build_main_agent_messages(
@@ -203,23 +139,8 @@ def test_context_manager_injects_current_kernel_without_event_history(tmp_path: 
         current_message_id="msg_2",
     )
 
-    assert messages[0]["role"] == "user"
-    assert messages[0]["content"].startswith(INNOVATION_KERNEL_CONTEXT_PREFIX)
-    assert "当前问题" in messages[0]["content"]
+    assert messages[-1] == {"role": "user", "content": "继续写交底书。"}
+    assert all("[当前创新内核]" not in str(message.get("content") or "") for message in messages)
+    assert all("当前问题" not in str(message.get("content") or "") for message in messages)
     events = store.read_session_events(project_id, session_id)
     assert [event.type for event in events] == ["user_input"]
-
-
-def test_extract_innovation_kernel_strips_analysis_and_fences() -> None:
-    assert extract_innovation_kernel("<analysis>x</analysis><innovation_kernel># K</innovation_kernel>") == "# K"
-    assert extract_innovation_kernel("```markdown\n<innovation_kernel>\n# K\n</innovation_kernel>\n```") == "# K"
-    dsml_wrapped = (
-        "<｜｜DSML｜｜tool_calls>\n"
-        "<｜｜DSML｜｜invoke name=\"innovation_kernel_kit\">\n"
-        "<｜｜DSML｜｜parameter name=\"content\" string=\"true\"># 创新内核\n\n## 1. 核心问题\n正文"
-        "</｜｜DSML｜｜parameter>\n"
-        "</｜｜DSML｜｜invoke>\n"
-        "</｜｜DSML｜｜tool_calls>"
-    )
-    assert extract_innovation_kernel(dsml_wrapped) == "# 创新内核\n\n## 1. 核心问题\n正文"
-    assert extract_innovation_kernel("<｜｜DSML｜｜tool_calls></｜｜DSML｜｜tool_calls>") == ""

@@ -95,7 +95,7 @@ class InnovationKernelRecord(BaseModel):
     exists: bool = False
     kernel_markdown: str = ""
     updated_at: str | None = None
-    source: Literal["create", "recreate"] | None = None
+    source: Literal["write"] | None = None
 
 
 class SessionEvent(BaseModel):

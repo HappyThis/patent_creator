@@ -39,5 +39,5 @@ export type InnovationKernelState = {
   exists: boolean;
   kernel_markdown: string;
   updated_at: string | null;
-  source: 'create' | 'recreate' | null;
+  source: 'write' | null;
 };

@@ -185,7 +185,7 @@ export function useWorkspaceStream({
           exists: payload.exists === true,
           kernel_markdown: typeof payload.kernel_markdown === 'string' ? payload.kernel_markdown : '',
           updated_at: typeof payload.updated_at === 'string' ? payload.updated_at : null,
-          source: payload.source === 'create' || payload.source === 'recreate' ? payload.source : null,
+          source: payload.source === 'write' ? payload.source : null,
         });
         return;
       }
@@ -209,7 +209,7 @@ export function useWorkspaceStream({
         const changed = payload.changed === true;
         const committed = payload.committed === true;
         const commitError = payload.commit_error as Record<string, unknown> | null | undefined;
-        if (changed || commitError) {
+        if (commitError || (changed && !committed)) {
           setEvents((current) => [
             ...current,
             {
@@ -217,8 +217,8 @@ export function useWorkspaceStream({
               kind: 'round_status',
               round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
               message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
-              status: committed ? 'done' : 'failed',
-              summary: committed ? '本轮修改已保存到版本历史。' : '本轮修改已完成，但版本提交失败。',
+              status: 'failed',
+              summary: '本轮修改已完成，但版本提交失败。',
               detail: commitError ? String(commitError.message ?? '') : undefined,
               timestamp: formatTimestamp(),
             },

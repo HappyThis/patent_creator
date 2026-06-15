@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.config import Settings
+from app.runtime import ExecutorEngine
 from app.runtime.context.compression import COMPRESSED_MEMORY_PREFIX
 from app.services import AppServices
+from app.storage.workspace_store import WorkspaceStore
 
 
 class ScriptedLLMClient:
@@ -180,3 +182,24 @@ async def create_project(services: AppServices, title: str = "测试项目") -> 
 
 def tool_call(tool: str, arguments: dict[str, Any], tool_call_id: str) -> dict[str, Any]:
     return {"tool": tool, "arguments": arguments, "tool_call_id": tool_call_id}
+
+
+def make_tool_executor(tmp_path: Path, title: str = "一种图像检测方法") -> tuple[ExecutorEngine, str]:
+    store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
+    project = store.create_project(title)
+    return ExecutorEngine(store), project.project_id
+
+
+def section_id_by_title(executor: ExecutorEngine, project_id: str, title: str) -> str:
+    disclosure = executor.store.get_disclosure(project_id)
+    section = next(section for section in disclosure["sections"] if section["title"]["text"] == title)
+    return section["id"]
+
+
+def run_builtin_tool(
+    executor: ExecutorEngine,
+    project_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    return asyncio.run(executor.execute_tool(project_id, tool_name, arguments))

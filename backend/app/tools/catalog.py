@@ -221,16 +221,13 @@ def _file_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> st
 
 
 def _innovation_kernel_started(arguments: dict[str, Any]) -> str:
-    action = arguments.get("action")
-    if action == "read_all":
+    if arguments.get("action") == "read":
         return "开始读取创新内核"
-    if action == "recreate":
-        return "开始重做创新内核"
-    return "开始生成创新内核"
+    return "开始写入创新内核"
 
 
 def _innovation_kernel_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
-    if arguments.get("action") == "read_all":
+    if arguments.get("action") == "read":
         return "创新内核已读取"
     return "创新内核已更新"
 

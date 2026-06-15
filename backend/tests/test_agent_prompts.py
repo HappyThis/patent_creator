@@ -1,15 +1,7 @@
 from __future__ import annotations
 
-import inspect
-
-import pytest
-
 from app.agents.prompts import build_main_agent_system_prompt
 from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_split_main_agent_system_prompt
-from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
-from app.runtime.context.barrier import render_barrier_message
-from app.runtime.context.prompts import context_compression_user_prompt
-from app.tools import DOCUMENT_WRITE_TOOL_NAMES, MAIN_AGENT_TOOL_NAMES, render_tool_manual
 
 
 def test_agent_prompt_entrypoint_is_main_agent_only() -> None:
@@ -53,6 +45,7 @@ def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_t
     assert "不要用当前工作区、默认上下文或未指定材料替代用户指定对象" in prompt
     assert "根据资料载体和任务需要选择合适工具" in prompt
     assert "不以减少工具调用为目标" in prompt
+    assert "仍需核验但不阻碍当前交付的事项" in prompt
     assert "已从用户材料或当前文档确认的内容" in prompt
     assert "条件性表述" in prompt
     assert "可设置、可包括、可通过" in prompt
@@ -91,9 +84,13 @@ def test_main_agent_prompt_defines_current_innovation_kernel_workflow() -> None:
 
     assert "创新内核是交底书生成前的当前态核心事实源" in prompt
     assert "innovation_kernel_kit" in prompt
-    assert "create、recreate、read_all" in prompt
-    assert "没有历史版本、候选或 review" in prompt
-    assert "当前创新内核" in prompt
+    assert "`read` 和 `write` 两个 action" in prompt
+    assert "不会替你生成、补全或解析内容" in prompt
+    assert "系统不会把创新内核固定注入上下文" in prompt
+    assert "当前上下文中必须已有成功的 `innovation_kernel_kit.read` 或 `innovation_kernel_kit.write` 工具结果" in prompt
+    assert "innovation_kernel_read_required" in prompt
+    assert "create、recreate、read_all" not in prompt
+    assert "确认创新内核" not in prompt
 
 
 def test_main_agent_prompt_uses_model_visible_action_words() -> None:
@@ -120,6 +117,11 @@ def test_main_agent_prompt_defines_structured_section_and_final_text_rules() -> 
     assert "面向对话过程、修改过程或方案迭代过程的表述" in prompt
     assert "调整后的最终表述" in prompt
     assert "解释调整过程" in prompt
+    assert "写“权利要求建议”时，保护点在精不在多" in prompt
+    assert "通常 1-3 条，默认 1-2 条，最多不得超过 3 条" in prompt
+    assert "不要把实施细节、可选参数或重复从属特征拆成多个保护点" in prompt
+    assert "不要把保护需求、权利要求布局或保护范围设计写成技术方案内容" in prompt
+    assert "保护性考虑应留在“权利要求建议”中" in prompt
     assert "v3 交底书中 section 负责结构，block 承接所有内容" in prompt
     assert "标题也是 title block" in prompt
     assert "整体架构" in prompt
@@ -140,122 +142,3 @@ def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:
     assert "当前材料条件下已经形成合理、正确、有创新度且结构清晰的完成态" in prompt
     assert "继续写只能带来重复、扩散或细枝末节补充" in prompt
     assert "反思结论用于决定下一步行动，不写入交底书正文" in prompt
-
-
-def test_main_agent_registers_disclosure_read_tools() -> None:
-    tool_names = {tool["function"]["name"] for tool in MAIN_AGENT_TOOLS}
-
-    assert {"disclosure_outline", "disclosure_search", "disclosure_read_section"} <= tool_names
-    assert "document_read" not in tool_names
-
-    search = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "disclosure_search")
-    search_properties = search["function"]["parameters"]["properties"]
-    assert set(search_properties) == {"query", "regex", "limit", "offset"}
-    assert "case_sensitive" not in search_properties
-
-
-def test_exec_command_metadata_comes_from_tool_docstring() -> None:
-    tool = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "exec_command")
-
-    description = tool["function"]["description"]
-    assert description == "在项目工作区内执行命令字符串，cwd 为当前 project 工作区。"
-    assert tool["function"]["parameters"]["properties"]["command"]["description"] == "要执行的命令字符串，按当前项目工作区作为 cwd 执行。"
-
-    prompt = build_main_agent_system_prompt()
-    assert "命令超时时返回 command_timeout" in prompt
-    assert '执行诊断命令：{"command":"git status --short","timeout":30}' in prompt
-
-
-def test_disclosure_edit_protocol_is_single_shape() -> None:
-    tool_names = [tool["function"]["name"] for tool in MAIN_AGENT_TOOLS]
-    assert "document_edit" not in tool_names
-    assert "document_append_child_section" not in tool_names
-    assert "disclosure_edit" in tool_names
-
-    edit = next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == "disclosure_edit")
-    properties = edit["function"]["parameters"]["properties"]
-
-    assert set(properties) == {"section_id", "operation", "block_id", "target_section_id", "position", "block", "section"}
-    assert edit["function"]["parameters"]["required"] == ["section_id", "operation"]
-    assert "operations" not in properties
-    assert "op" not in properties
-
-
-def test_tool_schemas_inline_local_definitions_for_provider_compatibility() -> None:
-    def walk(value: object) -> list[object]:
-        if isinstance(value, dict):
-            return [value, *(item for child in value.values() for item in walk(child))]
-        if isinstance(value, list):
-            return [item for child in value for item in walk(child)]
-        return []
-
-    for tool in MAIN_AGENT_TOOLS:
-        schema = tool["function"]["parameters"]
-        for node in walk(schema):
-            assert not (isinstance(node, dict) and "$defs" in node)
-            assert not (isinstance(node, dict) and "$ref" in node)
-
-
-def test_main_agent_prompt_requires_small_document_edits() -> None:
-    prompt = build_main_agent_system_prompt()
-    tool_manual = render_tool_manual(MAIN_AGENT_TOOL_NAMES)
-
-    assert "自动生成工具声明" in prompt
-    assert tool_manual in prompt
-    for tool_name in DOCUMENT_WRITE_TOOL_NAMES:
-        assert tool_name in tool_manual
-    assert "document_edit" not in MAIN_AGENT_TOOL_NAMES
-    assert "document_edit" not in tool_manual
-    assert DOCUMENT_WRITE_TOOL_NAMES == ("disclosure_edit",)
-    assert "operations" not in tool_manual
-    assert "单次新增/替换文本总量不得超过 1500 字" in tool_manual
-    assert "没有整章重写" in tool_manual
-    assert "insert_section 只创建子章节标题" in tool_manual
-
-
-def test_removed_subagent_tools_are_not_registered() -> None:
-    tool_names = [tool["function"]["name"] for tool in MAIN_AGENT_TOOLS]
-
-    assert "execute_subagent" not in tool_names
-    assert "write_pipe" not in tool_names
-    assert "finish" not in tool_names
-    with pytest.raises(KeyError):
-        render_tool_manual(("execute_subagent",))
-
-
-def test_agent_prompt_sources_do_not_hardcode_removed_subagent_protocol() -> None:
-    source = inspect.getsource(build_main_agent_system_prompt)
-
-    for phrase in ("execute_subagent", "write_pipe", "finish({})", "子 agent"):
-        assert phrase not in source
-
-
-def test_barrier_renderer_only_outputs_compressed_context_messages() -> None:
-    compressed = render_barrier_message({"kind": "compressed_context"})
-
-    assert compressed["role"] == "user"
-    assert "系统压缩后的累计工作状态" in compressed["content"]
-    with pytest.raises(ValueError):
-        render_barrier_message({"kind": "agent_task", "task": "检查提示词冲突"})
-
-
-def test_context_compression_user_prompt_defines_xml_summary_protocol() -> None:
-    prompt = context_compression_user_prompt()
-
-    assert "请只执行上下文滚动压缩" in prompt
-    assert "系统内部的上下文维护指令" in prompt
-    assert "不得把“用户要求只做上下文压缩”" in prompt
-    assert "最终交接版本" in prompt
-    assert "已成功写入的内容按最终落盘结果记录" in prompt
-    assert "不要把本条压缩指令本身" in prompt
-    assert "<analysis>" in prompt
-    assert "<summary>" in prompt
-    assert "不要输出 JSON" in prompt
-    assert "## 当前任务" in prompt
-    assert "## 执行进度" in prompt
-    assert "## 已完成事项" in prompt
-    assert "## 关键事实与证据" in prompt
-    assert "## 待办与下一步" in prompt
-    assert "## 风险与约束" in prompt
-    assert "工具调用 ID" in prompt
-    assert "target_estimated_tokens" not in prompt

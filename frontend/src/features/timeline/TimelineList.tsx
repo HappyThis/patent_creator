@@ -2,6 +2,8 @@ import { ProcessEvent, ToolCallEvent } from '../../types';
 
 type TimelineListProps = {
   items: ProcessEvent[];
+  label?: string;
+  defaultOpen?: boolean;
 };
 
 type ToolNode = {
@@ -9,14 +11,14 @@ type ToolNode = {
   children: ToolNode[];
 };
 
-export function TimelineList({ items }: TimelineListProps) {
+export function TimelineList({ items, label = '执行过程', defaultOpen = false }: TimelineListProps) {
   const toolCalls = items.filter((item) => item.kind === 'tool_call');
   const toolTree = buildToolTree(toolCalls);
 
   return (
-    <details className="process-group">
+    <details className="process-group" open={defaultOpen}>
       <summary className="process-summary">
-        <span>执行过程</span>
+        <span>{label}</span>
         <span className="process-summary-meta">{toolCalls.length} 个工具调用</span>
       </summary>
 

@@ -116,7 +116,7 @@ function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
   }
 
   if (block.kind === 'process') {
-    return <TimelineList key={`trace_process_${index}`} items={block.items} />;
+    return <TimelineList key={`trace_process_${index}`} items={block.items} label="工具调用" defaultOpen />;
   }
 
   return renderStatus(block.event, `trace_status_${block.event.id}_${index}`);
@@ -170,6 +170,21 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
     }
 
     if (!pendingRound.finalMessage) {
+      for (const traceBlock of pendingRound.traceBlocks) {
+        if (traceBlock.kind === 'process') {
+          blocks.push({ kind: 'process', items: traceBlock.items });
+        } else if (traceBlock.kind === 'status') {
+          blocks.push({ kind: 'status', event: traceBlock.event });
+        } else {
+          blocks.push({
+            kind: 'assistant_round',
+            roundKey: pendingRound.roundKey,
+            finalMessage: traceBlock.event,
+            traceBlocks: [],
+            durationLabel: null,
+          });
+        }
+      }
       pendingRound = null;
       return;
     }
@@ -194,7 +209,9 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
     if (event.kind === 'message' && event.role === 'assistant') {
       const roundKey = getAssistantRoundKey(event);
       if (!pendingRound || pendingRound.roundKey !== roundKey) {
-        flushRound();
+        if (pendingRound) {
+          flushRound();
+        }
         pendingRound = { roundKey, finalMessage: null, traceBlocks: [] };
       }
       if (pendingRound.finalMessage) {
@@ -206,11 +223,31 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
     }
 
     if (event.kind === 'tool_call') {
+      const roundKey = event.round_id ?? event.message_id;
+      if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
+        if (pendingRound) {
+          flushRound();
+        }
+        pendingRound = { roundKey, finalMessage: null, traceBlocks: [] };
+      }
       pendingProcess.push(event);
       continue;
     }
 
-    if (event.kind === 'round_status' || event.kind === 'context_status') {
+    if (event.kind === 'context_status') {
+      flushRound();
+      blocks.push({ kind: 'status', event });
+      continue;
+    }
+
+    if (event.kind === 'round_status') {
+      const roundKey = event.round_id ?? event.message_id;
+      if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
+        if (pendingRound) {
+          flushRound();
+        }
+        pendingRound = { roundKey, finalMessage: null, traceBlocks: [] };
+      }
       flushProcessToRound();
       if (pendingRound) {
         pendingRound.traceBlocks.push({ kind: 'status', event });
