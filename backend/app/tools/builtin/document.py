@@ -90,7 +90,8 @@ def disclosure_outline(
         返回 items、returned、total、offset、next_offset、truncated；每个 item 带 locator。
 
     Rules:
-        - 本工具用于定位，不返回正文全文。
+        - 当需要了解交底书结构、寻找可编辑位置或判断章节层级时，先用本工具定位。
+        - 本工具用于定位，不返回正文全文；不要基于 preview 直接改写关键正文。
         - title 是 block，作为 section.title 返回；普通正文 block 从 index=1 开始。
         - 结果分页返回；truncated 为 true 时用 next_offset 继续读取。
 
@@ -116,8 +117,9 @@ def disclosure_search(
         返回 matches、returned、total、offset、next_offset、truncated；命中单位固定为 block。
 
     Rules:
-        - 只用于定位命中的 block，不返回全文。
-        - 不支持 section 范围过滤和 block 类型过滤；找到结果后用 disclosure_read_section 精读。
+        - 当不知道概念、术语或目标文本在哪个章节时，先用本工具定位。
+        - 只用于定位命中的 block，不返回全文；不要基于搜索摘要直接改写关键正文。
+        - 不支持 section 范围过滤和 block 类型过滤；找到结果后用 disclosure_read_section 精读命中的 section 或 block。
         - 结果分页返回；truncated 为 true 时用 next_offset 继续搜索。
 
     Examples:
@@ -148,6 +150,7 @@ def disclosure_read_section(
         返回 section、returned、total、offset、next_offset、truncated；section.sections 只包含直接子 section 摘要。
 
     Rules:
+        - 当写作、评价或修改依赖当前正文时，应先精读相关 section 或目标 block。
         - block_ids 必须属于该 section 的直接 block；读子 section 内容必须改用子 section_id 再调用。
         - 分页对象是 title block + 当前 section 的直接 blocks，不展开子 section 正文。
         - title block 固定 index=0；正文 block 从 index=1 开始。
@@ -181,7 +184,11 @@ def disclosure_edit(
         返回 changed_section_ids、changed_block_ids、primary_section_id、primary_block_id、change_scope；失败时返回 code、message 和可选 retry_hint。
 
     Rules:
+        - 调用前必须确保当前上下文中已有完整创新内核，并且本次修改与创新内核一致；否则应先使用创新内核工具读取或写入完整创新内核。
+        - 若返回 innovation_kernel_required，说明当前 session 尚无创新内核，先整理完整创新内核并写入；若返回 innovation_kernel_read_required，说明已有内核但当前上下文缺少完整内容，先读取完整创新内核。
+        - 只能写最终态正文，不要写对话过程、修改过程、工具操作、方案迭代说明或内部判断。
         - 没有整章重写；重写章节必须拆成删除、插入 section、逐个 insert/replace block。
+        - section 负责结构，block 承接内容；编辑子 section 前，必须改用该子 section 的 section_id 作为工作区，不要跨 section 操作。
         - 改章节标题使用 replace_block 替换该 section 的 title block。
         - title block 只能 replace，不能 delete，也不能在其前方 insert block。
         - insert_section 只创建子章节标题；正文后续通过 insert_block 小步写入。

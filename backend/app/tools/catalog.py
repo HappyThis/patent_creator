@@ -35,7 +35,7 @@ class ToolDeclaration:
 
     @property
     def description(self) -> str:
-        return self.metadata.description
+        return _render_tool_description(self.metadata)
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -90,14 +90,10 @@ def render_tool_manual(tool_names: tuple[str, ...] | list[str]) -> str:
             [
                 "",
                 f"### {declaration.name}",
-                f"- 用途：{declaration.description}",
+                f"- 说明：{declaration.description}",
                 f"- 参数：{_render_schema_summary(declaration.parameters)}",
-                f"- 返回：{declaration.result_contract}",
             ]
         )
-        if declaration.usage_rules:
-            lines.append("- 使用规则：")
-            lines.extend(f"  - {rule}" for rule in declaration.usage_rules)
         if declaration.examples:
             lines.append("- 调用实例：")
             lines.extend(f"  - {label}：{_compact_json(arguments)}" for label, arguments in declaration.examples)
@@ -130,6 +126,17 @@ def _render_schema_summary(schema: dict[str, Any]) -> str:
         description_text = f"，{description}" if isinstance(description, str) and description else ""
         parts.append(f"{name}({type_name}，{marker}{enum_text}{description_text})")
     return "；".join(parts) + "。"
+
+
+def _render_tool_description(metadata: ToolFunctionMetadata) -> str:
+    lines = [
+        f"用途：{metadata.description}",
+        f"返回：{metadata.result_contract}",
+    ]
+    if metadata.usage_rules:
+        lines.append("规则：")
+        lines.extend(f"- {rule}" for rule in metadata.usage_rules)
+    return "\n".join(lines)
 
 
 def _schema_type_name(spec: dict[str, Any]) -> str:

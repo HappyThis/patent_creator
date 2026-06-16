@@ -13,10 +13,11 @@ def test_main_agent_prompt_requires_reading_source_before_uncertain_document_ans
 
     assert "先判断用户任务是否依赖当前交底书正文" in prompt
     assert "缺的是当前正文依据" in prompt
-    assert "先用 `disclosure_outline` 或 `disclosure_search` 定位" in prompt
-    assert "`disclosure_read_section` 精读相关 section" in prompt
-    assert "先搜索" in prompt
-    assert "关键词定位使用 `disclosure_search`" in prompt
+    assert "先定位相关章节或命中内容，再精读目标正文" in prompt
+    assert "不要在未读到关键原文时凭印象改写" in prompt
+    assert "disclosure_outline" not in prompt
+    assert "disclosure_search" not in prompt
+    assert "disclosure_read_section" not in prompt
 
 
 def test_main_agent_prompt_is_main_only() -> None:
@@ -34,7 +35,6 @@ def test_main_agent_prompt_is_main_only() -> None:
 
 def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_tasks() -> None:
     prompt = build_main_agent_system_prompt()
-    main_body = prompt.split("九、自动生成工具声明", 1)[0]
 
     assert "复杂任务工作流程" in prompt
     assert "单 agent 工作流" not in prompt
@@ -71,24 +71,25 @@ def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_t
     assert "会话 reset/clear 同步" not in prompt
     assert "list/inspect/query 管理面" not in prompt
     assert "证据链" not in prompt
-    assert "项目环境路径" not in main_body
-    assert "源码路径" not in main_body
-    assert "file_glob" not in main_body
-    assert "file_search" not in main_body
-    assert "file_read" not in main_body
-    assert "exec_command" not in main_body
+    assert "项目环境路径" not in prompt
+    assert "源码路径" not in prompt
+    assert "file_glob" not in prompt
+    assert "file_search" not in prompt
+    assert "file_read" not in prompt
+    assert "exec_command" not in prompt
 
 
 def test_main_agent_prompt_defines_current_innovation_kernel_workflow() -> None:
     prompt = build_main_agent_system_prompt()
 
     assert "创新内核是交底书生成前的当前态核心事实源" in prompt
-    assert "innovation_kernel_kit" in prompt
-    assert "`read` 和 `write` 两个 action" in prompt
-    assert "不会替你生成、补全或解析内容" in prompt
-    assert "系统不会把创新内核固定注入上下文" in prompt
-    assert "当前上下文中必须已有成功的 `innovation_kernel_kit.read` 或 `innovation_kernel_kit.write` 工具结果" in prompt
-    assert "innovation_kernel_read_required" in prompt
+    assert "系统不会固定注入创新内核" in prompt
+    assert "当前可用上下文中必须已有完整创新内核" in prompt
+    assert "已有创新内核但当前上下文没有完整内容时，先读取完整创新内核" in prompt
+    assert "先更新完整创新内核，再围绕新版内核修改交底书" in prompt
+    assert "innovation_kernel_kit" not in prompt
+    assert "innovation_kernel_read_required" not in prompt
+    assert "`read` 和 `write` 两个 action" not in prompt
     assert "create、recreate、read_all" not in prompt
     assert "确认创新内核" not in prompt
 
@@ -122,8 +123,7 @@ def test_main_agent_prompt_defines_structured_section_and_final_text_rules() -> 
     assert "不要把实施细节、可选参数或重复从属特征拆成多个保护点" in prompt
     assert "不要把保护需求、权利要求布局或保护范围设计写成技术方案内容" in prompt
     assert "保护性考虑应留在“权利要求建议”中" in prompt
-    assert "v3 交底书中 section 负责结构，block 承接所有内容" in prompt
-    assert "标题也是 title block" in prompt
+    assert "长内容必须拆成多次小步写入" in prompt
     assert "整体架构" in prompt
     assert "处理流程" in prompt
     assert "优先考虑子章节结构" in prompt

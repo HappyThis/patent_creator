@@ -37,9 +37,11 @@ async def innovation_kernel_kit(
     Rules:
         - 创新内核是交底书生成前的当前态核心事实源，不是交底书章节，也没有历史版本。
         - action 只能是 read 或 write。
-        - read 只读取当前完整创新内核；不存在时返回 failed。
+        - 写入或改写交底书正文前，当前上下文中必须已有本工具成功 read 或 write 后返回的完整 kernel_markdown。
+        - read 只读取当前完整创新内核；不存在时返回 innovation_kernel_not_found，此时应基于当前上下文整理完整内核并 write。
         - write 只负责保存调用方提供的完整 kernel_markdown；不生成、不补全、不解析模型输出。
         - write 是覆盖写，不支持 patch。调用方若不确定当前内核内容，应先 read，再生成完整新版并 write。
+        - 用户要求改变发明核心时，先形成完整新版内核并 write，再修改交底书正文；不要越过创新内核直接改正文。
 
     Examples:
         - 读取当前创新内核: {"action":"read"}
