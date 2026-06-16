@@ -45,6 +45,13 @@ export type TableNode = {
   rows: string[][];
 };
 
+export type FormulaNode = {
+  type: 'formula';
+  id: string;
+  section_id: string;
+  latex: string;
+};
+
 export type SectionNode = {
   type: 'section';
   id: string;
@@ -54,7 +61,7 @@ export type SectionNode = {
   children: RenderNode[];
 };
 
-export type RenderNode = TitleNode | ParagraphNode | ListNode | ImageNode | TableNode | SectionNode;
+export type RenderNode = TitleNode | ParagraphNode | ListNode | ImageNode | TableNode | FormulaNode | SectionNode;
 
 export type RenderAst = {
   type: 'document';

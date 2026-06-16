@@ -1,8 +1,7 @@
 import { ReactNode, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { ChatEvent, ChatMessageEvent, ProcessEvent } from '../../types';
 import { TimelineList } from '../timeline/TimelineList';
+import { MarkdownContent } from '../../components/MarkdownContent';
 
 type ChatThreadProps = {
   events: ChatEvent[];
@@ -87,16 +86,7 @@ function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], 
     >
       <div className={`message-bubble ${role}`}>
         <div className="markdown-body">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ node: _node, ...props }) => (
-                <a {...props} target="_blank" rel="noopener noreferrer" />
-              ),
-            }}
-          >
-            {event.text ?? ''}
-          </ReactMarkdown>
+          <MarkdownContent>{event.text ?? ''}</MarkdownContent>
         </div>
       </div>
       <time>{event.timestamp}</time>
@@ -109,7 +99,7 @@ function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
     return (
       <article key={`trace_message_${block.event.id}_${index}`} className="trace-message">
         <div className="markdown-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.event.text ?? ''}</ReactMarkdown>
+          <MarkdownContent>{block.event.text ?? ''}</MarkdownContent>
         </div>
       </article>
     );

@@ -129,6 +129,42 @@
   background: #e8e0d4;
 }
 
+.preview-formula {
+  margin: 18px 0 22px;
+  text-align: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.preview-formula-content {
+  display: block;
+  min-width: fit-content;
+  padding: 2px 0;
+}
+
+.preview-formula-content .katex-display {
+  margin: 0;
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.preview-formula-content .katex {
+  font-size: 1.08em;
+}
+
+.preview-formula-fallback code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #4a5763;
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .document-status-bar {
   display: flex;
   align-items: center;

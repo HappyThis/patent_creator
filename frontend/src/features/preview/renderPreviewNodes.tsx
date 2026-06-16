@@ -1,4 +1,5 @@
 import { RenderNode } from '../../types';
+import katex from 'katex';
 import { isSectionDirectlyEmpty, SectionStatus } from './documentStats';
 
 type RenderPreviewNodesProps = {
@@ -123,6 +124,33 @@ export function renderPreviewNodes({
           <div className="image-placeholder">{node.alt ?? '示意图'}</div>
           {node.caption ? <figcaption>{node.caption}</figcaption> : null}
         </figure>
+      );
+    }
+
+    if (node.type === 'formula') {
+      let rendered = '';
+      let renderFailed = false;
+      try {
+        rendered = katex.renderToString(node.latex, {
+          displayMode: true,
+          throwOnError: true,
+          strict: false,
+        });
+      } catch {
+        renderFailed = true;
+      }
+      return (
+        <div
+          key={node.id}
+          className={`preview-block preview-formula ${blockChanged ? 'changed' : ''} ${renderFailed ? 'preview-formula-fallback' : ''}`}
+          data-block-id={node.id}
+        >
+          {renderFailed ? (
+            <code>{node.latex}</code>
+          ) : (
+            <div className="preview-formula-content" dangerouslySetInnerHTML={{ __html: rendered }} />
+          )}
+        </div>
       );
     }
 

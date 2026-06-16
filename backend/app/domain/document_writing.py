@@ -12,7 +12,7 @@ from .document_tree import dedupe, get_required_section
 from .document_validation import validate_disclosure
 
 MAX_DOCUMENT_WRITE_TEXT_CHARS = 1500
-_WRITE_CONTENT_KEYS = {"text", "title", "items", "caption", "alt", "columns", "rows"}
+_WRITE_CONTENT_KEYS = {"text", "title", "items", "caption", "alt", "columns", "rows", "latex"}
 
 DocumentMutator = Callable[[dict[str, Any]], ToolResult]
 
@@ -304,6 +304,10 @@ def _prepare_block(
             block["caption"] = payload["caption"]
         if payload.get("alt") is not None:
             block["alt"] = payload["alt"]
+    elif block_type == "formula":
+        if not isinstance(payload.get("latex"), str):
+            return tool_failed("schema_validation_failed", "formula block 缺少 latex 字段。")
+        block["latex"] = payload["latex"]
     else:
         if not isinstance(payload.get("columns"), list) or not isinstance(payload.get("rows"), list):
             return tool_failed("schema_validation_failed", "table block 缺少 columns 或 rows 字段。")

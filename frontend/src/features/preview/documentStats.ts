@@ -80,6 +80,9 @@ function countNodeText(node: RenderNode): number {
   if (node.type === 'image') {
     return countText(`${node.caption ?? ''}${node.alt ?? ''}`);
   }
+  if (node.type === 'formula') {
+    return countText(node.latex);
+  }
   return 0;
 }
 

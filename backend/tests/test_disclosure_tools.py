@@ -10,7 +10,7 @@ def test_disclosure_v3_initial_structure(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
     disclosure = executor.store.get_disclosure(project_id)
 
-    assert disclosure["meta"]["schema_version"] == "v3"
+    assert disclosure["meta"]["schema_version"] == "v3.1"
     assert "id_counters" not in disclosure["meta"]
     assert "title" not in disclosure["meta"]
     assert disclosure["sections"][0]["title"] == {"id": "blk_000001", "type": "title", "text": "发明名称"}
@@ -21,6 +21,39 @@ def test_disclosure_v3_initial_structure(tmp_path: Path) -> None:
     }
     assert "type" not in disclosure["sections"][0]
     assert "children" not in disclosure["sections"][0]
+
+
+def test_disclosure_edit_supports_formula_block(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    section = section_id_by_title(executor, project_id, "技术方案")
+
+    inserted = run_builtin_tool(
+        executor,
+        project_id,
+        "disclosure_edit",
+        {
+            "section_id": section,
+            "operation": "insert_block",
+            "position": {"mode": "end"},
+            "block": {"type": "formula", "latex": r"\\frac{a+b}{c}"},
+        },
+    )
+    assert inserted["status"] == "success"
+    block_id = inserted["output"]["primary_block_id"]
+
+    read = run_builtin_tool(
+        executor,
+        project_id,
+        "disclosure_read_section",
+        {"section_id": section, "block_ids": [block_id]},
+    )
+    assert read["status"] == "success"
+    assert read["output"]["section"]["blocks"][0]["type"] == "formula"
+    assert read["output"]["section"]["blocks"][0]["latex"] == r"\\frac{a+b}{c}"
+
+    search = run_builtin_tool(executor, project_id, "disclosure_search", {"query": r"\\frac{a+b}{c}"})
+    assert search["status"] == "success"
+    assert search["output"]["matches"][0]["locator"]["block_id"] == block_id
 
 
 def test_disclosure_outline_search_and_read_section(tmp_path: Path) -> None:

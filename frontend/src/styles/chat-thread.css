@@ -159,6 +159,26 @@
   font-size: 12.5px;
 }
 
+.markdown-body .katex-display {
+  margin: 10px 0 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-body .markdown-math-block {
+  margin: 10px 0 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-body .markdown-math-block .katex-display {
+  margin: 0;
+}
+
+.markdown-body .katex-display > .katex {
+  max-width: 100%;
+}
+
 .markdown-body a {
   color: #2f6bcf;
   text-decoration: underline;

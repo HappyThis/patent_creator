@@ -58,7 +58,7 @@ def build_initial_disclosure(title: str) -> dict[str, Any]:
     return {
         "meta": {
             "document_type": "patent_disclosure",
-            "schema_version": "v3",
+            "schema_version": "v3.1",
             "created_at": created_at,
             "updated_at": created_at,
         },
@@ -141,6 +141,9 @@ def render_block(section_id: str, block: dict[str, Any]) -> dict[str, Any]:
         payload["src"] = block["src"]
         payload["caption"] = block.get("caption")
         payload["alt"] = block.get("alt")
+        return payload
+    if block["type"] == "formula":
+        payload["latex"] = block["latex"]
         return payload
     payload["columns"] = block["columns"]
     payload["rows"] = block["rows"]
@@ -248,6 +251,8 @@ def block_to_markdown(block: dict[str, Any]) -> list[str]:
         alt = block.get("alt", "image")
         caption = block.get("caption") or ""
         return [f"![{alt}]({block['src']})", caption] if caption else [f"![{alt}]({block['src']})"]
+    if block["type"] == "formula":
+        return ["$$", block["latex"], "$$"]
     header = "| " + " | ".join(block["columns"]) + " |"
     divider = "| " + " | ".join(["---"] * len(block["columns"])) + " |"
     rows = ["| " + " | ".join(row) + " |" for row in block["rows"]]

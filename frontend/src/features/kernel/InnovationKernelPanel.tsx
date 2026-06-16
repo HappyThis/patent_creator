@@ -1,5 +1,4 @@
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownContent } from '../../components/MarkdownContent';
 import type { InnovationKernelState } from '../../types';
 
 type InnovationKernelPanelProps = {
@@ -14,7 +13,7 @@ export function InnovationKernelPanel({ innovationKernel }: InnovationKernelPane
       <div className="kernel-scroll">
         {markdown ? (
           <article className="kernel-document markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+            <MarkdownContent>{markdown}</MarkdownContent>
           </article>
         ) : (
           <div className="kernel-empty">暂无内容</div>

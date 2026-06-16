@@ -42,8 +42,8 @@ class DisclosureReadSectionArguments(_StrictModel):
 
 
 class BlockArguments(_StrictModel):
-    type: Literal["title", "paragraph", "list", "image", "table"] = Field(
-        description="block 类型。title/paragraph 使用 text；list 使用 ordered 和 items；image 使用 src，可选 caption/alt；table 使用 columns 和 rows。"
+    type: Literal["title", "paragraph", "list", "image", "table", "formula"] = Field(
+        description="block 类型。title/paragraph 使用 text；list 使用 ordered 和 items；image 使用 src，可选 caption/alt；table 使用 columns 和 rows；formula 使用 latex。"
     )
     text: str | None = Field(default=None, description="type=title 或 paragraph 时必填。")
     ordered: bool | None = Field(default=None, description="type=list 时必填，是否为有序列表。")
@@ -53,6 +53,7 @@ class BlockArguments(_StrictModel):
     alt: str | None = Field(default=None, description="type=image 时可选，替代文本。")
     columns: list[str] | None = Field(default=None, description="type=table 时必填，表头列名。")
     rows: list[list[str]] | None = Field(default=None, description="type=table 时必填，表格行。")
+    latex: str | None = Field(default=None, description="type=formula 时必填，块级公式的 LaTeX 源码。")
 
 
 class PositionArguments(_StrictModel):

@@ -53,6 +53,9 @@ def test_disclosure_edit_protocol_is_single_shape() -> None:
     assert edit["function"]["parameters"]["required"] == ["section_id", "operation"]
     assert "operations" not in properties
     assert "op" not in properties
+    block_schema = next(item for item in properties["block"]["anyOf"] if isinstance(item, dict) and item.get("type") == "object")
+    block_properties = block_schema["properties"]
+    assert "latex" in block_properties
 
 
 def test_tool_schemas_inline_local_definitions_for_provider_compatibility() -> None:
