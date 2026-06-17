@@ -217,6 +217,8 @@ def block_text(block: dict[str, Any]) -> str:
         return "\n".join(value for value in [block.get("alt"), block.get("caption"), block.get("src")] if value)
     if block["type"] == "formula":
         return block["latex"]
+    if block["type"] == "figure":
+        return block["figure_id"]
     return "\n".join([" ".join(block["columns"]), *[" ".join(row) for row in block["rows"]]])
 
 

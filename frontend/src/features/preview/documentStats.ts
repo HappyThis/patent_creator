@@ -83,6 +83,9 @@ function countNodeText(node: RenderNode): number {
   if (node.type === 'formula') {
     return countText(node.latex);
   }
+  if (node.type === 'figure') {
+    return countText(node.figure_id);
+  }
   return 0;
 }
 

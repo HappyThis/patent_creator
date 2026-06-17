@@ -316,6 +316,28 @@ class ChatService:
                         )
 
                     if (
+                        tool_call.tool == "figure_kit"
+                        and result.get("status") == "success"
+                        and tool_call.arguments.get("action") in {"create", "update", "delete"}
+                    ):
+                        changed_payload = {
+                            **changed_payload,
+                            "changed": True,
+                            "change_scope": "figure_asset_updated",
+                            "active_section_id": changed_payload.get("active_section_id"),
+                            "active_block_id": changed_payload.get("active_block_id"),
+                        }
+                        await self.bus.publish(
+                            key,
+                            "document_changed",
+                            {
+                                **changed_payload,
+                                "round_id": state.round_id,
+                                "message_id": state.message_id,
+                            },
+                        )
+
+                    if (
                         tool_call.tool == "innovation_kernel_kit"
                         and result.get("status") == "success"
                         and tool_call.arguments.get("action") == "write"

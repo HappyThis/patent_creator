@@ -52,6 +52,23 @@ export type FormulaNode = {
   latex: string;
 };
 
+export type FigureRenderAsset = {
+  figure_id: string;
+  label: string;
+  title: string;
+  source?: {
+    type: string;
+    content: string;
+  };
+};
+
+export type FigureNode = {
+  type: 'figure';
+  id: string;
+  section_id: string;
+  figure_id: string;
+};
+
 export type SectionNode = {
   type: 'section';
   id: string;
@@ -61,7 +78,7 @@ export type SectionNode = {
   children: RenderNode[];
 };
 
-export type RenderNode = TitleNode | ParagraphNode | ListNode | ImageNode | TableNode | FormulaNode | SectionNode;
+export type RenderNode = TitleNode | ParagraphNode | ListNode | ImageNode | TableNode | FormulaNode | FigureNode | SectionNode;
 
 export type RenderAst = {
   type: 'document';
@@ -70,6 +87,7 @@ export type RenderAst = {
     document_type: string;
     schema_version: string;
   };
+  figures?: FigureRenderAsset[];
   outline: OutlineItem[];
   children: RenderNode[];
 };

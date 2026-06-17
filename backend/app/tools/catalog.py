@@ -13,6 +13,7 @@ from .builtin.document import (
     disclosure_search,
 )
 from .builtin.filesystem import file_glob, file_read, file_search
+from .builtin.figure import figure_kit
 from .builtin.innovation_kernel import innovation_kernel_kit
 from .builtin.shell import exec_command
 from .metadata import ToolFunctionMetadata, get_tool_metadata
@@ -239,6 +240,28 @@ def _innovation_kernel_finished(arguments: dict[str, Any], result: dict[str, Any
     return "创新内核已更新"
 
 
+def _figure_started(arguments: dict[str, Any]) -> str:
+    action = arguments.get("action")
+    if action == "check":
+        return "开始检查附图"
+    if action == "list":
+        return "开始读取附图列表"
+    if action in {"create", "update"}:
+        return "开始生成附图"
+    return "开始处理附图"
+
+
+def _figure_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
+    action = arguments.get("action")
+    if action == "check":
+        return "附图检查已完成"
+    if action == "list":
+        return "附图列表已读取"
+    if action in {"create", "update"}:
+        return "附图已更新"
+    return "附图处理已完成"
+
+
 @dataclass(frozen=True, slots=True)
 class _ToolRegistration:
     function: Callable[..., Any]
@@ -290,6 +313,7 @@ _TOOL_REGISTRATIONS = (
         summary_finished=_file_search_finished,
     ),
     _ToolRegistration(file_read, summary_started=_file_read_started, summary_finished=_file_read_finished),
+    _ToolRegistration(figure_kit, summary_started=_figure_started, summary_finished=_figure_finished),
     _ToolRegistration(
         innovation_kernel_kit,
         summary_started=_innovation_kernel_started,

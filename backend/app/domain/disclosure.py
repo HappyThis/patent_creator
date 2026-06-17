@@ -17,8 +17,8 @@ STANDARD_SECTION_TITLES: list[str] = [
     "关键创新点",
     "具体实施方式",
     "技术效果",
-    "附图说明",
     "权利要求建议",
+    "附录",
 ]
 
 SECTION_ID_PATTERN = re.compile(r"^sec_\d{6}$")
@@ -58,7 +58,7 @@ def build_initial_disclosure(title: str) -> dict[str, Any]:
     return {
         "meta": {
             "document_type": "patent_disclosure",
-            "schema_version": "v3.1",
+            "schema_version": "v3.2",
             "created_at": created_at,
             "updated_at": created_at,
         },
@@ -82,7 +82,7 @@ def build_outline_items(sections: list[dict[str, Any]], level: int = 2) -> list[
     return items
 
 
-def build_render_ast(disclosure: dict[str, Any]) -> dict[str, Any]:
+def build_render_ast(disclosure: dict[str, Any], figures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     outline = [item.model_dump() for item in build_outline_items(disclosure["sections"])]
     return {
         "type": "document",
@@ -91,6 +91,7 @@ def build_render_ast(disclosure: dict[str, Any]) -> dict[str, Any]:
             "document_type": disclosure["meta"]["document_type"],
             "schema_version": disclosure["meta"]["schema_version"],
         },
+        "figures": figures or [],
         "outline": outline,
         "children": [render_section(section, 2) for section in disclosure["sections"]],
     }
@@ -144,6 +145,9 @@ def render_block(section_id: str, block: dict[str, Any]) -> dict[str, Any]:
         return payload
     if block["type"] == "formula":
         payload["latex"] = block["latex"]
+        return payload
+    if block["type"] == "figure":
+        payload["figure_id"] = block["figure_id"]
         return payload
     payload["columns"] = block["columns"]
     payload["rows"] = block["rows"]
@@ -253,6 +257,9 @@ def block_to_markdown(block: dict[str, Any]) -> list[str]:
         return [f"![{alt}]({block['src']})", caption] if caption else [f"![{alt}]({block['src']})"]
     if block["type"] == "formula":
         return ["$$", block["latex"], "$$"]
+    if block["type"] == "figure":
+        figure_id = block["figure_id"]
+        return [f"![{figure_id}](figure:{figure_id})"]
     header = "| " + " | ".join(block["columns"]) + " |"
     divider = "| " + " | ".join(["---"] * len(block["columns"])) + " |"
     rows = ["| " + " | ".join(row) + " |" for row in block["rows"]]

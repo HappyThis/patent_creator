@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
+from ..domain.figures import build_figure_record, figure_summary, mermaid_layout_warnings, update_figure_record, validate_mermaid_source
 from ..schemas import InnovationKernelRecord, ProjectRecord, SessionEvent, SessionSummary
 
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
@@ -302,7 +303,7 @@ class WorkspaceStore:
     def commit_workspace(self, project_id: str, message: str) -> tuple[bool, dict[str, str] | None]:
         workspace = self.project_dir(project_id)
         add_result = subprocess.run(
-            ["git", "add", "disclosure.json", "project.json", "sessions"],
+            ["git", "add", "disclosure.json", "project.json", "sessions", "assets"],
             cwd=workspace,
             capture_output=True,
             text=True,
@@ -349,6 +350,90 @@ class WorkspaceStore:
 
     def innovation_kernel_file(self, project_id: str, session_id: str) -> Path:
         return self.project_dir(project_id) / "sessions" / f"{session_id}.innovation_kernel.json"
+
+    def figures_dir(self, project_id: str) -> Path:
+        path = self.project_dir(project_id) / "assets" / "figures"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def list_figures(self, project_id: str) -> list[dict[str, Any]]:
+        figures: list[dict[str, Any]] = []
+        for path in sorted(self.figures_dir(project_id).glob("fig_*.json")):
+            try:
+                figure = self.read_json(path)
+            except Exception:
+                continue
+            if isinstance(figure.get("figure_id"), str):
+                figures.append(self._normalize_figure(figure))
+        figures.sort(key=lambda figure: figure.get("figure_id", ""))
+        return figures
+
+    def get_figure(self, project_id: str, figure_id: str) -> dict[str, Any] | None:
+        path = self.figure_json_file(project_id, figure_id)
+        if not path.exists():
+            return None
+        return self._normalize_figure(self.read_json(path))
+
+    def create_figure(self, project_id: str, *, title: str, mermaid: str) -> dict[str, Any]:
+        figure_id = self.next_figure_id(project_id)
+        index = int(figure_id.removeprefix("fig_"))
+        asset_path = f"assets/figures/{figure_id}.json"
+        validate_result = validate_mermaid_source(mermaid)
+        if validate_result["status"] == "failed":
+            return validate_result
+        figure = build_figure_record(
+            figure_id=figure_id,
+            index=index,
+            title=title,
+            mermaid=mermaid,
+            asset_path=asset_path,
+        )
+        self.write_json_atomic(self.figure_json_file(project_id, figure_id), figure)
+        return {
+            "status": "success",
+            "output": {"figure": self._normalize_figure(figure), "warnings": mermaid_layout_warnings(mermaid)},
+        }
+
+    def update_figure(self, project_id: str, figure_id: str, *, title: str | None, mermaid: str) -> dict[str, Any]:
+        current = self.get_figure(project_id, figure_id)
+        if current is None:
+            return {"status": "failed", "output": {"code": "figure_not_found", "message": f"figure 不存在：{figure_id}"}}
+        validate_result = validate_mermaid_source(mermaid)
+        if validate_result["status"] == "failed":
+            return validate_result
+        updated = update_figure_record(current, title=title, mermaid=mermaid)
+        self.write_json_atomic(self.figure_json_file(project_id, figure_id), updated)
+        return {
+            "status": "success",
+            "output": {"figure": self._normalize_figure(updated), "warnings": mermaid_layout_warnings(mermaid)},
+        }
+
+    def delete_figure(self, project_id: str, figure_id: str) -> bool:
+        path = self.figure_json_file(project_id, figure_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def next_figure_id(self, project_id: str) -> str:
+        max_value = 0
+        for figure in self.list_figures(project_id):
+            figure_id = str(figure.get("figure_id") or "")
+            if figure_id.startswith("fig_"):
+                try:
+                    max_value = max(max_value, int(figure_id.removeprefix("fig_")))
+                except ValueError:
+                    continue
+        return f"fig_{max_value + 1:06d}"
+
+    def figure_json_file(self, project_id: str, figure_id: str) -> Path:
+        return self.figures_dir(project_id) / f"{figure_id}.json"
+
+    def figure_summaries(self, project_id: str) -> list[dict[str, Any]]:
+        return [figure_summary(figure) for figure in self.list_figures(project_id)]
+
+    def _normalize_figure(self, figure: dict[str, Any]) -> dict[str, Any]:
+        return dict(figure)
 
     @staticmethod
     def write_json(path: Path, payload: dict[str, Any]) -> None:

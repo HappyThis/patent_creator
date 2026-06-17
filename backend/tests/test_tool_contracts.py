@@ -56,6 +56,19 @@ def test_disclosure_edit_protocol_is_single_shape() -> None:
     block_schema = next(item for item in properties["block"]["anyOf"] if isinstance(item, dict) and item.get("type") == "object")
     block_properties = block_schema["properties"]
     assert "latex" in block_properties
+    assert "figure_id" in block_properties
+
+
+def test_main_agent_registers_figure_kit() -> None:
+    tool_names = {tool["function"]["name"] for tool in MAIN_AGENT_TOOLS}
+
+    assert "figure_kit" in tool_names
+    figure = _tool("figure_kit")
+    description = figure["function"]["description"]
+    properties = figure["function"]["parameters"]["properties"]
+    assert "markdown_ref" in description
+    assert "figure block 只用于在“附录”章节展示图本体" in description
+    assert set(properties) == {"action", "ref", "title", "mermaid"}
 
 
 def test_tool_schemas_inline_local_definitions_for_provider_compatibility() -> None:
@@ -78,8 +91,7 @@ def test_main_agent_prompt_requires_small_document_edits() -> None:
     edit_description = _tool("disclosure_edit")["function"]["description"]
 
     assert "自动生成工具声明" not in prompt
-    for tool_name in DOCUMENT_WRITE_TOOL_NAMES:
-        assert tool_name not in prompt
+    assert "disclosure_edit 小步落盘" in prompt
     assert "document_edit" not in MAIN_AGENT_TOOL_NAMES
     assert DOCUMENT_WRITE_TOOL_NAMES == ("disclosure_edit",)
     assert "operations" not in edit_description
@@ -107,11 +119,16 @@ def test_tool_descriptions_carry_lookup_and_kernel_workflow_guidance() -> None:
     assert "写入或改写交底书正文前，当前上下文中必须已有本工具成功 read 或 write 后返回的完整 kernel_markdown。" in kernel_description
     assert "innovation_kernel_not_found" in kernel_description
     assert "不生成、不补全、不解析模型输出。" in kernel_description
+    assert "短小但完整" in kernel_description
+    assert "不要写分析报告、探索过程、完整交底书提纲、长篇备选方案或工具执行记录。" in kernel_description
+    assert "推荐 markdown 模板" in kernel_description
+    for heading in ("# 创新内核", "## 发明目标", "## 核心技术手段", "## 必要组成要素", "## 协同流程或运行机理", "## 关键边界", "## 技术效果"):
+        assert heading in kernel_description
 
-    assert "disclosure_outline" not in prompt
-    assert "disclosure_search" not in prompt
-    assert "disclosure_read_section" not in prompt
-    assert "innovation_kernel_kit" not in prompt
+    assert "先用 disclosure_outline 或 disclosure_search 定位" in prompt
+    assert "再用 disclosure_read_section 精读目标 section 或 block" in prompt
+    assert "innovation_kernel_kit.write" in prompt
+    assert "innovation_kernel_kit.read" in prompt
 
 
 def test_removed_subagent_tools_are_not_registered() -> None:

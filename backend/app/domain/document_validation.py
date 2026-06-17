@@ -13,8 +13,8 @@ def validate_disclosure(disclosure: dict[str, Any]) -> ToolResult | None:
     meta = disclosure.get("meta", {})
     if meta.get("document_type") != "patent_disclosure":
         return tool_failed("schema_validation_failed", "disclosure.document_type 必须为 patent_disclosure。")
-    if meta.get("schema_version") != "v3.1":
-        return tool_failed("schema_validation_failed", "disclosure.schema_version 必须为 v3.1。")
+    if meta.get("schema_version") != "v3.2":
+        return tool_failed("schema_validation_failed", "disclosure.schema_version 必须为 v3.2。")
     for key in ("created_at", "updated_at"):
         if not isinstance(meta.get(key), str) or not meta.get(key):
             return tool_failed("schema_validation_failed", f"meta.{key} 必须是非空字符串。")
@@ -87,6 +87,8 @@ def validate_block(
         return tool_failed("schema_validation_failed", "image block 缺少 src 字段。")
     if block_type == "formula" and not isinstance(block.get("latex"), str):
         return tool_failed("schema_validation_failed", "formula block 缺少 latex 字段。")
+    if block_type == "figure" and not isinstance(block.get("figure_id"), str):
+        return tool_failed("schema_validation_failed", "figure block 缺少 figure_id 字段。")
     if block_type == "table" and (
         not isinstance(block.get("columns"), list) or not isinstance(block.get("rows"), list)
     ):

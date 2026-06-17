@@ -23,6 +23,8 @@ export function PreviewPanel({
   previewRef,
   onActiveSectionChange,
 }: PreviewPanelProps) {
+  const figuresById = Object.fromEntries((renderAst.figures ?? []).map((figure) => [figure.figure_id, figure]));
+
   useEffect(() => {
     if (!previewRef.current) {
       return;
@@ -85,6 +87,7 @@ export function PreviewPanel({
             recentSectionIds,
             recentBlockIds,
             sectionStatusById: stats.sectionStatusById,
+            figuresById,
           })}
           <footer className="document-status-bar" aria-label="文档状态">
             <span>字数：{stats.characters.toLocaleString('zh-CN')}</span>

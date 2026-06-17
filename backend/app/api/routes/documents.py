@@ -36,7 +36,7 @@ def create_document_router(services: AppServices) -> APIRouter:
             active_section_id = block_match[0]["id"]
 
         return RenderResponse(
-            render_ast=build_render_ast(disclosure),
+            render_ast=build_render_ast(disclosure, figures=services.store.list_figures(project_id)),
             active_section_id=active_section_id,
             active_block_id=active_block_id,
             updated_at=project.updated_at,

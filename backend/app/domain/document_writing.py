@@ -5,14 +5,14 @@ from collections.abc import Callable
 from typing import Any
 
 from ..core import now_iso
-from .disclosure import find_section, next_block_id, next_section_id
+from .disclosure import find_section, next_block_id, next_section_id, section_title_text
 from .document_schema import BLOCK_TYPES
 from .document_tool_results import ToolResult, tool_failed, tool_success
 from .document_tree import dedupe, get_required_section
 from .document_validation import validate_disclosure
 
 MAX_DOCUMENT_WRITE_TEXT_CHARS = 1500
-_WRITE_CONTENT_KEYS = {"text", "title", "items", "caption", "alt", "columns", "rows", "latex"}
+_WRITE_CONTENT_KEYS = {"text", "title", "items", "caption", "alt", "columns", "rows", "latex", "figure_id"}
 
 DocumentMutator = Callable[[dict[str, Any]], ToolResult]
 
@@ -100,6 +100,8 @@ def _replace_block(
             block_result = _prepare_block(disclosure, block_payload, existing_block_id=block_id, forbid_title=True)
             if block_result["status"] == "failed":
                 return block_result
+            if block_result["output"]["block"].get("type") == "figure" and section_title_text(section) != "附录":
+                return tool_failed("figure_block_outside_appendix", "figure block 只能写入附录章节。")
             section["blocks"][index] = block_result["output"]["block"]
             return _write_output([section["id"]], [block_id], section["id"], block_id, "block_replaced")
     return tool_failed("block_not_found", f"block_id 不是该 section 的直接 block：{block_id}")
@@ -130,6 +132,8 @@ def _insert_block(
     if isinstance(insert_at, dict):
         return insert_at
     block = block_result["output"]["block"]
+    if block.get("type") == "figure" and section_title_text(section) != "附录":
+        return tool_failed("figure_block_outside_appendix", "figure block 只能写入附录章节。")
     section.setdefault("blocks", []).insert(insert_at, block)
     return _write_output([section["id"]], [block["id"]], section["id"], block["id"], "block_inserted")
 
@@ -308,6 +312,10 @@ def _prepare_block(
         if not isinstance(payload.get("latex"), str):
             return tool_failed("schema_validation_failed", "formula block 缺少 latex 字段。")
         block["latex"] = payload["latex"]
+    elif block_type == "figure":
+        if not isinstance(payload.get("figure_id"), str):
+            return tool_failed("schema_validation_failed", "figure block 缺少 figure_id 字段。")
+        block["figure_id"] = payload["figure_id"]
     else:
         if not isinstance(payload.get("columns"), list) or not isinstance(payload.get("rows"), list):
             return tool_failed("schema_validation_failed", "table block 缺少 columns 或 rows 字段。")

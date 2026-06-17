@@ -1,12 +1,14 @@
-import { RenderNode } from '../../types';
+import { FigureRenderAsset, RenderNode } from '../../types';
 import katex from 'katex';
 import { isSectionDirectlyEmpty, SectionStatus } from './documentStats';
+import { PreviewFigure } from './PreviewFigure';
 
 type RenderPreviewNodesProps = {
   nodes: RenderNode[];
   recentSectionIds: string[];
   recentBlockIds: string[];
   sectionStatusById: Record<string, SectionStatus>;
+  figuresById: Record<string, FigureRenderAsset>;
   parentIndexPath?: number[];
 };
 
@@ -15,6 +17,7 @@ export function renderPreviewNodes({
   recentSectionIds,
   recentBlockIds,
   sectionStatusById,
+  figuresById,
   parentIndexPath = [],
 }: RenderPreviewNodesProps): JSX.Element[] {
   let sectionIndex = 0;
@@ -46,6 +49,7 @@ export function renderPreviewNodes({
               recentSectionIds,
               recentBlockIds,
               sectionStatusById,
+              figuresById,
               parentIndexPath: indexPath,
             })}
           </div>
@@ -65,7 +69,7 @@ export function renderPreviewNodes({
           ].filter(Boolean).join(' ')}
           data-block-id={node.id}
         >
-          {node.text}
+          {renderFigureRefs(node.text, figuresById)}
         </p>
       );
     }
@@ -78,8 +82,8 @@ export function renderPreviewNodes({
           className={`preview-block preview-list ${blockChanged ? 'changed' : ''}`}
           data-block-id={node.id}
         >
-          {node.items.map((item) => (
-            <li key={item}>{item}</li>
+          {node.items.map((item, index) => (
+            <li key={`${node.id}_${index}`}>{renderFigureRefs(item, figuresById)}</li>
           ))}
         </Tag>
       );
@@ -104,7 +108,7 @@ export function renderPreviewNodes({
               {node.rows.map((row, rowIndex) => (
                 <tr key={`${node.id}_${rowIndex}`}>
                   {row.map((cell, index) => (
-                    <td key={`${node.id}_${rowIndex}_${index}`}>{cell}</td>
+                    <td key={`${node.id}_${rowIndex}_${index}`}>{renderFigureRefs(cell, figuresById)}</td>
                   ))}
                 </tr>
               ))}
@@ -154,7 +158,48 @@ export function renderPreviewNodes({
       );
     }
 
+    if (node.type === 'figure') {
+      const figure = figuresById[node.figure_id];
+      const caption = figure ? `${figure.label} ${figure.title}`.trim() : `图? ${node.figure_id}`;
+      return (
+        <figure
+          key={node.id}
+          id={`figure-${node.figure_id}`}
+          className={`preview-block preview-figure ${blockChanged ? 'changed' : ''} ${figure ? '' : 'missing'}`}
+          data-block-id={node.id}
+          data-figure-id={node.figure_id}
+        >
+          <PreviewFigure figure={figure} figureId={node.figure_id} />
+          <figcaption>{caption}</figcaption>
+        </figure>
+      );
+    }
+
     const exhaustive: never = node;
     return exhaustive;
   });
+}
+
+function renderFigureRefs(text: string, figuresById: Record<string, FigureRenderAsset>) {
+  const pattern = /\[([^\]]+)\]\(figure:(fig_\d{6})\)/g;
+  const parts: JSX.Element[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(<span key={`text_${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
+    }
+    const figureId = match[2];
+    const figure = figuresById[figureId];
+    parts.push(
+      <a key={`figure_${match.index}`} className="preview-figure-ref" href={`#figure-${figureId}`}>
+        {figure?.label ?? match[1]}
+      </a>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push(<span key={`text_${lastIndex}`}>{text.slice(lastIndex)}</span>);
+  }
+  return parts.length ? parts : text;
 }

@@ -17,7 +17,7 @@ class InnovationKernelKitArguments(BaseModel):
     )
     kernel_markdown: str | None = Field(
         default=None,
-        description="write 时必填，必须是完整创新内核 markdown；read 时不要提供。",
+        description="write 时必填，必须是短小完整的当前创新内核 markdown；read 时不要提供。不要写分析报告、探索过程或交底书全文提纲。",
     )
 
 
@@ -40,6 +40,22 @@ async def innovation_kernel_kit(
         - 写入或改写交底书正文前，当前上下文中必须已有本工具成功 read 或 write 后返回的完整 kernel_markdown。
         - read 只读取当前完整创新内核；不存在时返回 innovation_kernel_not_found，此时应基于当前上下文整理完整内核并 write。
         - write 只负责保存调用方提供的完整 kernel_markdown；不生成、不补全、不解析模型输出。
+        - kernel_markdown 应短小但完整，只保留当前发明的核心事实源；不要写分析报告、探索过程、完整交底书提纲、长篇备选方案或工具执行记录。
+        - 推荐结构为：发明目标、核心技术手段、必要组成要素、协同流程或运行机理、关键边界、技术效果；每项使用短句。
+        - 推荐 markdown 模板：
+          # 创新内核
+          ## 发明目标
+          - ...
+          ## 核心技术手段
+          - ...
+          ## 必要组成要素
+          - ...
+          ## 协同流程或运行机理
+          - ...
+          ## 关键边界
+          - ...
+          ## 技术效果
+          - ...
         - write 是覆盖写，不支持 patch。调用方若不确定当前内核内容，应先 read，再生成完整新版并 write。
         - 用户要求改变发明核心时，先形成完整新版内核并 write，再修改交底书正文；不要越过创新内核直接改正文。
 

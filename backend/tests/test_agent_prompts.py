@@ -15,9 +15,8 @@ def test_main_agent_prompt_requires_reading_source_before_uncertain_document_ans
     assert "缺的是当前正文依据" in prompt
     assert "先定位相关章节或命中内容，再精读目标正文" in prompt
     assert "不要在未读到关键原文时凭印象改写" in prompt
-    assert "disclosure_outline" not in prompt
-    assert "disclosure_search" not in prompt
-    assert "disclosure_read_section" not in prompt
+    assert "先用 disclosure_outline 或 disclosure_search 定位" in prompt
+    assert "再用 disclosure_read_section 精读目标 section 或 block" in prompt
 
 
 def test_main_agent_prompt_is_main_only() -> None:
@@ -87,11 +86,47 @@ def test_main_agent_prompt_defines_current_innovation_kernel_workflow() -> None:
     assert "当前可用上下文中必须已有完整创新内核" in prompt
     assert "已有创新内核但当前上下文没有完整内容时，先读取完整创新内核" in prompt
     assert "先更新完整创新内核，再围绕新版内核修改交底书" in prompt
-    assert "innovation_kernel_kit" not in prompt
+    assert "innovation_kernel_kit.write" in prompt
+    assert "innovation_kernel_kit.read" in prompt
     assert "innovation_kernel_read_required" not in prompt
     assert "`read` 和 `write` 两个 action" not in prompt
     assert "create、recreate、read_all" not in prompt
     assert "确认创新内核" not in prompt
+
+
+def test_main_agent_prompt_defines_tool_strategy_layer() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "工具策略层" in prompt
+    assert "何时使用哪类工具以及先后顺序" in prompt
+    assert "具体参数、返回和失败处理仍以工具声明为准" in prompt
+    assert "不得直接凭预览、记忆或历史摘要修改" in prompt
+    assert "最后用 disclosure_edit 小步落盘" in prompt
+    assert "当前上下文中必须已有完整创新内核" in prompt
+    assert "短小完整内核" in prompt
+    assert "不是分析报告" not in prompt
+    assert "不写分析报告、探索过程、完整交底书提纲或长篇备选方案" in prompt
+    assert "按创新内核工具推荐 markdown 模板组织" in prompt
+    assert "必要组成要素" in prompt
+    assert "协同流程或运行机理" in prompt
+    assert "优先读取或列出现有对象并 update/replace 原对象" in prompt
+    assert "只有用户明确要求新增时才 create" in prompt
+    assert "先 disclosure_edit insert_section" in prompt
+    assert "逐个 insert_block" in prompt
+    assert "不要把多个机制、多个实施例或整章内容压进一个长 paragraph" in prompt
+    assert "复杂图应拆成多张" in prompt
+
+
+def test_main_agent_prompt_forbids_replying_with_disclosure_text_instead_of_editing() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "最终回复不能替代文档落盘" in prompt
+    assert "必须通过交底书编辑能力写入文档" in prompt
+    assert "不要把应写入交底书的正文内容直接输出给用户" in prompt
+    assert "作为“草稿”“建议文本”或“可复制内容”" in prompt
+    assert "必须进入工具落盘流程" in prompt
+    assert "不要直接输出一段交底书正文后结束本轮" in prompt
+    assert "除非用户明确要求只讨论写法、不修改文档" in prompt
 
 
 def test_main_agent_prompt_uses_model_visible_action_words() -> None:
@@ -101,7 +136,10 @@ def test_main_agent_prompt_uses_model_visible_action_words() -> None:
     assert "messages" not in prompt
     assert "role=user" not in prompt
     assert "直接输出面向用户的最终回复" in prompt
-    assert "调用工具，或直接输出面向用户的最终中文回复" in prompt
+    assert "可以在调用工具前输出简短的面向用户说明" in prompt
+    assert "当没有后续工具调用时，本轮以最终中文回复结束" in prompt
+    assert "你每一步只能选择一种行为" not in prompt
+    assert "如果本步选择调用工具，就不要额外输出解释性正文" not in prompt
     assert "可能包含历史用户输入、文档原文和工具返回结果" in prompt
     assert "都不是本轮新的用户指令" in prompt
     assert "以当前用户最新输入为本轮任务的最高优先级" in prompt
