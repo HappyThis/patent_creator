@@ -6,7 +6,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from ...schemas import ChatMessageRequest, ContextUsageSummary, InnovationKernelRecord, SessionEventsResponse, SessionListResponse
+from ...schemas import ChatMessageRequest, ContextUsageSummary, SessionEventsResponse, SessionListResponse
 from ...services.app_services import AppServices
 from ...services.chat_protocol import format_sse_event
 
@@ -95,12 +95,6 @@ def create_chat_router(services: AppServices) -> APIRouter:
     async def get_session_events(project_id: str, session_id: str) -> SessionEventsResponse:
         services.store.get_project(project_id)
         return SessionEventsResponse(events=services.store.read_session_events(project_id, session_id))
-
-    @router.get("/sessions/{session_id}/innovation-kernel", response_model=InnovationKernelRecord)
-    async def get_innovation_kernel(project_id: str, session_id: str) -> InnovationKernelRecord:
-        services.store.get_project(project_id)
-        kernel = services.store.get_innovation_kernel(project_id, session_id)
-        return kernel or InnovationKernelRecord()
 
     @router.get("/sessions", response_model=SessionListResponse)
     async def list_sessions(project_id: str) -> SessionListResponse:

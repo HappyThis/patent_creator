@@ -1,4 +1,4 @@
-import { InnovationKernelState, ProjectState, RenderAst, SessionEventRecord, SessionSummary } from '../../types';
+import { ProjectState, RenderAst, SessionEventRecord, SessionSummary } from '../../types';
 import { requestJson } from './http';
 
 export type ApiClient = {
@@ -22,7 +22,6 @@ export type ApiClient = {
   }>;
   listSessions: (project_id: string) => Promise<{ sessions: SessionSummary[] }>;
   getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: SessionEventRecord[] }>;
-  getInnovationKernel: (project_id: string, session_id: string) => Promise<InnovationKernelState>;
   exportMarkdown: (project_id: string) => Promise<{ path: string }>;
   cancelRound: (
     project_id: string,
@@ -87,11 +86,6 @@ export const apiClient: ApiClient = {
   },
   async getSessionEvents(project_id, session_id) {
     return requestJson<{ events: SessionEventRecord[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);
-  },
-  async getInnovationKernel(project_id, session_id) {
-    return requestJson<InnovationKernelState>(
-      `/api/projects/${project_id}/sessions/${session_id}/innovation-kernel`,
-    );
   },
   async exportMarkdown(project_id) {
     return requestJson<{ path: string }>(`/api/projects/${project_id}/export/markdown`, {

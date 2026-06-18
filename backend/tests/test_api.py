@@ -31,23 +31,6 @@ class StubLLMClient:
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> str:
-        if "<innovation_kernel>" in user_prompt:
-            return (
-                "<analysis>生成测试创新内核。</analysis>\n"
-                "<innovation_kernel>\n"
-                "# 创新内核\n\n"
-                "## 1. 核心问题\n"
-                "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
-                "## 2. 创新构思\n"
-                "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
-                "## 3. 关键技术机制\n"
-                "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
-                "## 4. 技术效果\n"
-                "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
-                "## 5. 待确认边界\n"
-                "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
-                "</innovation_kernel>"
-            )
         message_count = len(messages or [])
         return (
             "<analysis>测试压缩。</analysis>\n"
@@ -200,64 +183,8 @@ class StubLLMClient:
                 },
             ]
 
-        if tool_results and tool_results[-1].get("tool_call_id") == "stub_call_kernel_read":
-            last_result = json.loads(str(tool_results[-1].get("content") or "{}"))
-            if last_result.get("status") == "success":
-                return tool_calls_action(disclosure_edit_tool_calls())
-
         if not tool_results:
-            if "<innovation_kernel>" in user_message:
-                kernel_text = (
-                    "# 创新内核\n\n"
-                    "## 1. 核心问题\n"
-                    "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
-                    "## 2. 创新构思\n"
-                    "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
-                    "## 3. 关键技术机制\n"
-                    "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
-                    "## 4. 技术效果\n"
-                    "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
-                    "## 5. 待确认边界\n"
-                    "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
-                )
-                return {
-                    "type": "respond",
-                    "text": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
-                    "assistant_message": {
-                        "role": "assistant",
-                        "content": f"<innovation_kernel>\n{kernel_text}</innovation_kernel>",
-                    },
-                }
-            if "创新内核" in user_message:
-                kernel_text = (
-                    "# 创新内核\n\n"
-                    "## 1. 核心问题\n"
-                    "低算力终端需要在有限资源下保持实时检测稳定性。\n\n"
-                    "## 2. 创新构思\n"
-                    "通过候选区域筛选、轻量特征提取和时序校正协同降低无效推理。\n\n"
-                    "## 3. 关键技术机制\n"
-                    "先对输入帧进行候选区域粗筛，再只对高价值区域执行完整检测，并结合上一帧稳定特征进行时序校正。\n\n"
-                    "## 4. 技术效果\n"
-                    "减少无效推理带来的单帧处理开销，在低算力终端上降低时延、能耗和温升压力。\n\n"
-                    "## 5. 待确认边界\n"
-                    "候选筛选阈值、轻量特征类型和时序校正窗口仍需结合实施材料确认。\n"
-                )
-                tool_calls = [
-                    {
-                        "tool": "innovation_kernel_kit",
-                        "arguments": {"action": "write", "kernel_markdown": kernel_text},
-                        "tool_call_id": "stub_call_kernel",
-                    }
-                ]
-            else:
-                tool_calls = [
-                    {
-                        "tool": "innovation_kernel_kit",
-                        "arguments": {"action": "read"},
-                        "tool_call_id": "stub_call_kernel_read",
-                    },
-                ]
-            return tool_calls_action(tool_calls)
+            return tool_calls_action(disclosure_edit_tool_calls())
 
         reply = "已完成本轮修改。"
         if on_text_delta is not None:
@@ -456,23 +383,16 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert render_response.status_code == 200
         assert render_response.json()["render_ast"]["title"] == "一种图像检测方法"
 
-        kernel_events = await collect_stream_events(
-            client,
-            project_id,
-            {"message": "请先生成创新内核。"},
-        )
-        assert "innovation_kernel_changed" in [name for name, _ in kernel_events]
-        session_id = kernel_events[0][1]["session_id"]
-
         sse_events = await collect_stream_events(
             client,
             project_id,
-            {"session_id": session_id, "message": "请补充技术效果章节，强调低算力实时性的收益。"},
+            {"message": "请补充技术效果章节，强调低算力实时性的收益。"},
         )
         event_names = [name for name, _ in sse_events]
         assert event_names[0] == "round_started"
         assert "document_changed" in event_names
         assert event_names[-1] == "round_finished"
+        session_id = sse_events[0][1]["session_id"]
 
         session_events = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/events")
         assert session_events.status_code == 200
@@ -528,56 +448,6 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
             json={"session_id": "sess_missing", "message": "继续写。"},
         )
         assert missing_session_response.status_code == 404
-
-
-@pytest.mark.anyio
-async def test_innovation_kernel_api_and_stream_update_current_kernel(tmp_path: Path) -> None:
-    settings = Settings(
-        data_dir=tmp_path / "data",
-        git_user_name="Test User",
-        git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
-        round_step_delay=0.01,
-        round_finish_delay=0.01,
-    )
-    services = AppServices(settings, llm_client=StubLLMClient())
-    app = create_app(settings, services=services)
-    transport = httpx.ASGITransport(app=app)
-
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        create_response = await client.post(
-            "/api/projects",
-            json={"project_name": "创新内核项目", "disclosure_title": "一种图像检测方法"},
-        )
-        assert create_response.status_code == 200
-        project_id = create_response.json()["project_id"]
-
-        sse_events = await collect_stream_events(
-            client,
-            project_id,
-            {"message": "请基于当前材料生成创新内核。"},
-        )
-
-        event_names = [name for name, _ in sse_events]
-        assert event_names[0] == "round_started"
-        assert "innovation_kernel_changed" in event_names
-        assert event_names[-1] == "round_finished"
-
-        kernel_payload = next(payload for name, payload in sse_events if name == "innovation_kernel_changed")
-        assert kernel_payload["exists"] is True
-        assert kernel_payload["source"] == "write"
-        assert "user_confirmation_reminder" not in kernel_payload
-        assert "低算力终端" in kernel_payload["kernel_markdown"]
-
-        session_id = sse_events[0][1]["session_id"]
-        kernel_response = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/innovation-kernel")
-        assert kernel_response.status_code == 200
-        assert kernel_response.json()["kernel_markdown"] == kernel_payload["kernel_markdown"]
-
-        session_events_response = await client.get(f"/api/projects/{project_id}/sessions/{session_id}/events")
-        assert session_events_response.status_code == 200
-        assert all(event["type"] != "innovation_kernel" for event in session_events_response.json()["events"])
-
 
 @pytest.mark.anyio
 async def test_session_stream_can_attach_to_running_round(tmp_path: Path) -> None:

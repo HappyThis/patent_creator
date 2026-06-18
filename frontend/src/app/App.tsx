@@ -1,17 +1,14 @@
-import { CSSProperties, PointerEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { CSSProperties, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatPanel } from '../features/chat/ChatPanel';
 import { HomePage } from '../features/home/HomePage';
-import { InnovationKernelPanel } from '../features/kernel/InnovationKernelPanel';
 import { buildDocumentStats } from '../features/preview/documentStats';
 import { PreviewPanel } from '../features/preview/PreviewPanel';
 import { apiClient } from '../services/api/client';
 import { useWorkspace } from '../hooks/useWorkspace';
-import type { ProjectState } from '../types';
+import type { ProjectState, RenderAst } from '../types';
 
 type WorkspaceStyle = CSSProperties & {
-  '--left-pane-width': string;
   '--right-pane-width': string;
-  '--left-resizer-width': string;
   '--right-resizer-width': string;
 };
 
@@ -25,25 +22,26 @@ function readProjectIdFromPath(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function clampSideWidth(value: number, otherSideWidth = 0) {
-  const resizerReserve = otherSideWidth > 0 ? RESIZER_WIDTH * 2 : RESIZER_WIDTH;
-  const availableWidth = window.innerWidth - otherSideWidth - resizerReserve - MIN_CHAT_WIDTH;
+function clampSideWidth(value: number) {
+  const availableWidth = window.innerWidth - RESIZER_WIDTH - MIN_CHAT_WIDTH;
   const viewportLimit = Math.max(MIN_SIDE_WIDTH, availableWidth);
   return Math.min(Math.max(value, MIN_SIDE_WIDTH), Math.min(MAX_SIDE_WIDTH, viewportLimit));
 }
 
+function disclosureSignature(renderAst: RenderAst) {
+  return JSON.stringify(renderAst);
+}
+
 function App() {
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const previousDisclosureSignatureRef = useRef<string | null>(null);
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => readProjectIdFromPath());
-  const [isKernelOpen, setIsKernelOpen] = useState(false);
   const [isDisclosureOpen, setIsDisclosureOpen] = useState(false);
-  const [hasUnseenKernelUpdate, setHasUnseenKernelUpdate] = useState(false);
-  const [kernelWidth, setKernelWidth] = useState(340);
+  const [hasUnseenDisclosureUpdate, setHasUnseenDisclosureUpdate] = useState(false);
   const [disclosureWidth, setDisclosureWidth] = useState(460);
-  const previousKernelUpdateRef = useRef<string | null>(null);
   const {
     renderAst,
     events,
@@ -54,7 +52,6 @@ function App() {
     canCancelRound,
     contextUsage,
     sessionTabs,
-    innovationKernel,
     previewFocusTarget,
     recentSectionIds,
     recentBlockIds,
@@ -67,8 +64,7 @@ function App() {
     handleNewSession,
   } = useWorkspace(selectedProjectId);
   const documentStats = buildDocumentStats(renderAst);
-  const activeSessionId = sessionTabs.find((tab) => tab.active)?.session_id ?? null;
-  const hasInnovationKernel = innovationKernel.exists && innovationKernel.kernel_markdown.trim().length > 0;
+  const currentDisclosureSignature = useMemo(() => disclosureSignature(renderAst), [renderAst]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -97,60 +93,66 @@ function App() {
     }
     window.history.replaceState(null, '', '/');
     setSelectedProjectId(null);
-    setIsKernelOpen(false);
     setIsDisclosureOpen(false);
+    setHasUnseenDisclosureUpdate(false);
   }, [projects, projectsError, projectsLoading, selectedProjectId]);
 
   useEffect(() => {
     const handlePopState = () => {
       setSelectedProjectId(readProjectIdFromPath());
-      setIsKernelOpen(false);
       setIsDisclosureOpen(false);
+      setHasUnseenDisclosureUpdate(false);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   useEffect(() => {
-    previousKernelUpdateRef.current = null;
-    setHasUnseenKernelUpdate(false);
-  }, [activeSessionId, selectedProjectId]);
+    previousDisclosureSignatureRef.current = null;
+    setHasUnseenDisclosureUpdate(false);
+  }, [selectedProjectId]);
 
   useEffect(() => {
-    const updateKey = innovationKernel.updated_at ?? (hasInnovationKernel ? innovationKernel.kernel_markdown : null);
-    if (!updateKey) {
-      previousKernelUpdateRef.current = null;
-      setHasUnseenKernelUpdate(false);
+    if (!selectedProjectId) {
+      previousDisclosureSignatureRef.current = null;
+      setHasUnseenDisclosureUpdate(false);
+      return;
+    }
+    if (isLoading) {
+      previousDisclosureSignatureRef.current = currentDisclosureSignature;
       return;
     }
 
-    if (previousKernelUpdateRef.current === null) {
-      previousKernelUpdateRef.current = updateKey;
-      if (!isKernelOpen && isBusy) {
-        setHasUnseenKernelUpdate(true);
-      }
+    const previousSignature = previousDisclosureSignatureRef.current;
+    previousDisclosureSignatureRef.current = currentDisclosureSignature;
+
+    if (previousSignature === null || previousSignature === currentDisclosureSignature) {
       return;
     }
-
-    if (previousKernelUpdateRef.current !== updateKey) {
-      previousKernelUpdateRef.current = updateKey;
-      if (!isKernelOpen) {
-        setHasUnseenKernelUpdate(true);
-      }
+    if (!isDisclosureOpen) {
+      setHasUnseenDisclosureUpdate(true);
     }
-  }, [hasInnovationKernel, innovationKernel.kernel_markdown, innovationKernel.updated_at, isBusy, isKernelOpen]);
+  }, [currentDisclosureSignature, isDisclosureOpen, isLoading, selectedProjectId]);
 
   useEffect(() => {
-    if (isKernelOpen) {
-      setHasUnseenKernelUpdate(false);
+    if (isDisclosureOpen) {
+      setHasUnseenDisclosureUpdate(false);
     }
-  }, [isKernelOpen]);
+  }, [isDisclosureOpen]);
 
   const handleProjectSelect = useCallback((projectId: string) => {
     window.history.pushState(null, '', `/projects/${encodeURIComponent(projectId)}`);
     setSelectedProjectId(projectId);
-    setIsKernelOpen(false);
     setIsDisclosureOpen(false);
+    setHasUnseenDisclosureUpdate(false);
+  }, []);
+
+  const handleReturnHome = useCallback(() => {
+    window.history.pushState(null, '', '/');
+    previousDisclosureSignatureRef.current = null;
+    setSelectedProjectId(null);
+    setIsDisclosureOpen(false);
+    setHasUnseenDisclosureUpdate(false);
   }, []);
 
   const handleProjectCreate = useCallback(
@@ -171,8 +173,8 @@ function App() {
           : '/';
         window.history.pushState(null, '', nextPath);
         setSelectedProjectId(response.next_project_id);
-        setIsKernelOpen(false);
         setIsDisclosureOpen(false);
+        setHasUnseenDisclosureUpdate(false);
       }
       void loadProjects();
     },
@@ -186,18 +188,9 @@ function App() {
 
   useEffect(() => {
     const normalizeSideWidths = () => {
-      let nextKernelWidth = kernelWidth;
       let nextDisclosureWidth = disclosureWidth;
-
-      if (isKernelOpen) {
-        nextKernelWidth = clampSideWidth(nextKernelWidth, isDisclosureOpen ? nextDisclosureWidth : 0);
-      }
       if (isDisclosureOpen) {
-        nextDisclosureWidth = clampSideWidth(nextDisclosureWidth, isKernelOpen ? nextKernelWidth : 0);
-      }
-
-      if (nextKernelWidth !== kernelWidth) {
-        setKernelWidth(nextKernelWidth);
+        nextDisclosureWidth = clampSideWidth(nextDisclosureWidth);
       }
       if (nextDisclosureWidth !== disclosureWidth) {
         setDisclosureWidth(nextDisclosureWidth);
@@ -207,25 +200,17 @@ function App() {
     normalizeSideWidths();
     window.addEventListener('resize', normalizeSideWidths);
     return () => window.removeEventListener('resize', normalizeSideWidths);
-  }, [disclosureWidth, isDisclosureOpen, isKernelOpen, kernelWidth]);
+  }, [disclosureWidth, isDisclosureOpen]);
 
   const beginResize = useCallback(
-    (side: 'kernel' | 'disclosure', event: PointerEvent<HTMLDivElement>) => {
+    (event: PointerEvent<HTMLDivElement>) => {
       event.preventDefault();
       const startX = event.clientX;
-      const startWidth = side === 'kernel' ? kernelWidth : disclosureWidth;
-      const otherSideWidth =
-        side === 'kernel'
-          ? isDisclosureOpen ? disclosureWidth : 0
-          : isKernelOpen ? kernelWidth : 0;
+      const startWidth = disclosureWidth;
 
       const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
-        const delta = side === 'kernel' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
-        const nextWidth = clampSideWidth(startWidth + delta, otherSideWidth);
-        if (side === 'kernel') {
-          setKernelWidth(nextWidth);
-          return;
-        }
+        const delta = startX - moveEvent.clientX;
+        const nextWidth = clampSideWidth(startWidth + delta);
         setDisclosureWidth(nextWidth);
       };
 
@@ -239,8 +224,17 @@ function App() {
       window.addEventListener('pointermove', handlePointerMove);
       window.addEventListener('pointerup', handlePointerUp);
     },
-    [disclosureWidth, isDisclosureOpen, isKernelOpen, kernelWidth],
+    [disclosureWidth],
   );
+
+  const toggleDisclosurePreview = useCallback(() => {
+    if (isDisclosureOpen) {
+      setIsDisclosureOpen(false);
+      return;
+    }
+    setDisclosureWidth(clampSideWidth(MAX_SIDE_WIDTH));
+    setIsDisclosureOpen(true);
+  }, [isDisclosureOpen]);
 
   if (!selectedProjectId) {
     return (
@@ -259,16 +253,14 @@ function App() {
   }
 
   const workspaceStyle: WorkspaceStyle = {
-    '--left-pane-width': isKernelOpen ? `${kernelWidth}px` : '0px',
     '--right-pane-width': isDisclosureOpen ? `${disclosureWidth}px` : '0px',
-    '--left-resizer-width': isKernelOpen ? '10px' : '0px',
     '--right-resizer-width': isDisclosureOpen ? '10px' : '0px',
   };
-  const kernelToggleLabel = hasUnseenKernelUpdate
-    ? '技术内核已更新，点击查看'
-    : isKernelOpen
-      ? '收起技术内核'
-      : '展开技术内核';
+  const disclosureToggleLabel = hasUnseenDisclosureUpdate
+    ? '交底书已更新，点击预览'
+    : isDisclosureOpen
+      ? '收起交底书预览'
+      : '预览交底书';
 
   return (
     <div className="app-shell workspace-shell">
@@ -276,44 +268,24 @@ function App() {
         className={[
           'workspace',
           'chat-workspace',
-          isKernelOpen || isDisclosureOpen ? 'side-panel-open' : 'no-side-panels',
-          isKernelOpen ? 'kernel-open' : '',
+          isDisclosureOpen ? 'side-panel-open' : 'no-side-panels',
           isDisclosureOpen ? 'disclosure-open' : '',
         ].filter(Boolean).join(' ')}
         style={workspaceStyle}
       >
-        {isKernelOpen ? (
-          <div className="workspace-side-pane workspace-side-kernel">
-            <InnovationKernelPanel innovationKernel={innovationKernel} />
-          </div>
-        ) : null}
-
-        {isKernelOpen ? (
-          <div
-            className="workspace-resizer workspace-resizer-left"
-            role="separator"
-            aria-label="调整创新内核宽度"
-            onPointerDown={(event) => beginResize('kernel', event)}
-          />
-        ) : null}
-
         <section className="chat-stage">
           <button
-            className={[
-              'workspace-edge-toggle',
-              'workspace-edge-toggle-left',
-              'workspace-edge-toggle-kernel',
-              isKernelOpen ? 'active' : '',
-              hasInnovationKernel ? 'has-content' : 'empty',
-              hasUnseenKernelUpdate ? 'has-unseen-update' : '',
-            ].filter(Boolean).join(' ')}
+            className="workspace-home-button"
             type="button"
-            onClick={() => setIsKernelOpen((current) => !current)}
-            aria-pressed={isKernelOpen}
-            aria-label={kernelToggleLabel}
-            title={kernelToggleLabel}
+            onClick={handleReturnHome}
+            aria-label="返回首页"
+            title="返回首页"
           >
-            <PanelChevron direction={isKernelOpen ? 'left' : 'right'} />
+            <svg className="workspace-home-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 11.5 12 5l7.5 6.5" />
+              <path d="M6.8 10.2V19h10.4v-8.8" />
+              <path d="M10 19v-5h4v5" />
+            </svg>
           </button>
 
           <button
@@ -322,21 +294,13 @@ function App() {
               'workspace-edge-toggle-right',
               'workspace-edge-toggle-disclosure',
               isDisclosureOpen ? 'active' : '',
-              hasInnovationKernel ? 'kernel-ready' : 'requires-kernel',
+              hasUnseenDisclosureUpdate ? 'has-disclosure-update' : '',
             ].filter(Boolean).join(' ')}
             type="button"
-            onClick={() => setIsDisclosureOpen((current) => !current)}
+            onClick={toggleDisclosurePreview}
             aria-pressed={isDisclosureOpen}
-            aria-label={
-              isDisclosureOpen
-                ? '收起交底书预览'
-                : '预览交底书'
-            }
-            title={
-              isDisclosureOpen
-                ? '收起交底书预览'
-                : '预览交底书'
-            }
+            aria-label={disclosureToggleLabel}
+            title={disclosureToggleLabel}
           >
             <PanelChevron direction={isDisclosureOpen ? 'right' : 'left'} />
           </button>
@@ -350,7 +314,6 @@ function App() {
             onComposerChange={setComposer}
             onSubmit={submitMessage}
             onCancel={cancelCurrentRound}
-            onExport={exportMarkdown}
             onSessionSelect={handleSessionSelect}
             onNewSession={handleNewSession}
             canCancel={canCancelRound}
@@ -363,7 +326,7 @@ function App() {
             className="workspace-resizer workspace-resizer-right"
             role="separator"
             aria-label="调整交底书预览宽度"
-            onPointerDown={(event) => beginResize('disclosure', event)}
+            onPointerDown={beginResize}
           />
         ) : null}
 
@@ -377,6 +340,7 @@ function App() {
               stats={documentStats}
               previewRef={previewRef}
               onActiveSectionChange={setActiveSectionId}
+              onExport={exportMarkdown}
             />
           </div>
         ) : null}

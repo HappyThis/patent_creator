@@ -34,8 +34,6 @@
 .chat-workspace {
   position: relative;
   grid-template-columns:
-    var(--left-pane-width)
-    var(--left-resizer-width)
     minmax(340px, 1fr)
     var(--right-resizer-width)
     var(--right-pane-width);
@@ -49,13 +47,61 @@
 
 .chat-stage {
   position: relative;
-  grid-column: 3;
+  grid-column: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   background: transparent;
+}
+
+.workspace-home-button {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  z-index: 18;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(92, 82, 68, 0.12);
+  border-radius: 999px;
+  background: rgba(250, 248, 242, 0.82);
+  color: #7a858b;
+  box-shadow: 0 10px 26px rgba(56, 48, 38, 0.055);
+  backdrop-filter: blur(14px);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.workspace-home-button:hover {
+  border-color: rgba(59, 71, 77, 0.18);
+  background: rgba(255, 253, 248, 0.95);
+  color: #293640;
+  box-shadow: 0 12px 28px rgba(56, 48, 38, 0.08);
+  transform: translateY(-0.5px);
+}
+
+.workspace-home-button:focus-visible {
+  outline: 2px solid rgba(50, 111, 139, 0.34);
+  outline-offset: 2px;
+}
+
+.workspace-home-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .chat-workspace.no-side-panels .chat-stage {
@@ -104,15 +150,6 @@
     transform 140ms ease;
 }
 
-.workspace-edge-toggle-left {
-  left: 0;
-  border-radius: 999px;
-}
-
-.chat-workspace.kernel-open .workspace-edge-toggle-left {
-  left: -6px;
-}
-
 .workspace-edge-toggle-right {
   right: 0;
   border-radius: 999px;
@@ -122,26 +159,10 @@
   right: -6px;
 }
 
-.workspace-edge-toggle-kernel {
-  border-color: rgba(62, 55, 45, 0.16);
-  background: rgba(250, 248, 242, 0.78);
-  color: #74736e;
-}
-
-.workspace-edge-toggle-kernel.empty {
-  border-color: rgba(62, 55, 45, 0.16);
-  background: rgba(250, 248, 242, 0.78);
-  color: #74736e;
-}
-
 .workspace-edge-toggle-disclosure {
   border-color: rgba(62, 55, 45, 0.16);
   background: rgba(250, 248, 242, 0.78);
   color: #74736e;
-}
-
-.workspace-edge-toggle-disclosure.requires-kernel {
-  opacity: 0.72;
 }
 
 .workspace-edge-toggle:hover,
@@ -160,45 +181,31 @@
   transform: translateY(-50%);
 }
 
-.workspace-edge-toggle-kernel:hover,
-.workspace-edge-toggle-kernel.active {
-  border-color: rgba(59, 71, 77, 0.22);
-  color: #242424;
-}
-
 .workspace-edge-toggle-disclosure:hover,
 .workspace-edge-toggle-disclosure.active {
   border-color: rgba(59, 71, 77, 0.22);
   color: #242424;
 }
 
-.workspace-edge-toggle.has-unseen-update {
-  color: #74736e;
+.workspace-edge-toggle-disclosure.has-disclosure-update:not(.active) {
+  animation: disclosure-update-pulse 1.9s ease-in-out infinite;
 }
 
-.workspace-edge-toggle.has-unseen-update::before {
-  content: "";
-  position: absolute;
-  top: 9px;
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: #b8741f;
-  box-shadow:
-    0 0 0 2px rgba(255, 244, 221, 0.95),
-    0 0 0 4px rgba(184, 116, 31, 0.13);
-}
+@keyframes disclosure-update-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 0 10px 4px rgba(202, 132, 45, 0.18),
+      0 0 26px 10px rgba(202, 132, 45, 0.12);
+  }
 
-.workspace-edge-toggle-left.has-unseen-update::before {
-  right: 2px;
-}
-
-.workspace-edge-toggle-left.has-unseen-update .workspace-panel-icon {
-  opacity: 1;
-}
-
-.workspace-edge-toggle-right.has-unseen-update::before {
-  left: 2px;
+  48% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 0 17px 7px rgba(202, 132, 45, 0.34),
+      0 0 40px 17px rgba(202, 132, 45, 0.19);
+  }
 }
 
 .workspace-panel-icon {
@@ -235,13 +242,8 @@
   outline-offset: 2px;
 }
 
-.workspace-side-kernel {
-  grid-column: 1;
-  border-right: 1px solid rgba(92, 82, 68, 0.11);
-}
-
 .workspace-side-preview {
-  grid-column: 5;
+  grid-column: 3;
   border-left: 1px solid rgba(92, 82, 68, 0.11);
 }
 
@@ -295,12 +297,8 @@
   transition: background 140ms ease;
 }
 
-.workspace-resizer-left {
-  grid-column: 2;
-}
-
 .workspace-resizer-right {
-  grid-column: 4;
+  grid-column: 2;
 }
 
 .workspace-resizer:hover,

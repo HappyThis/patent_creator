@@ -12,6 +12,7 @@ type PreviewPanelProps = {
   stats: DocumentStats;
   previewRef: RefObject<HTMLDivElement>;
   onActiveSectionChange: (sectionId: string) => void;
+  onExport: () => void;
 };
 
 export function PreviewPanel({
@@ -22,6 +23,7 @@ export function PreviewPanel({
   stats,
   previewRef,
   onActiveSectionChange,
+  onExport,
 }: PreviewPanelProps) {
   const figuresById = Object.fromEntries((renderAst.figures ?? []).map((figure) => [figure.figure_id, figure]));
 
@@ -80,6 +82,19 @@ export function PreviewPanel({
 
   return (
     <section className="preview-pane">
+      <button
+        className="preview-export-button"
+        type="button"
+        onClick={onExport}
+        aria-label="下载 Markdown"
+        title="下载 Markdown"
+      >
+        <svg className="preview-export-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v10" />
+          <path d="m8.5 10.5 3.5 3.5 3.5-3.5" />
+          <path d="M5 19h14" />
+        </svg>
+      </button>
       <div className="preview-scroll" ref={previewRef}>
         <article className="document-card">
           {renderPreviewNodes({

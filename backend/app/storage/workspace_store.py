@@ -12,7 +12,7 @@ from uuid import uuid4
 from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..domain.figures import build_figure_record, figure_summary, mermaid_layout_warnings, update_figure_record, validate_mermaid_source
-from ..schemas import InnovationKernelRecord, ProjectRecord, SessionEvent, SessionSummary
+from ..schemas import ProjectRecord, SessionEvent, SessionSummary
 
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
 CURRENT_PROJECT_POINTER = "current_project_id"
@@ -243,33 +243,6 @@ class WorkspaceStore:
                     events.append(SessionEvent.model_validate_json(line))
         return events
 
-    def get_innovation_kernel(self, project_id: str, session_id: str) -> InnovationKernelRecord | None:
-        if not self.session_exists(project_id, session_id):
-            raise ApiError(404, "session_not_found", f"session_id 不存在：{session_id}")
-        path = self.innovation_kernel_file(project_id, session_id)
-        if not path.exists():
-            return None
-        return InnovationKernelRecord.model_validate(self.read_json(path))
-
-    def save_innovation_kernel(
-        self,
-        project_id: str,
-        session_id: str,
-        *,
-        kernel_markdown: str,
-        source: str,
-    ) -> InnovationKernelRecord:
-        if not self.session_exists(project_id, session_id):
-            raise ApiError(404, "session_not_found", f"session_id 不存在：{session_id}")
-        record = InnovationKernelRecord(
-            exists=True,
-            kernel_markdown=kernel_markdown,
-            updated_at=now_iso(),
-            source=source,
-        )
-        self.write_json_atomic(self.innovation_kernel_file(project_id, session_id), record.model_dump())
-        return record
-
     def list_sessions(self, project_id: str, active_session_id: str | None = None) -> list[SessionSummary]:
         sessions_dir = self.project_dir(project_id) / "sessions"
         if not sessions_dir.exists():
@@ -347,9 +320,6 @@ class WorkspaceStore:
 
     def session_file(self, project_id: str, session_id: str) -> Path:
         return self.project_dir(project_id) / "sessions" / f"{session_id}.jsonl"
-
-    def innovation_kernel_file(self, project_id: str, session_id: str) -> Path:
-        return self.project_dir(project_id) / "sessions" / f"{session_id}.innovation_kernel.json"
 
     def figures_dir(self, project_id: str) -> Path:
         path = self.project_dir(project_id) / "assets" / "figures"

@@ -75,7 +75,7 @@ def _apply_document_write(
             "primary_block_id": output["primary_block_id"],
             "change_scope": output["change_scope"],
             "updated_at": draft["meta"]["updated_at"],
-            "notice": "交底书已更新。请确保本次修改与当前创新内核保持一致。",
+            "notice": "交底书已更新。",
         }
     )
 

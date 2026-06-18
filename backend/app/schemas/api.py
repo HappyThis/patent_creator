@@ -91,13 +91,6 @@ class ChatMessageResponse(BaseModel):
     first_user_text: str
 
 
-class InnovationKernelRecord(BaseModel):
-    exists: bool = False
-    kernel_markdown: str = ""
-    updated_at: str | None = None
-    source: Literal["write"] | None = None
-
-
 class SessionEvent(BaseModel):
     id: str
     ts: str

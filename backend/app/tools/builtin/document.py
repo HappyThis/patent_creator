@@ -125,7 +125,7 @@ def disclosure_search(
         - 结果分页返回；truncated 为 true 时用 next_offset 继续搜索。
 
     Examples:
-        - 搜索关键词: {"query":"创新内核","regex":false,"limit":50,"offset":0}
+        - 搜索关键词: {"query":"任务状态","regex":false,"limit":50,"offset":0}
     """
     parsed = _validate_tool_arguments(DisclosureSearchArguments, arguments)
     if parsed["status"] == "failed":
@@ -186,8 +186,6 @@ def disclosure_edit(
         返回 changed_section_ids、changed_block_ids、primary_section_id、primary_block_id、change_scope；失败时返回 code、message 和可选 retry_hint。
 
     Rules:
-        - 调用前必须确保当前上下文中已有完整创新内核，并且本次修改与创新内核一致；否则应先使用创新内核工具读取或写入完整创新内核。
-        - 若返回 innovation_kernel_required，说明当前 session 尚无创新内核，先整理完整创新内核并写入；若返回 innovation_kernel_read_required，说明已有内核但当前上下文缺少完整内容，先读取完整创新内核。
         - 只能写最终态正文，不要写对话过程、修改过程、工具操作、方案迭代说明或内部判断。
         - 没有整章重写；重写章节必须拆成删除、插入 section、逐个 insert/replace block。
         - section 负责结构，block 承接内容；编辑子 section 前，必须改用该子 section 的 section_id 作为工作区，不要跨 section 操作。
@@ -199,7 +197,7 @@ def disclosure_edit(
     Examples:
         - 替换段落: {"section_id":"sec_000007","operation":"replace_block","block_id":"blk_000012","block":{"type":"paragraph","text":"替换后的段落。"}}
         - 插入段落: {"section_id":"sec_000007","operation":"insert_block","position":{"mode":"end"},"block":{"type":"paragraph","text":"新增段落。"}}
-        - 新增子章节: {"section_id":"sec_000007","operation":"insert_section","position":{"mode":"end"},"section":{"title":"创新内核门禁机制"}}
+        - 新增子章节: {"section_id":"sec_000007","operation":"insert_section","position":{"mode":"end"},"section":{"title":"任务状态管理机制"}}
     """
     parsed = _validate_tool_arguments(DisclosureEditArguments, arguments)
     if parsed["status"] == "failed":

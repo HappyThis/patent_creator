@@ -97,38 +97,30 @@ def test_main_agent_prompt_requires_small_document_edits() -> None:
     assert "operations" not in edit_description
     assert "单次新增/替换文本总量不得超过 1500 字。" in edit_description
     assert "没有整章重写；重写章节必须拆成删除、插入 section、逐个 insert/replace block。" in edit_description
-    assert "调用前必须确保当前上下文中已有完整创新内核" in edit_description
-    assert "innovation_kernel_required" in edit_description
-    assert "innovation_kernel_read_required" in edit_description
+    assert "创新内核" not in edit_description
+    assert "innovation_kernel_required" not in edit_description
+    assert "innovation_kernel_read_required" not in edit_description
     assert "只能写最终态正文" in edit_description
     assert "section 负责结构，block 承接内容" in edit_description
     assert "不要跨 section 操作" in edit_description
     assert "insert_section 只创建子章节标题" in edit_description
 
 
-def test_tool_descriptions_carry_lookup_and_kernel_workflow_guidance() -> None:
+def test_tool_descriptions_carry_lookup_workflow_guidance_without_kernel_tool() -> None:
     outline_description = _tool("disclosure_outline")["function"]["description"]
     search_description = _tool("disclosure_search")["function"]["description"]
     read_description = _tool("disclosure_read_section")["function"]["description"]
-    kernel_description = _tool("innovation_kernel_kit")["function"]["description"]
     prompt = build_main_agent_system_prompt()
+    tool_names = {tool["function"]["name"] for tool in MAIN_AGENT_TOOLS}
 
     assert "当需要了解交底书结构、寻找可编辑位置或判断章节层级时，先用本工具定位。" in outline_description
     assert "当不知道概念、术语或目标文本在哪个章节时，先用本工具定位。" in search_description
     assert "当写作、评价或修改依赖当前正文时，应先精读相关 section 或目标 block。" in read_description
-    assert "写入或改写交底书正文前，当前上下文中必须已有本工具成功 read 或 write 后返回的完整 kernel_markdown。" in kernel_description
-    assert "innovation_kernel_not_found" in kernel_description
-    assert "不生成、不补全、不解析模型输出。" in kernel_description
-    assert "短小但完整" in kernel_description
-    assert "不要写分析报告、探索过程、完整交底书提纲、长篇备选方案或工具执行记录。" in kernel_description
-    assert "推荐 markdown 模板" in kernel_description
-    for heading in ("# 创新内核", "## 发明目标", "## 核心技术手段", "## 必要组成要素", "## 协同流程或运行机理", "## 关键边界", "## 技术效果"):
-        assert heading in kernel_description
+    assert "innovation_kernel_kit" not in tool_names
 
     assert "先用 disclosure_outline 或 disclosure_search 定位" in prompt
     assert "再用 disclosure_read_section 精读目标 section 或 block" in prompt
-    assert "innovation_kernel_kit.write" in prompt
-    assert "innovation_kernel_kit.read" in prompt
+    assert "innovation_kernel_kit" not in prompt
 
 
 def test_removed_subagent_tools_are_not_registered() -> None:

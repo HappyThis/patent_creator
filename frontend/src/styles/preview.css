@@ -1,4 +1,5 @@
 .preview-pane {
+  position: relative;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -7,6 +8,54 @@
   border-radius: 14px;
   background: rgba(250, 247, 241, 0.9);
   box-shadow: 0 18px 46px rgba(55, 45, 30, 0.09);
+}
+
+.preview-export-button {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  z-index: 8;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(92, 82, 68, 0.12);
+  border-radius: 999px;
+  background: rgba(250, 248, 242, 0.86);
+  color: #7a858b;
+  box-shadow: 0 10px 26px rgba(56, 48, 38, 0.055);
+  backdrop-filter: blur(14px);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.preview-export-button:hover {
+  border-color: rgba(59, 71, 77, 0.18);
+  background: rgba(255, 253, 248, 0.95);
+  color: #293640;
+  box-shadow: 0 12px 28px rgba(56, 48, 38, 0.08);
+  transform: translateY(-0.5px);
+}
+
+.preview-export-button:focus-visible {
+  outline: 2px solid rgba(50, 111, 139, 0.34);
+  outline-offset: 2px;
+}
+
+.preview-export-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .preview-scroll {

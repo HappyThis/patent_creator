@@ -10,7 +10,6 @@
   overflow: hidden;
 }
 
-.session-export-button,
 .session-history-button,
 .session-new-button {
   width: 30px;
@@ -34,7 +33,6 @@
     transform 140ms ease;
 }
 
-.session-export-icon,
 .session-history-icon,
 .session-new-icon {
   width: 16px;
@@ -47,7 +45,6 @@
   stroke-linejoin: round;
 }
 
-.session-export-button:hover:not(:disabled),
 .session-history-button:hover:not(:disabled),
 .session-new-button:hover:not(:disabled) {
   border-color: transparent;
@@ -62,7 +59,6 @@
   background: rgba(92, 82, 68, 0.06);
 }
 
-.session-export-button:disabled,
 .session-history-button:disabled,
 .session-new-button:disabled {
   opacity: 0.45;

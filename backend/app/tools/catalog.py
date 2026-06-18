@@ -14,7 +14,6 @@ from .builtin.document import (
 )
 from .builtin.filesystem import file_glob, file_read, file_search
 from .builtin.figure import figure_kit
-from .builtin.innovation_kernel import innovation_kernel_kit
 from .builtin.shell import exec_command
 from .metadata import ToolFunctionMetadata, get_tool_metadata
 
@@ -228,18 +227,6 @@ def _file_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> st
     return "文件读取已完成"
 
 
-def _innovation_kernel_started(arguments: dict[str, Any]) -> str:
-    if arguments.get("action") == "read":
-        return "开始读取创新内核"
-    return "开始写入创新内核"
-
-
-def _innovation_kernel_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
-    if arguments.get("action") == "read":
-        return "创新内核已读取"
-    return "创新内核已更新"
-
-
 def _figure_started(arguments: dict[str, Any]) -> str:
     action = arguments.get("action")
     if action == "check":
@@ -314,11 +301,6 @@ _TOOL_REGISTRATIONS = (
     ),
     _ToolRegistration(file_read, summary_started=_file_read_started, summary_finished=_file_read_finished),
     _ToolRegistration(figure_kit, summary_started=_figure_started, summary_finished=_figure_finished),
-    _ToolRegistration(
-        innovation_kernel_kit,
-        summary_started=_innovation_kernel_started,
-        summary_finished=_innovation_kernel_finished,
-    ),
     _ToolRegistration(exec_command, summary_started=_exec_started, summary_finished=_exec_finished),
 )
 _TOOL_REGISTRY = _build_tool_registry(_TOOL_REGISTRATIONS)

@@ -12,7 +12,6 @@ type ChatComposerProps = {
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
-  onExport: () => void;
   onSessionSelect: (session_id: string) => void;
   onNewSession: () => void;
 };
@@ -27,7 +26,6 @@ export function ChatComposer({
   onComposerChange,
   onSubmit,
   onCancel,
-  onExport,
   onSessionSelect,
   onNewSession,
 }: ChatComposerProps) {
@@ -105,20 +103,6 @@ export function ChatComposer({
           <div className="composer-toolbar-right">
             <ContextUsageBadge contextUsage={contextUsage} />
             <div className="composer-session-actions" ref={sessionSwitcherRef}>
-              <button
-                className="session-export-button"
-                type="button"
-                onClick={onExport}
-                disabled={isBusy}
-                aria-label="导出 Markdown"
-                title="导出 Markdown"
-              >
-                <svg className="session-export-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 4v10" />
-                  <path d="m8.5 10.5 3.5 3.5 3.5-3.5" />
-                  <path d="M5 19h14" />
-                </svg>
-              </button>
               <button
                 className="session-history-button"
                 type="button"

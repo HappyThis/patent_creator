@@ -12,7 +12,6 @@ type ChatPanelProps = {
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
-  onExport: () => void;
   onSessionSelect: (session_id: string) => void;
   onNewSession: () => void;
   canCancel?: boolean;
@@ -28,7 +27,6 @@ export function ChatPanel({
   onComposerChange,
   onSubmit,
   onCancel,
-  onExport,
   onSessionSelect,
   onNewSession,
   canCancel = false,
@@ -58,7 +56,6 @@ export function ChatPanel({
         onComposerChange={onComposerChange}
         onSubmit={onSubmit}
         onCancel={onCancel}
-        onExport={onExport}
         onSessionSelect={onSessionSelect}
         onNewSession={onNewSession}
       />

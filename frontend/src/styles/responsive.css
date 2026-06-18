@@ -6,8 +6,6 @@
 
   .chat-workspace {
     grid-template-columns:
-      var(--left-pane-width)
-      var(--left-resizer-width)
       minmax(340px, 1fr)
       var(--right-resizer-width)
       var(--right-pane-width);

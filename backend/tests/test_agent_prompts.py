@@ -78,19 +78,13 @@ def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_t
     assert "exec_command" not in prompt
 
 
-def test_main_agent_prompt_defines_current_innovation_kernel_workflow() -> None:
+def test_main_agent_prompt_does_not_require_innovation_kernel() -> None:
     prompt = build_main_agent_system_prompt()
 
-    assert "创新内核是交底书生成前的当前态核心事实源" in prompt
-    assert "系统不会固定注入创新内核" in prompt
-    assert "当前可用上下文中必须已有完整创新内核" in prompt
-    assert "已有创新内核但当前上下文没有完整内容时，先读取完整创新内核" in prompt
-    assert "先更新完整创新内核，再围绕新版内核修改交底书" in prompt
-    assert "innovation_kernel_kit.write" in prompt
-    assert "innovation_kernel_kit.read" in prompt
-    assert "innovation_kernel_read_required" not in prompt
-    assert "`read` 和 `write` 两个 action" not in prompt
-    assert "create、recreate、read_all" not in prompt
+    assert "创新内核" not in prompt
+    assert "技术内核" not in prompt
+    assert "innovation_kernel_kit" not in prompt
+    assert "kernel_markdown" not in prompt
     assert "确认创新内核" not in prompt
 
 
@@ -102,13 +96,6 @@ def test_main_agent_prompt_defines_tool_strategy_layer() -> None:
     assert "具体参数、返回和失败处理仍以工具声明为准" in prompt
     assert "不得直接凭预览、记忆或历史摘要修改" in prompt
     assert "最后用 disclosure_edit 小步落盘" in prompt
-    assert "当前上下文中必须已有完整创新内核" in prompt
-    assert "短小完整内核" in prompt
-    assert "不是分析报告" not in prompt
-    assert "不写分析报告、探索过程、完整交底书提纲或长篇备选方案" in prompt
-    assert "按创新内核工具推荐 markdown 模板组织" in prompt
-    assert "必要组成要素" in prompt
-    assert "协同流程或运行机理" in prompt
     assert "优先读取或列出现有对象并 update/replace 原对象" in prompt
     assert "只有用户明确要求新增时才 create" in prompt
     assert "先 disclosure_edit insert_section" in prompt
