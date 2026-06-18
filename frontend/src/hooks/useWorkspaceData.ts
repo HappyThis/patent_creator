@@ -10,7 +10,7 @@ const emptyRenderAst: RenderAst = {
   title: EMPTY_DOCUMENT_TITLE,
   meta: {
     document_type: 'patent_disclosure',
-    schema_version: 'v3.2',
+    schema_version: 'v3.3',
   },
   figures: [],
   outline: [],

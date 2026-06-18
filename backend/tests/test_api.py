@@ -100,17 +100,17 @@ class StubLLMClient:
             }
 
         def disclosure_edit_tool_calls() -> list[dict[str, Any]]:
-            if "技术效果" in user_message:
+            if "权利要求" in user_message or "关键创新点" in user_message:
                 return [
                     {
                         "tool": "disclosure_edit",
                         "arguments": {
-                            "section_id": "sec_000010",
+                            "section_id": "sec_000008",
                             "operation": "insert_block",
                             "position": {"mode": "end"},
                             "block": {
                                 "type": "paragraph",
-                                "text": "本方案通过减少无效推理和复用时序信息，降低了低算力终端上的单帧处理开销。",
+                                "text": "本方案的关键创新点在于通过减少无效推理和复用时序信息，降低低算力终端上的单帧处理开销。",
                             },
                         },
                         "tool_call_id": "stub_call_2a",
@@ -118,7 +118,7 @@ class StubLLMClient:
                     {
                         "tool": "disclosure_edit",
                         "arguments": {
-                            "section_id": "sec_000010",
+                            "section_id": "sec_000008",
                             "operation": "insert_block",
                             "position": {"mode": "end"},
                             "block": {
@@ -138,7 +138,7 @@ class StubLLMClient:
                 {
                     "tool": "disclosure_edit",
                     "arguments": {
-                        "section_id": "sec_000007",
+                        "section_id": "sec_000006",
                         "operation": "insert_block",
                         "position": {"mode": "end"},
                         "block": {
@@ -151,7 +151,7 @@ class StubLLMClient:
                 {
                     "tool": "disclosure_edit",
                     "arguments": {
-                        "section_id": "sec_000007",
+                        "section_id": "sec_000006",
                         "operation": "insert_block",
                         "position": {"mode": "end"},
                         "block": {
@@ -164,7 +164,7 @@ class StubLLMClient:
                 {
                     "tool": "disclosure_edit",
                     "arguments": {
-                        "section_id": "sec_000007",
+                        "section_id": "sec_000006",
                         "operation": "insert_section",
                         "position": {"mode": "end"},
                         "section": {"title": "整体架构"},
@@ -174,7 +174,7 @@ class StubLLMClient:
                 {
                     "tool": "disclosure_edit",
                     "arguments": {
-                        "section_id": "sec_000007",
+                        "section_id": "sec_000006",
                         "operation": "insert_section",
                         "position": {"mode": "end"},
                         "section": {"title": "处理流程"},
@@ -377,7 +377,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
         outline_response = await client.get(f"/api/projects/{project_id}/outline")
         assert outline_response.status_code == 200
-        assert len(outline_response.json()["sections"]) == 12
+        assert len(outline_response.json()["sections"]) == 9
 
         render_response = await client.get(f"/api/projects/{project_id}/render")
         assert render_response.status_code == 200
@@ -386,7 +386,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         sse_events = await collect_stream_events(
             client,
             project_id,
-            {"message": "请补充技术效果章节，强调低算力实时性的收益。"},
+            {"message": "请补充关键创新点及权利要求建议，强调低算力实时性的核心保护点。"},
         )
         event_names = [name for name, _ in sse_events]
         assert event_names[0] == "round_started"
@@ -414,8 +414,8 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
 
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200
-        technical_effects = section_by_title(document_response.json(), "技术效果")
-        assert len(technical_effects["blocks"]) == 2
+        innovation_claims = section_by_title(document_response.json(), "关键创新点及权利要求建议")
+        assert len(innovation_claims["blocks"]) == 2
         technical_solution = section_by_title(document_response.json(), "技术方案")
         assert technical_solution["blocks"] == []
 
@@ -423,7 +423,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert export_response.status_code == 200
         export_path = Path(export_response.json()["path"])
         assert export_path.exists()
-        assert "技术效果" in export_path.read_text(encoding="utf-8")
+        assert "关键创新点及权利要求建议" in export_path.read_text(encoding="utf-8")
 
         second_stream_events = await collect_stream_events(
             client,
@@ -528,7 +528,7 @@ async def test_running_round_can_be_cancelled(tmp_path: Path) -> None:
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         stream_task = asyncio.create_task(
-            collect_stream_events(client, project_id, {"message": "请补充技术效果章节。"})
+            collect_stream_events(client, project_id, {"message": "请补充关键创新点及权利要求建议。"})
         )
 
         running_project = services.store.get_project(project_id)

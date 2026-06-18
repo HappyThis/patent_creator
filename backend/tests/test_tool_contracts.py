@@ -68,6 +68,10 @@ def test_main_agent_registers_figure_kit() -> None:
     properties = figure["function"]["parameters"]["properties"]
     assert "markdown_ref" in description
     assert "figure block 只用于在“附录”章节展示图本体" in description
+    assert "不要把执行流程伪装成架构图" in description
+    assert "架构图应优先使用 subgraph 表达层次或边界" in description
+    assert "这些应画成流程图或状态图" in description
+    assert "架构图必须体现分层、系统边界、模块职责和依赖方向" in properties["mermaid"]["description"]
     assert set(properties) == {"action", "ref", "title", "mermaid"}
 
 
@@ -88,7 +92,10 @@ def test_tool_schemas_inline_local_definitions_for_provider_compatibility() -> N
 
 def test_main_agent_prompt_requires_small_document_edits() -> None:
     prompt = build_main_agent_system_prompt()
-    edit_description = _tool("disclosure_edit")["function"]["description"]
+    edit = _tool("disclosure_edit")
+    edit_description = edit["function"]["description"]
+    properties = edit["function"]["parameters"]["properties"]
+    block_schema = next(item for item in properties["block"]["anyOf"] if isinstance(item, dict) and item.get("type") == "object")
 
     assert "自动生成工具声明" not in prompt
     assert "disclosure_edit 小步落盘" in prompt
@@ -103,7 +110,16 @@ def test_main_agent_prompt_requires_small_document_edits() -> None:
     assert "只能写最终态正文" in edit_description
     assert "section 负责结构，block 承接内容" in edit_description
     assert "不要跨 section 操作" in edit_description
+    assert "两个以上独立机制、流程阶段、模块、实施例、规则组或异常分支" in edit_description
     assert "insert_section 只创建子章节标题" in edit_description
+    assert "$...$ 行内 LaTeX" in edit_description
+    assert "不要裸写 D_i、Active_i" in edit_description
+    assert "独立公式使用 type=formula 的块级 LaTeX" in edit_description
+    assert "[式(1)](formula:<formula_block_id>)" in edit_description
+    assert "$...$ 行内 LaTeX" in block_schema["properties"]["text"]["description"]
+    assert "[式(1)](formula:blk_000001)" in block_schema["properties"]["type"]["description"]
+    assert "自动编号为式(1)、式(2)" in block_schema["properties"]["latex"]["description"]
+    assert "单元格支持 $...$ 行内 LaTeX" in block_schema["properties"]["rows"]["description"]
 
 
 def test_tool_descriptions_carry_lookup_workflow_guidance_without_kernel_tool() -> None:
@@ -116,6 +132,8 @@ def test_tool_descriptions_carry_lookup_workflow_guidance_without_kernel_tool() 
     assert "当需要了解交底书结构、寻找可编辑位置或判断章节层级时，先用本工具定位。" in outline_description
     assert "当不知道概念、术语或目标文本在哪个章节时，先用本工具定位。" in search_description
     assert "当写作、评价或修改依赖当前正文时，应先精读相关 section 或目标 block。" in read_description
+    assert "writing_guide_markdown" in read_description
+    assert "空章节写作要领，不是交底书正文" in read_description
     assert "innovation_kernel_kit" not in tool_names
 
     assert "先用 disclosure_outline 或 disclosure_search 定位" in prompt

@@ -12,10 +12,21 @@ def test_disclosure_v3_initial_structure(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
     disclosure = executor.store.get_disclosure(project_id)
 
-    assert disclosure["meta"]["schema_version"] == "v3.2"
+    assert disclosure["meta"]["schema_version"] == "v3.3"
     assert "id_counters" not in disclosure["meta"]
     assert "title" not in disclosure["meta"]
     assert disclosure["sections"][0]["title"] == {"id": "blk_000001", "type": "title", "text": "发明名称"}
+    assert [section["title"]["text"] for section in disclosure["sections"]] == [
+        "发明名称",
+        "技术领域",
+        "背景技术",
+        "现有技术及其缺陷",
+        "要解决的技术问题",
+        "技术方案",
+        "具体实施方式",
+        "关键创新点及权利要求建议",
+        "附录",
+    ]
     assert disclosure["sections"][-1]["title"]["text"] == "附录"
     assert disclosure["sections"][0]["blocks"][0] == {
         "id": "blk_000002",
@@ -291,6 +302,64 @@ def test_disclosure_read_section_paginates_title_and_direct_blocks(tmp_path: Pat
     assert second_page["status"] == "success"
     assert second_page["output"]["section"]["blocks"][0]["text"] == "第二段"
     assert second_page["output"]["truncated"] is False
+
+
+def test_disclosure_read_section_returns_writing_guide_for_empty_top_level_fixed_section(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    section = section_id_by_title(executor, project_id, "技术方案")
+
+    read = run_builtin_tool(executor, project_id, "disclosure_read_section", {"section_id": section})
+
+    assert read["status"] == "success"
+    assert read["output"]["writing_guide_markdown"].startswith("## 技术方案写作要领")
+    assert "专利代理人员" in read["output"]["writing_guide_markdown"]
+    assert "不要求固定写作顺序" in read["output"]["writing_guide_markdown"]
+    assert "避免只写“系统根据状态进行处理”" in read["output"]["writing_guide_markdown"]
+    assert "两个以上独立机制" in read["output"]["writing_guide_markdown"]
+
+
+def test_disclosure_read_section_omits_writing_guide_for_filled_or_child_section(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    section = section_id_by_title(executor, project_id, "技术方案")
+
+    inserted_block = run_builtin_tool(
+        executor,
+        project_id,
+        "disclosure_edit",
+        {
+            "section_id": section,
+            "operation": "insert_block",
+            "position": {"mode": "end"},
+            "block": {"type": "paragraph", "text": "系统先接收任务条目，再创建隔离工作空间。"},
+        },
+    )
+    assert inserted_block["status"] == "success"
+
+    filled = run_builtin_tool(executor, project_id, "disclosure_read_section", {"section_id": section})
+    assert filled["status"] == "success"
+    assert "writing_guide_markdown" not in filled["output"]
+
+    child = run_builtin_tool(
+        executor,
+        project_id,
+        "disclosure_edit",
+        {
+            "section_id": section,
+            "operation": "insert_section",
+            "position": {"mode": "end"},
+            "section": {"title": "调度流程"},
+        },
+    )
+    assert child["status"] == "success"
+
+    child_read = run_builtin_tool(
+        executor,
+        project_id,
+        "disclosure_read_section",
+        {"section_id": child["output"]["primary_section_id"]},
+    )
+    assert child_read["status"] == "success"
+    assert "writing_guide_markdown" not in child_read["output"]
 
 
 def test_disclosure_edit_block_and_section_operations(tmp_path: Path) -> None:

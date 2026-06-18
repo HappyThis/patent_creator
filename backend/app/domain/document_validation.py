@@ -13,8 +13,8 @@ def validate_disclosure(disclosure: dict[str, Any]) -> ToolResult | None:
     meta = disclosure.get("meta", {})
     if meta.get("document_type") != "patent_disclosure":
         return tool_failed("schema_validation_failed", "disclosure.document_type 必须为 patent_disclosure。")
-    if meta.get("schema_version") != "v3.2":
-        return tool_failed("schema_validation_failed", "disclosure.schema_version 必须为 v3.2。")
+    if meta.get("schema_version") != "v3.3":
+        return tool_failed("schema_validation_failed", "disclosure.schema_version 必须为 v3.3。")
     for key in ("created_at", "updated_at"):
         if not isinstance(meta.get(key), str) or not meta.get(key):
             return tool_failed("schema_validation_failed", f"meta.{key} 必须是非空字符串。")

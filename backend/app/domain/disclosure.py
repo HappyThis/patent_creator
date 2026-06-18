@@ -10,14 +10,11 @@ STANDARD_SECTION_TITLES: list[str] = [
     "发明名称",
     "技术领域",
     "背景技术",
-    "现有技术方案",
-    "现有技术缺陷",
+    "现有技术及其缺陷",
     "要解决的技术问题",
     "技术方案",
-    "关键创新点",
     "具体实施方式",
-    "技术效果",
-    "权利要求建议",
+    "关键创新点及权利要求建议",
     "附录",
 ]
 
@@ -58,7 +55,7 @@ def build_initial_disclosure(title: str) -> dict[str, Any]:
     return {
         "meta": {
             "document_type": "patent_disclosure",
-            "schema_version": "v3.2",
+            "schema_version": "v3.3",
             "created_at": created_at,
             "updated_at": created_at,
         },

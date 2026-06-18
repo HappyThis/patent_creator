@@ -5,10 +5,69 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from .disclosure import find_section
+from .disclosure import STANDARD_SECTION_TITLES, find_section, section_title_text
 from .document_tool_results import ToolResult, tool_failed, tool_success
 
 DEFAULT_PREVIEW_CHARS = 40
+
+SECTION_WRITING_GUIDES: dict[str, str] = {
+    "发明名称": """## 发明名称写作要领
+
+- 用一句话概括技术对象和核心机制，让代理人一眼知道方案解决的是什么技术事项。
+- 名称应具体、克制，不写营销词、效果词，也不要只写宽泛领域名。
+- 可以使用“基于……的……方法/系统/装置”这类中性表达，但不要为了命名而补编未确认的技术特征。
+- 如果核心机制尚不明确，应先补充询问或暂用保守名称。""",
+    "技术领域": """## 技术领域写作要领
+
+- 用 1-2 句话定位方案所属的技术领域，服务于代理人检索和理解。
+- 只写领域归属和应用场景边界，不展开背景问题、技术方案、创新点或技术效果。
+- 领域范围要贴近实际方案，不要写成产品介绍，也不要故意扩大到无事实支撑的上位领域。""",
+    "背景技术": """## 背景技术写作要领
+
+- 说明该领域中常见的系统、流程、技术环境或协作关系，让代理人知道问题出现在哪里。
+- 优先交代客观上下文：参与对象、输入输出、数据/状态流转、已有组件、典型工作方式。
+- 不写本方案的改进手段，不提前评价创新点，也不要使用“本发明”等正式专利口吻。
+- 缺少背景事实时宁可保持简短，不要编造行业通用做法。""",
+    "现有技术及其缺陷": """## 现有技术及其缺陷写作要领
+
+- 按“现有做法是什么 -> 在什么条件下不够 -> 造成什么技术后果”说明，不要求固定段落标题。
+- 缺陷要落到技术层面，例如状态不一致、调度冲突、信息缺失、资源无法释放、人工介入导致流程不可控。
+- 不要只写业务痛点、体验问题或管理目标，也不要把拟采用的方案写成现有技术。
+- 如果只能确认问题、不能确认现有做法，应明确保守描述，不要虚构竞品或行业方案。""",
+    "要解决的技术问题": """## 要解决的技术问题写作要领
+
+- 将前文缺陷收束为 1-3 个明确技术问题，避免罗列过多目标。
+- 每个问题应能回答：什么对象、在什么条件下、出现什么技术障碍、为什么需要技术性处理。
+- 技术问题应与后续技术方案能够对应，不写商业目标、用户体验口号或纯效果描述。
+- 事实不足时先保留问题边界，不要把尚未确认的解决手段写进问题本身。""",
+    "技术方案": """## 技术方案写作要领
+
+- 这是交底书的核心，要让专利代理人员看完后能复述技术原理、运行方式和关键边界。
+- 围绕本方案真正的技术主线组织内容，可以按流程、模块、状态机、数据链路、控制策略或异常处理展开，不要求固定写作顺序。
+- 写作时检查是否交代清楚关键组成、输入输出、数据或状态变化、判断条件、执行动作、异常分支和边界约束。
+- 避免只写“系统根据状态进行处理”“根据策略执行任务”这类泛化描述；应说明状态/策略从何而来、包含什么、如何影响后续动作。
+- 两个以上独立机制、流程阶段、模块、规则组或异常分支，建议拆成子章节。
+- 图表、公式、流程图、架构图或时序图只有在能降低理解成本时才加入；缺少事实依据时不要补编技术细节。""",
+    "具体实施方式": """## 具体实施方式写作要领
+
+- 这里用于支撑“技术方案”如何落地，不是重新泛泛讲一遍原理。
+- 可从步骤、模块协作、数据结构、接口、配置、参数、伪流程、运行环境或异常处理切入，选择最能说明可实施性的方式。
+- 写清关键条件、分支、失败处理、替代实现和可选参数，但不要堆砌与核心方案无关的工程细节。
+- 可以拆子章节写不同实施路径或典型场景；无法确认的实现细节应留白或追问，不要为了完整而编造。""",
+    "关键创新点及权利要求建议": """## 关键创新点及权利要求建议写作要领
+
+- 保护点在精不在多，通常 1-3 条，最多不超过 3 条。
+- 每条应聚焦一个值得保护的必要特征组合，说明核心要素、协作关系以及它带来的技术结果。
+- 不要把实施细节、可选参数、同义表述或普通从属特征拆成很多条。
+- 用工程语言说明建议保护什么，不要直接写正式权利要求书；保护点必须能从技术方案中找到支撑。
+- 如果当前资料不足以判断保护点，应先追问或只写已确认的核心组合。""",
+    "附录": """## 附录写作要领
+
+- 放置有助于理解正文的图、表、公式、流程图、架构图、时序图等材料。
+- figure block 只应放在附录；正文其他章节用 [图1](figure:fig_000001) 这类引用连接到图。
+- 图表应服务于正文解释，优先表达结构关系、流程关系、状态变化或量化关系，不加入装饰性材料。
+- 如果图表无法比文字更清楚，或缺少足够事实支撑，就不要强行生成。""",
+}
 
 
 def disclosure_outline(disclosure: dict[str, Any], *, limit: int, offset: int) -> ToolResult:
@@ -81,17 +140,31 @@ def disclosure_read_section(
             }
         )
 
-    return tool_success(
-        {
-            "section": {
-                "locator": section_locator,
-                "title": read_block_entry(section["title"], section_path=[item["id"] for item in path], index=0),
-                "blocks": page_payload.pop("blocks"),
-                "sections": child_sections,
-            },
-            **page_payload,
-        }
-    )
+    output = {
+        "section": {
+            "locator": section_locator,
+            "title": read_block_entry(section["title"], section_path=[item["id"] for item in path], index=0),
+            "blocks": page_payload.pop("blocks"),
+            "sections": child_sections,
+        },
+        **page_payload,
+    }
+    writing_guide = section_writing_guide_for(path)
+    if writing_guide:
+        output["writing_guide_markdown"] = writing_guide
+    return tool_success(output)
+
+
+def section_writing_guide_for(section_path: list[dict[str, Any]]) -> str | None:
+    if len(section_path) != 1:
+        return None
+    section = section_path[0]
+    if section.get("blocks") or section.get("sections"):
+        return None
+    title = section_title_text(section)
+    if title not in STANDARD_SECTION_TITLES:
+        return None
+    return SECTION_WRITING_GUIDES.get(title)
 
 
 def build_outline_items(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:

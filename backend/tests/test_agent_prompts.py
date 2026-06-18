@@ -49,7 +49,7 @@ def test_main_agent_prompt_defines_single_agent_workflow_for_complex_technical_t
     assert "条件性表述" in prompt
     assert "可设置、可包括、可通过" in prompt
     assert "不得写成已有事实" in prompt
-    assert "正文呈现最终技术方案、结构、实施条件和技术效果" in prompt
+    assert "正文呈现最终技术方案、结构、实施条件，以及由技术手段自然推出的效果" in prompt
     assert "写技术方案章节前" in prompt
     assert "领域通用的方案骨架" in prompt
     assert "必要技术特征" in prompt
@@ -139,19 +139,49 @@ def test_main_agent_prompt_uses_model_visible_action_words() -> None:
 def test_main_agent_prompt_defines_structured_section_and_final_text_rules() -> None:
     prompt = build_main_agent_system_prompt()
 
+    assert "交底书是技术人员向专利代理人员阐明发明核心内容的技术解释文档" in prompt
     assert "正文必须是最终态文本" in prompt
     assert "面向对话过程、修改过程或方案迭代过程的表述" in prompt
     assert "调整后的最终表述" in prompt
     assert "解释调整过程" in prompt
-    assert "写“权利要求建议”时，保护点在精不在多" in prompt
+    assert "优先使用技术人员解释给专利代理人员的工程语言" in prompt
+    assert "除“关键创新点及权利要求建议”外" in prompt
+    assert "避免使用“本发明”“权利要求”“保护范围”“实施例一/二”等正式专利申请腔表达" in prompt
+    assert "写“关键创新点及权利要求建议”时，保护点在精不在多" in prompt
     assert "通常 1-3 条，默认 1-2 条，最多不得超过 3 条" in prompt
     assert "不要把实施细节、可选参数或重复从属特征拆成多个保护点" in prompt
     assert "不要把保护需求、权利要求布局或保护范围设计写成技术方案内容" in prompt
-    assert "保护性考虑应留在“权利要求建议”中" in prompt
+    assert "保护性考虑应留在“关键创新点及权利要求建议”中" in prompt
     assert "长内容必须拆成多次小步写入" in prompt
     assert "整体架构" in prompt
     assert "处理流程" in prompt
     assert "优先考虑子章节结构" in prompt
+    assert "预计超过约 3 个正文段落，应先建立子章节" in prompt
+    assert "默认先用 disclosure_edit insert_section 建立子章节标题" in prompt
+
+
+def test_main_agent_prompt_prioritizes_technical_solution_clarity_for_patent_agents() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "“技术方案”章节是交底书核心中的核心" in prompt
+    assert "必须清楚阐明技术原理和工作方式" in prompt
+    assert "使专利代理人员能够理解方案如何成立、如何实施、如何区别于常规做法" in prompt
+    assert "技术原理是什么" in prompt
+    assert "输入、输出、触发条件、处理逻辑、与其他要素的连接关系以及必要边界" in prompt
+    assert "尽量避免让专利代理人员产生二次猜测" in prompt
+
+
+def test_main_agent_prompt_uses_figures_tables_and_formulas_only_when_helpful() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "在合适位置补充有解释价值的表格、公式或附图" in prompt
+    assert "流程图用于说明处理步骤或状态流转" in prompt
+    assert "架构图用于说明模块协同" in prompt
+    assert "时序图用于说明跨主体交互" in prompt
+    assert "表格用于对比条件或参数" in prompt
+    assert "公式用于说明明确的数学或评分关系" in prompt
+    assert "不是装饰" in prompt
+    assert "不强行为每章配置" in prompt
 
 
 def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:
@@ -160,6 +190,7 @@ def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:
     assert "优秀作品标准" in prompt
     assert "内容合理性、内容正确性、技术创新性、表达与规划" in prompt
     assert "语言简洁易懂而不失专业" in prompt
+    assert "必要图表公式服务于理解" in prompt
     assert "阶段性反思与完成态判断" in prompt
     assert "每完成一次关键读取、正文写入或结构调整后，做一次轻量自检" in prompt
     assert "反思已完成步骤是否仍然成立" in prompt

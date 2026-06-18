@@ -43,17 +43,17 @@ class DisclosureReadSectionArguments(_StrictModel):
 
 class BlockArguments(_StrictModel):
     type: Literal["title", "paragraph", "list", "image", "table", "formula", "figure"] = Field(
-        description="block 类型。title/paragraph 使用 text；list 使用 ordered 和 items；image 使用 src，可选 caption/alt；table 使用 columns 和 rows；formula 使用 latex；figure 使用 figure_id 且只能放在附录章节。"
+        description="block 类型。title/paragraph 使用 text；list 使用 ordered 和 items；image 使用 src，可选 caption/alt；table 使用 columns 和 rows；formula 使用 latex；figure 使用 figure_id 且只能放在附录章节。paragraph/list/table 文本支持 $...$ 行内 LaTeX，也支持 [式(1)](formula:blk_000001) 引用块级公式。"
     )
-    text: str | None = Field(default=None, description="type=title 或 paragraph 时必填。")
+    text: str | None = Field(default=None, description="type=title 或 paragraph 时必填；paragraph 文本可用 $D_i$、$Active_i$ 这类 $...$ 行内 LaTeX。")
     ordered: bool | None = Field(default=None, description="type=list 时必填，是否为有序列表。")
-    items: list[str] | None = Field(default=None, description="type=list 时必填，列表项文本。")
+    items: list[str] | None = Field(default=None, description="type=list 时必填，列表项文本；支持 $...$ 行内 LaTeX。")
     src: str | None = Field(default=None, description="type=image 时必填，图片资源路径或 URL。")
     caption: str | None = Field(default=None, description="type=image 时可选，图片标题。")
     alt: str | None = Field(default=None, description="type=image 时可选，替代文本。")
-    columns: list[str] | None = Field(default=None, description="type=table 时必填，表头列名。")
-    rows: list[list[str]] | None = Field(default=None, description="type=table 时必填，表格行。")
-    latex: str | None = Field(default=None, description="type=formula 时必填，块级公式的 LaTeX 源码。")
+    columns: list[str] | None = Field(default=None, description="type=table 时必填，表头列名；支持 $...$ 行内 LaTeX。")
+    rows: list[list[str]] | None = Field(default=None, description="type=table 时必填，表格行；单元格支持 $...$ 行内 LaTeX。")
+    latex: str | None = Field(default=None, description="type=formula 时必填，块级公式的 LaTeX 源码；预览中会按文档顺序自动编号为式(1)、式(2)。")
     figure_id: str | None = Field(default=None, description="type=figure 时必填，附图资产 id，例如 fig_000001。")
 
 
@@ -149,10 +149,11 @@ def disclosure_read_section(
     """精读一个交底书 section 的直接内容，可按 block 分页或读取指定直接 block。
 
     Returns:
-        返回 section、returned、total、offset、next_offset、truncated；section.sections 只包含直接子 section 摘要。
+        返回 section、returned、total、offset、next_offset、truncated；section.sections 只包含直接子 section 摘要。读取一级固定章节且该章节为空时，额外返回纯 Markdown 字符串 writing_guide_markdown。
 
     Rules:
         - 当写作、评价或修改依赖当前正文时，应先精读相关 section 或目标 block。
+        - writing_guide_markdown 是空章节写作要领，不是交底书正文；写入前应结合用户信息生成具体内容。
         - block_ids 必须属于该 section 的直接 block；读子 section 内容必须改用子 section_id 再调用。
         - 分页对象是 title block + 当前 section 的直接 blocks，不展开子 section 正文。
         - title block 固定 index=0；正文 block 从 index=1 开始。
@@ -189,10 +190,14 @@ def disclosure_edit(
         - 只能写最终态正文，不要写对话过程、修改过程、工具操作、方案迭代说明或内部判断。
         - 没有整章重写；重写章节必须拆成删除、插入 section、逐个 insert/replace block。
         - section 负责结构，block 承接内容；编辑子 section 前，必须改用该子 section 的 section_id 作为工作区，不要跨 section 操作。
+        - 当一个章节包含两个以上独立机制、流程阶段、模块、实施例、规则组或异常分支时，应优先 insert_section 拆成子章节，不要把多个主题压进同一个长 paragraph。
         - 改章节标题使用 replace_block 替换该 section 的 title block。
         - title block 只能 replace，不能 delete，也不能在其前方 insert block。
         - insert_section 只创建子章节标题；正文后续通过 insert_block 小步写入。
         - 单次新增/替换文本总量不得超过 1500 字。
+        - 段落、列表项和表格文本支持 $...$ 行内 LaTeX；涉及下标、变量、集合、逻辑条件时写作 $D_i$、$Active_i$，不要裸写 D_i、Active_i。
+        - 独立公式使用 type=formula 的块级 LaTeX；不要把完整公式塞进普通段落。
+        - 块级公式在预览中自动编号；正文引用公式时使用 [式(1)](formula:<formula_block_id>)，block_id 以实际公式 block_id 为准。
 
     Examples:
         - 替换段落: {"section_id":"sec_000007","operation":"replace_block","block_id":"blk_000012","block":{"type":"paragraph","text":"替换后的段落。"}}

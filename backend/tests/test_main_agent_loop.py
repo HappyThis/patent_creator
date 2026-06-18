@@ -29,7 +29,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
             "tool_calls": [
                 tool_call(
                     "disclosure_read_section",
-                    {"section_id": "sec_000010", "limit": 20},
+                    {"section_id": "sec_000008", "limit": 20},
                     "call_1",
                 )
             ],
@@ -46,7 +46,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
                 tool_call(
                     "disclosure_edit",
                     {
-                        "section_id": "sec_000010",
+                        "section_id": "sec_000008",
                         "operation": "insert_block",
                         "position": {"mode": "end"},
                         "block": {"type": "paragraph", "text": "正文占位。"},
@@ -57,7 +57,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
         }
 
     def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
-        return {"type": "respond", "text": "已更新技术效果。"}
+        return {"type": "respond", "text": "已更新关键创新点及权利要求建议。"}
 
     llm = ScriptedLLMClient([step_read, step_edit, step_respond])
     services = AppServices(make_settings(tmp_path), llm_client=llm)
@@ -65,7 +65,7 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
 
     response = await services.chat.start_round(
         project_id,
-        ChatMessageRequest(message="请补充技术效果。"),
+        ChatMessageRequest(message="请补充关键创新点及权利要求建议。"),
     )
     await wait_until_idle(services, project_id)
 
@@ -87,12 +87,12 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     assert "document_changed" in bus_event_names
     assert bus_event_names[-1] == "round_finished"
     round_finished_payload = bus_events[-1][1]
-    assert round_finished_payload["reply"] == "已更新技术效果。"
+    assert round_finished_payload["reply"] == "已更新关键创新点及权利要求建议。"
     assert round_finished_payload["changed"] is True
 
     disclosure = services.store.get_disclosure(project_id)
-    technical_effects = section_by_title(disclosure, "技术效果")
-    assert len(technical_effects["blocks"]) >= 1
+    innovation_claims = section_by_title(disclosure, "关键创新点及权利要求建议")
+    assert len(innovation_claims["blocks"]) >= 1
 
 
 @pytest.mark.anyio
@@ -104,7 +104,7 @@ async def test_main_agent_loop_allows_document_write_without_innovation_kernel(t
                 tool_call(
                     "disclosure_edit",
                     {
-                        "section_id": "sec_000010",
+                        "section_id": "sec_000008",
                         "operation": "insert_block",
                         "position": {"mode": "end"},
                         "block": {"type": "paragraph", "text": "should not write"},
