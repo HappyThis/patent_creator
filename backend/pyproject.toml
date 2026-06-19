@@ -1,7 +1,7 @@
 [project]
 name = "patent-creator-backend"
-version = "0.1.0"
-description = "FastAPI backend for the patent creator workspace."
+version = "0.2.0"
+description = "FastAPI backend for the patent disclosure AI agent workspace."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
