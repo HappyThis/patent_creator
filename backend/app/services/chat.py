@@ -23,6 +23,8 @@ from .event_bus import SessionEventBus
 
 logger = logging.getLogger("patent_creator.chat")
 LockedResult = TypeVar("LockedResult")
+SESSION_TITLE_MAX_CHARS = 24
+SESSION_TITLE_TIMEOUT = 12.0
 
 
 @dataclass
@@ -91,7 +93,6 @@ class ChatService:
                     "active_block_id": payload.active_block_id,
                 },
             )
-
             response = ChatMessageResponse(
                 accepted=True,
                 session_id=session_id,
@@ -114,7 +115,13 @@ class ChatService:
     async def delete_project(self, project_id: str) -> str | None:
         return await self._run_with_project_lock(project_id, lambda: self.store.delete_project(project_id))
 
+    async def delete_session(self, project_id: str, session_id: str) -> str | None:
+        return await self._run_with_project_lock(project_id, lambda: self.store.delete_session(project_id, session_id))
+
     def launch_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
+        if not payload.session_id:
+            self._launch_session_title_task(project_id, payload.message, state)
+
         key = (project_id, state.session_id, state.round_id)
         task = asyncio.create_task(self._run_round(project_id, payload, state))
         self._running_tasks[key] = task
@@ -124,6 +131,55 @@ class ChatService:
                 self._running_tasks.pop(key, None)
 
         task.add_done_callback(discard_finished_task)
+
+    def _launch_session_title_task(self, project_id: str, user_message: str, state: RoundState) -> None:
+        task = asyncio.create_task(self._generate_session_title(project_id, user_message, state))
+
+        def log_title_task_error(done_task: asyncio.Task[None]) -> None:
+            try:
+                done_task.result()
+            except Exception:
+                logger.exception(
+                    "session title task failed project=%s session=%s round=%s",
+                    project_id,
+                    state.session_id,
+                    state.round_id,
+                )
+
+        task.add_done_callback(log_title_task_error)
+
+    async def _generate_session_title(self, project_id: str, user_message: str, state: RoundState) -> None:
+        title = await self._summarize_session_title(user_message)
+        if not title:
+            return
+
+        def append_title() -> bool:
+            if not self.store.session_exists(project_id, state.session_id):
+                return False
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="session_title",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload={"title": title},
+            )
+            return True
+
+        appended = await self._run_with_project_lock(project_id, append_title)
+        if not appended:
+            return
+        await self.bus.publish(
+            (project_id, state.session_id),
+            "session_title_updated",
+            {
+                "session_id": state.session_id,
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+                "title": title,
+            },
+        )
 
     async def cancel_round(self, project_id: str, session_id: str, round_id: str) -> dict[str, Any]:
         def find_running_task() -> asyncio.Task[None] | None:
@@ -485,6 +541,46 @@ class ChatService:
             project_id,
             build_commit_message(changed_payload),
         )
+
+    async def _summarize_session_title(self, user_message: str) -> str | None:
+        try:
+            result = await self.llm_client.generate_json(
+                system_prompt="你负责把用户发起的一轮专利写作对话概括成侧边栏标题。",
+                user_prompt=(
+                    "请为下面这条用户消息生成一个中文短标题，并严格返回 JSON 对象。"
+                    f"JSON schema: {{\"title\":\"不超过 {SESSION_TITLE_MAX_CHARS} 个字符的标题\"}}。"
+                    "不要返回 Markdown，不要返回解释，不要返回额外字段。\n\n"
+                    f"用户消息：\n{user_message}"
+                ),
+                temperature=0.1,
+                timeout=min(self.settings.llm_timeout, SESSION_TITLE_TIMEOUT),
+                trace_context={"project_phase": "session_title"},
+            )
+        except Exception as exc:
+            logger.warning("session title generation failed: %s", exc)
+            return None
+
+        raw_title = result.get("title")
+        if not isinstance(raw_title, str):
+            logger.warning("session title generation returned invalid payload: %s", result)
+            return None
+        return self._clean_session_title(raw_title) or None
+
+    @staticmethod
+    def _clean_session_title(raw_title: str) -> str:
+        normalized = " ".join(raw_title.split()).strip()
+        if not normalized:
+            return ""
+        lowered = normalized.lower()
+        if "<analysis" in lowered or "<summary" in lowered:
+            return ""
+        normalized = normalized.lstrip("#-0123456789.、)） ")
+        normalized = normalized.strip("`'\"“”‘’《》「」 ")
+        for prefix in ("标题：", "标题:", "对话标题：", "对话标题:", "session title:", "Session title:"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix) :].strip()
+                break
+        return normalized[:SESSION_TITLE_MAX_CHARS].strip()
 
     async def _set_project_idle(self, project_id: str) -> None:
         def mark_idle() -> None:

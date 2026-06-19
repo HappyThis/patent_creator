@@ -25,6 +25,7 @@ export type SessionSummary = {
   event_count: number;
   last_round_id: string | null;
   first_user_text: string | null;
+  title?: string | null;
   is_active: boolean;
   context_usage?: ContextUsageSummary | null;
 };

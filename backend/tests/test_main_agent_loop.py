@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -208,9 +209,18 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
     response = await services.chat.start_round(project_id, ChatMessageRequest(message="先看技术领域。"))
     await wait_until_idle(services, project_id)
 
-    events = services.store.read_session_events(project_id, response.session_id)
+    for _ in range(50):
+        events = services.store.read_session_events(project_id, response.session_id)
+        if any(event.type == "session_title" for event in events):
+            break
+        await asyncio.sleep(0.01)
+    else:
+        events = services.store.read_session_events(project_id, response.session_id)
     round_events = [event for event in events if event.round_id == response.round_id]
-    assert [event.type for event in round_events] == [
+    title_events = [event for event in round_events if event.type == "session_title"]
+    loop_events = [event for event in round_events if event.type != "session_title"]
+    assert title_events[-1].payload["title"] == "低算力实时保护"
+    assert [event.type for event in loop_events] == [
         "user_input",
         "agent_message",
         "agent_output",
@@ -219,9 +229,9 @@ async def test_main_agent_loop_persists_tool_call_preamble(tmp_path: Path) -> No
         "agent_message",
         "agent_output",
     ]
-    assert round_events[1].payload["message"]["content"] == "我先读取技术领域，然后继续判断。"
-    assert round_events[2].payload["text"] == "我先读取技术领域，然后继续判断。"
-    assert round_events[-1].payload["text"] == "读取完成。"
+    assert loop_events[1].payload["message"]["content"] == "我先读取技术领域，然后继续判断。"
+    assert loop_events[2].payload["text"] == "我先读取技术领域，然后继续判断。"
+    assert loop_events[-1].payload["text"] == "读取完成。"
 
 @pytest.mark.anyio
 async def test_main_agent_loop_recovers_invalid_tool_arguments_json(tmp_path: Path) -> None:

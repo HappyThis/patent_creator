@@ -1,8 +1,8 @@
 import type { SessionSummary, SessionTab } from '../../types';
 import { formatTimestamp } from './chatEventTransforms';
 
-function buildSessionTitle(firstUserText?: string | null): string {
-  const normalized = (firstUserText ?? '').replace(/\s+/g, ' ').trim();
+function buildSessionTitle(session: SessionSummary): string {
+  const normalized = (session.title || session.first_user_text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) {
     return '未命名会话';
   }
@@ -16,7 +16,7 @@ export function buildSessionTabs(
 ): SessionTab[] {
   return sessions.map((session) => ({
     ...session,
-    title: buildSessionTitle(session.first_user_text),
+    title: buildSessionTitle(session),
     subtitle: `更新于 ${formatTimestamp(session.updated_at)}`,
     active: session.session_id === selected_session_id,
   }));
@@ -40,6 +40,7 @@ export function upsertActiveSessionSummary(
         event_count: Math.max(session.event_count, 1),
         last_round_id: roundId ?? session.last_round_id,
         first_user_text: session.first_user_text || firstUserText,
+        title: session.title,
         is_active: true,
       };
       continue;
@@ -57,6 +58,7 @@ export function upsertActiveSessionSummary(
       event_count: 1,
       last_round_id: roundId ?? null,
       first_user_text: firstUserText,
+      title: null,
       is_active: true,
       context_usage: null,
     },

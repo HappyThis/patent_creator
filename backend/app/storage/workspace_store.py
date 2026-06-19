@@ -270,6 +270,28 @@ class WorkspaceStore:
                 return text if isinstance(text, str) else None
         return None
 
+    def delete_session(self, project_id: str, session_id: str) -> str | None:
+        project = self.get_project(project_id)
+        if project.is_busy or project.running_session_id or project.running_round_id:
+            raise ApiError(409, "project_busy", "项目正在运行，不能删除对话。")
+
+        path = self.session_file(project_id, session_id)
+        if not path.exists():
+            raise ApiError(404, "session_not_found", f"session_id 不存在：{session_id}")
+
+        path.unlink()
+        next_session_id: str | None = None
+        remaining_sessions = self.list_sessions(project_id)
+        if remaining_sessions:
+            next_session_id = remaining_sessions[0].session_id
+
+        if project.active_session_id == session_id:
+            project.active_session_id = next_session_id
+            project.updated_at = now_iso()
+            self.save_project(project)
+
+        return next_session_id
+
     def round_message_status(
         self,
         project_id: str,
@@ -329,17 +351,21 @@ class WorkspaceStore:
         event_count = 0
         last_line: str | None = None
         first_user_text: str | None = None
+        title: str | None = None
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
                 event_count += 1
                 last_line = line
-                if first_user_text is None:
-                    event = SessionEvent.model_validate_json(line)
-                    if event.type == "user_input":
-                        text = event.payload.get("text")
-                        first_user_text = text if isinstance(text, str) else None
+                event = SessionEvent.model_validate_json(line)
+                if first_user_text is None and event.type == "user_input":
+                    text = event.payload.get("text")
+                    first_user_text = text if isinstance(text, str) else None
+                if event.type == "session_title":
+                    raw_title = event.payload.get("title")
+                    if isinstance(raw_title, str) and raw_title.strip():
+                        title = raw_title.strip()
         last_event = SessionEvent.model_validate_json(last_line) if last_line else None
         return SessionSummary(
             session_id=session_id,
@@ -347,6 +373,7 @@ class WorkspaceStore:
             event_count=event_count,
             last_round_id=last_event.round_id if last_event else None,
             first_user_text=first_user_text,
+            title=title,
             is_active=session_id == active_session_id,
         )
 

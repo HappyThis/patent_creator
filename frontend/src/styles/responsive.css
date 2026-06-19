@@ -6,6 +6,7 @@
 
   .chat-workspace {
     grid-template-columns:
+      240px
       minmax(340px, 1fr)
       var(--right-resizer-width)
       var(--right-pane-width);
@@ -43,6 +44,17 @@
     grid-template-columns: 1fr;
     height: auto;
     min-height: calc(100vh - 28px);
+  }
+
+  .workspace-sidebar {
+    grid-column: 1;
+    max-height: 320px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(92, 82, 68, 0.1);
+  }
+
+  .chat-stage {
+    grid-column: 1;
   }
 
   .chat-workspace .workspace-side-pane,

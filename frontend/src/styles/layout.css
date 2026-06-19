@@ -34,6 +34,7 @@
 .chat-workspace {
   position: relative;
   grid-template-columns:
+    260px
     minmax(340px, 1fr)
     var(--right-resizer-width)
     var(--right-pane-width);
@@ -47,7 +48,7 @@
 
 .chat-stage {
   position: relative;
-  grid-column: 1;
+  grid-column: 2;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -56,52 +57,260 @@
   background: transparent;
 }
 
-.workspace-home-button {
-  position: absolute;
-  top: 16px;
-  left: 18px;
-  z-index: 18;
-  width: 32px;
-  height: 32px;
+.workspace-sidebar {
+  grid-column: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 18px 8px 18px 14px;
+  border-right: 1px solid rgba(92, 82, 68, 0.1);
+  background: rgba(244, 240, 233, 0.72);
+  color: #2e3942;
+  overflow: auto;
+}
+
+.workspace-sidebar-section {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-session-section {
+  flex: 1;
+}
+
+.workspace-sidebar-heading {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 7px;
+  color: #7c756b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-sidebar-icon-button,
+.workspace-project-actions button,
+.workspace-session-delete-button {
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(92, 82, 68, 0.12);
-  border-radius: 999px;
-  background: rgba(250, 248, 242, 0.82);
-  color: #7a858b;
-  box-shadow: 0 10px 26px rgba(56, 48, 38, 0.055);
-  backdrop-filter: blur(14px);
-  transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease,
-    box-shadow 140ms ease;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #8a8378;
 }
 
-.workspace-home-button:hover {
-  border-color: rgba(59, 71, 77, 0.18);
-  background: rgba(255, 253, 248, 0.95);
+.workspace-sidebar-icon-button:hover:not(:disabled),
+.workspace-project-actions button:hover:not(:disabled),
+.workspace-session-delete-button:hover:not(:disabled) {
+  background: rgba(92, 82, 68, 0.08);
   color: #293640;
-  box-shadow: 0 12px 28px rgba(56, 48, 38, 0.08);
-  transform: translateY(-0.5px);
 }
 
-.workspace-home-button:focus-visible {
-  outline: 2px solid rgba(50, 111, 139, 0.34);
-  outline-offset: 2px;
+.workspace-sidebar-icon-button:disabled,
+.workspace-project-actions button:disabled,
+.workspace-session-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
-.workspace-home-icon {
-  width: 16px;
-  height: 16px;
-  display: block;
+.workspace-sidebar-icon-button svg,
+.workspace-project-actions svg,
+.workspace-session-delete-button svg,
+.workspace-project-button svg {
+  width: 15px;
+  height: 15px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.75;
+  stroke-width: 1.65;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.workspace-sidebar-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-project-row,
+.workspace-session-row {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 7px;
+}
+
+.workspace-project-group.selected .workspace-project-row,
+.workspace-session-row.active {
+  background: rgba(92, 82, 68, 0.1);
+}
+
+.workspace-project-button,
+.workspace-session-button {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #293640;
+  text-align: left;
+}
+
+.workspace-project-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-project-button span,
+.workspace-session-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-project-actions {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding-right: 3px;
+}
+
+.workspace-project-row:hover .workspace-project-actions,
+.workspace-project-group.selected .workspace-project-actions {
+  display: inline-flex;
+}
+
+.workspace-sidebar-status {
+  flex: 0 0 auto;
+  color: #8d6b2f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-session-button {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 4px 7px 18px;
+  color: #2f3940;
+  font-size: 13px;
+}
+
+.workspace-session-delete-button {
+  display: none;
+  margin-right: 3px;
+}
+
+.workspace-session-row:hover .workspace-session-delete-button,
+.workspace-session-row.active .workspace-session-delete-button {
+  display: inline-flex;
+}
+
+.workspace-session-row:hover,
+.workspace-project-row:hover {
+  background: rgba(92, 82, 68, 0.07);
+}
+
+.workspace-session-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.workspace-session-title {
+  font-weight: 650;
+}
+
+.workspace-session-time {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  color: #8b857b;
+  font-size: 12px;
+}
+
+.workspace-sidebar-empty,
+.workspace-sidebar-error {
+  margin: 2px 7px;
+  color: #8a8378;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-sidebar-error {
+  color: #9b4f2f;
+}
+
+.workspace-project-form,
+.workspace-project-rename {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0 6px 8px;
+  padding: 8px;
+  border: 1px solid rgba(92, 82, 68, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 253, 248, 0.58);
+}
+
+.workspace-project-form input,
+.workspace-project-rename input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(92, 82, 68, 0.14);
+  border-radius: 5px;
+  background: rgba(255, 253, 248, 0.82);
+  color: #293640;
+  font-size: 12px;
+}
+
+.workspace-project-form input:focus,
+.workspace-project-rename input:focus {
+  outline: 2px solid rgba(50, 111, 139, 0.22);
+  outline-offset: 1px;
+}
+
+.workspace-project-form-actions,
+.workspace-project-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.workspace-project-form-actions button,
+.workspace-project-row-actions button {
+  height: 27px;
+  padding: 0 9px;
+  border: 1px solid rgba(92, 82, 68, 0.12);
+  border-radius: 5px;
+  background: rgba(244, 240, 233, 0.92);
+  color: #4a515a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-project-form-actions button:hover:not(:disabled),
+.workspace-project-row-actions button:hover:not(:disabled) {
+  background: rgba(255, 253, 248, 0.96);
 }
 
 .chat-workspace.no-side-panels .chat-stage {
@@ -243,7 +452,7 @@
 }
 
 .workspace-side-preview {
-  grid-column: 3;
+  grid-column: 4;
   border-left: 1px solid rgba(92, 82, 68, 0.11);
 }
 
@@ -298,7 +507,7 @@
 }
 
 .workspace-resizer-right {
-  grid-column: 2;
+  grid-column: 3;
 }
 
 .workspace-resizer:hover,

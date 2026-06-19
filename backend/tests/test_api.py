@@ -23,6 +23,17 @@ def section_by_title(disclosure: dict[str, Any], title: str) -> dict[str, Any]:
 
 
 class StubLLMClient:
+    async def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {"title": "低算力实时保护"}
+
     async def generate_text(
         self,
         *,
@@ -482,6 +493,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         sessions = sessions_response.json()["sessions"]
         sessions_by_id = {session["session_id"]: session for session in sessions}
         assert sessions_by_id[session_id]["is_active"] is True
+        assert sessions_by_id[session_id]["title"] == "低算力实时保护"
         assert sessions_by_id[session_id]["context_usage"]["status"] in {"ok", "over_limit"}
         assert sessions_by_id["sess_inactive_for_list"]["is_active"] is False
         assert sessions_by_id["sess_inactive_for_list"]["context_usage"] is None
@@ -713,3 +725,102 @@ async def test_running_round_can_be_cancelled(tmp_path: Path) -> None:
     session_id = events[0][1]["session_id"]
     session_events = services.store.read_session_events(project_id, session_id)
     assert session_events[-1].payload["code"] == "round_cancelled"
+
+
+@pytest.mark.anyio
+async def test_session_can_be_deleted_and_active_session_moves(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    project = services.store.create_project("session delete project")
+    project_id = project.project_id
+    for session_id, title in (("sess_first", "第一轮标题"), ("sess_second", "第二轮标题")):
+        services.store.append_session_event(
+            project_id,
+            session_id,
+            event_type="user_input",
+            scope="main",
+            round_id=f"round_{session_id}",
+            message_id=f"msg_{session_id}",
+            payload={"text": title},
+        )
+        services.store.append_session_event(
+            project_id,
+            session_id,
+            event_type="session_title",
+            scope="main",
+            round_id=f"round_{session_id}",
+            message_id=f"msg_{session_id}",
+            payload={"title": title},
+        )
+
+    project.active_session_id = "sess_first"
+    services.store.save_project(project)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        delete_response = await client.delete(f"/api/projects/{project_id}/sessions/sess_first")
+        assert delete_response.status_code == 200
+        assert delete_response.json() == {
+            "deleted": True,
+            "project_id": project_id,
+            "session_id": "sess_first",
+            "next_session_id": "sess_second",
+        }
+
+        sessions_response = await client.get(f"/api/projects/{project_id}/sessions")
+        assert sessions_response.status_code == 200
+        sessions = sessions_response.json()["sessions"]
+        assert [session["session_id"] for session in sessions] == ["sess_second"]
+        assert sessions[0]["is_active"] is True
+        assert sessions[0]["title"] == "第二轮标题"
+
+        second_delete_response = await client.delete(f"/api/projects/{project_id}/sessions/sess_second")
+        assert second_delete_response.status_code == 200
+        assert second_delete_response.json()["next_session_id"] is None
+
+    assert services.store.session_file(project_id, "sess_first").exists() is False
+    assert services.store.session_file(project_id, "sess_second").exists() is False
+    assert services.store.get_project(project_id).active_session_id is None
+
+
+@pytest.mark.anyio
+async def test_running_project_rejects_session_delete(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    project = services.store.create_project("session delete project")
+    project_id = project.project_id
+    services.store.append_session_event(
+        project_id,
+        "sess_running",
+        event_type="user_input",
+        scope="main",
+        round_id="round_running",
+        message_id="msg_running",
+        payload={"text": "运行中的会话"},
+    )
+    project.active_session_id = "sess_running"
+    project.running_session_id = "sess_running"
+    project.running_round_id = "round_running"
+    project.is_busy = True
+    services.store.save_project(project)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.delete(f"/api/projects/{project_id}/sessions/sess_running")
+
+    assert response.status_code == 409
+    assert services.store.session_file(project_id, "sess_running").exists() is True

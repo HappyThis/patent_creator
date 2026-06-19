@@ -54,7 +54,15 @@ export function useWorkspaceData(syncActiveSection: (sectionId: string | null | 
   const refreshSessions = useCallback(async (project_id: string, preferred_session_id?: string | null) => {
     const response = await apiClient.listSessions(project_id);
     setSessions(response.sessions);
-    setSelectedSessionId((current) => preferred_session_id ?? current ?? response.sessions[0]?.session_id ?? null);
+    setSelectedSessionId((current) => {
+      if (preferred_session_id && response.sessions.some((session) => session.session_id === preferred_session_id)) {
+        return preferred_session_id;
+      }
+      if (current && response.sessions.some((session) => session.session_id === current)) {
+        return current;
+      }
+      return response.sessions[0]?.session_id ?? null;
+    });
     return response.sessions;
   }, []);
 

@@ -67,7 +67,8 @@ export type SessionEventRecord = {
     | 'tool_call'
     | 'tool_result'
     | 'context_summary'
-    | 'context_pruned';
+    | 'context_pruned'
+    | 'session_title';
   seq: number;
   scope: string;
   round_id: string;

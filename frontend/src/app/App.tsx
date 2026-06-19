@@ -1,8 +1,8 @@
 import { CSSProperties, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatPanel } from '../features/chat/ChatPanel';
-import { HomePage } from '../features/home/HomePage';
 import { buildDocumentStats } from '../features/preview/documentStats';
 import { PreviewPanel } from '../features/preview/PreviewPanel';
+import { WorkspaceSidebar } from '../features/workspace/WorkspaceSidebar';
 import { apiClient } from '../services/api/client';
 import { useWorkspace } from '../hooks/useWorkspace';
 import type { ProjectState } from '../types';
@@ -20,6 +20,10 @@ const RESIZER_WIDTH = 10;
 function readProjectIdFromPath(): string | null {
   const match = window.location.pathname.match(/^\/projects\/([^/]+)\/?$/);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function projectPath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}`;
 }
 
 function clampSideWidth(value: number) {
@@ -59,6 +63,7 @@ function App() {
     exportDocx,
     handleSessionSelect,
     handleNewSession,
+    handleSessionDelete,
   } = useWorkspace(selectedProjectId);
   const documentStats = useMemo(() => buildDocumentStats(renderAst), [renderAst]);
 
@@ -80,15 +85,29 @@ function App() {
   }, [loadProjects]);
 
   useEffect(() => {
-    if (projectsLoading || projectsError || !selectedProjectId) {
+    if (projectsLoading || projectsError) {
       return;
     }
+
+    if (!selectedProjectId && projects.length > 0) {
+      const nextProjectId = projects[0].project_id;
+      window.history.replaceState(null, '', projectPath(nextProjectId));
+      setSelectedProjectId(nextProjectId);
+      return;
+    }
+
+    if (!selectedProjectId) {
+      return;
+    }
+
     const selectedProjectExists = projects.some((project) => project.project_id === selectedProjectId);
     if (selectedProjectExists) {
       return;
     }
-    window.history.replaceState(null, '', '/');
-    setSelectedProjectId(null);
+
+    const nextProjectId = projects[0]?.project_id ?? null;
+    window.history.replaceState(null, '', nextProjectId ? projectPath(nextProjectId) : '/');
+    setSelectedProjectId(nextProjectId);
     setIsDisclosureOpen(false);
     setHasUnseenDisclosureUpdate(false);
   }, [projects, projectsError, projectsLoading, selectedProjectId]);
@@ -140,16 +159,8 @@ function App() {
   }, [isDisclosureOpen]);
 
   const handleProjectSelect = useCallback((projectId: string) => {
-    window.history.pushState(null, '', `/projects/${encodeURIComponent(projectId)}`);
+    window.history.pushState(null, '', projectPath(projectId));
     setSelectedProjectId(projectId);
-    setIsDisclosureOpen(false);
-    setHasUnseenDisclosureUpdate(false);
-  }, []);
-
-  const handleReturnHome = useCallback(() => {
-    window.history.pushState(null, '', '/');
-    previousDisclosureUpdatedAtRef.current = null;
-    setSelectedProjectId(null);
     setIsDisclosureOpen(false);
     setHasUnseenDisclosureUpdate(false);
   }, []);
@@ -167,11 +178,9 @@ function App() {
     async (projectId: string) => {
       const response = await apiClient.deleteProject(projectId);
       if (selectedProjectId === projectId) {
-        const nextPath = response.next_project_id
-          ? `/projects/${encodeURIComponent(response.next_project_id)}`
-          : '/';
-        window.history.pushState(null, '', nextPath);
-        setSelectedProjectId(response.next_project_id);
+        const nextProjectId = response.next_project_id;
+        window.history.pushState(null, '', nextProjectId ? projectPath(nextProjectId) : '/');
+        setSelectedProjectId(nextProjectId);
         setIsDisclosureOpen(false);
         setHasUnseenDisclosureUpdate(false);
       }
@@ -235,22 +244,6 @@ function App() {
     setIsDisclosureOpen(true);
   }, [isDisclosureOpen]);
 
-  if (!selectedProjectId) {
-    return (
-      <div className="app-shell home-shell">
-        <HomePage
-          projects={projects}
-          isLoading={projectsLoading}
-          error={projectsError}
-          onSelectProject={handleProjectSelect}
-          onCreateProject={handleProjectCreate}
-          onDeleteProject={handleProjectDelete}
-          onRenameProject={handleProjectRename}
-        />
-      </div>
-    );
-  }
-
   const workspaceStyle: WorkspaceStyle = {
     '--right-pane-width': isDisclosureOpen ? `${disclosureWidth}px` : '0px',
     '--right-resizer-width': isDisclosureOpen ? '10px' : '0px',
@@ -272,21 +265,23 @@ function App() {
         ].filter(Boolean).join(' ')}
         style={workspaceStyle}
       >
-        <section className="chat-stage">
-          <button
-            className="workspace-home-button"
-            type="button"
-            onClick={handleReturnHome}
-            aria-label="返回首页"
-            title="返回首页"
-          >
-            <svg className="workspace-home-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4.5 11.5 12 5l7.5 6.5" />
-              <path d="M6.8 10.2V19h10.4v-8.8" />
-              <path d="M10 19v-5h4v5" />
-            </svg>
-          </button>
+        <WorkspaceSidebar
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          sessionTabs={sessionTabs}
+          isLoadingProjects={projectsLoading}
+          projectsError={projectsError}
+          isWorkspaceBusy={isBusy || isLoading}
+          onSelectProject={handleProjectSelect}
+          onCreateProject={handleProjectCreate}
+          onDeleteProject={handleProjectDelete}
+          onRenameProject={handleProjectRename}
+          onSessionSelect={handleSessionSelect}
+          onNewSession={handleNewSession}
+          onDeleteSession={handleSessionDelete}
+        />
 
+        <section className="chat-stage">
           <button
             className={[
               'workspace-edge-toggle',
@@ -305,16 +300,13 @@ function App() {
           </button>
 
           <ChatPanel
-            sessionTabs={sessionTabs}
             events={events}
             composer={composer}
-            isBusy={isBusy || isLoading}
+            isBusy={isBusy || isLoading || !selectedProjectId}
             contextUsage={contextUsage}
             onComposerChange={setComposer}
             onSubmit={submitMessage}
             onCancel={cancelCurrentRound}
-            onSessionSelect={handleSessionSelect}
-            onNewSession={handleNewSession}
             canCancel={canCancelRound}
             isCancelling={isCancelling}
           />

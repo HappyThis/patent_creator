@@ -69,29 +69,6 @@
   gap: 10px;
 }
 
-.composer-session-actions {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  position: relative;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.composer-session-actions .session-menu {
-  top: auto;
-  right: 0;
-  bottom: 42px;
-  left: auto;
-  border-top: 1px solid var(--chat-line);
-  border-radius: 10px;
-}
-
 .composer-toolbar-right {
   margin-left: auto;
   display: inline-flex;

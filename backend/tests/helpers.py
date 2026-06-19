@@ -83,6 +83,17 @@ class ScriptedLLMClient:
             return message
         return {"role": "assistant", "content": ""}
 
+    async def generate_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {"title": "低算力实时保护"}
+
     async def generate_text(
         self,
         *,

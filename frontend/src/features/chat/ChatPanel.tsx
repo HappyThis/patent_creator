@@ -1,12 +1,11 @@
 import { UIEvent, useCallback, useLayoutEffect, useRef } from 'react';
-import type { ChatEvent, ContextUsageSummary, SessionTab } from '../../types';
+import type { ChatEvent, ContextUsageSummary } from '../../types';
 import { ChatComposer } from './ChatComposer';
 import { ChatThread } from './ChatThread';
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 96;
 
 type ChatPanelProps = {
-  sessionTabs: SessionTab[];
   events: ChatEvent[];
   composer: string;
   isBusy: boolean;
@@ -14,14 +13,11 @@ type ChatPanelProps = {
   onComposerChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
-  onSessionSelect: (session_id: string) => void;
-  onNewSession: () => void;
   canCancel?: boolean;
   isCancelling?: boolean;
 };
 
 export function ChatPanel({
-  sessionTabs,
   events,
   composer,
   isBusy,
@@ -29,8 +25,6 @@ export function ChatPanel({
   onComposerChange,
   onSubmit,
   onCancel,
-  onSessionSelect,
-  onNewSession,
   canCancel = false,
   isCancelling = false,
 }: ChatPanelProps) {
@@ -69,7 +63,6 @@ export function ChatPanel({
       </div>
 
       <ChatComposer
-        sessionTabs={sessionTabs}
         composer={composer}
         isBusy={isBusy}
         contextUsage={contextUsage}
@@ -78,8 +71,6 @@ export function ChatPanel({
         onComposerChange={onComposerChange}
         onSubmit={onSubmit}
         onCancel={onCancel}
-        onSessionSelect={onSessionSelect}
-        onNewSession={onNewSession}
       />
     </aside>
   );

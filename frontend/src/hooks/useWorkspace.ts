@@ -125,9 +125,64 @@ export function useWorkspace(projectId: string | null) {
             ...current,
             active_session_id: null,
           }
-        : current,
+      : current,
     );
   }, [clearSessionEvents, closeStream, project, resetRecent, trackOptimisticMessage]);
+
+  const handleSessionDelete = useCallback(
+    async (session_id: string) => {
+      if (!project || project.is_busy) {
+        return;
+      }
+      closeStream();
+      try {
+        const response = await apiClient.deleteSession(project.project_id, session_id);
+        const nextProject = await refreshProject(project.project_id);
+        const refreshedSessions = await refreshSessions(
+          project.project_id,
+          response.next_session_id ?? nextProject.active_session_id,
+        );
+        if (selectedSessionId !== session_id) {
+          return;
+        }
+
+        const nextSessionId =
+          response.next_session_id ?? nextProject.active_session_id ?? refreshedSessions[0]?.session_id ?? null;
+        setSelectedSessionId(nextSessionId);
+        resetRecent();
+        if (nextSessionId) {
+          await loadSessionEvents(project.project_id, nextSessionId);
+          return;
+        }
+        clearSessionEvents();
+      } catch (error: unknown) {
+        const messageText = error instanceof Error ? error.message : '删除对话失败。';
+        setEvents((current) => [
+          ...current,
+          {
+            id: `delete_session_error_${Date.now()}`,
+            kind: 'message',
+            role: 'assistant',
+            text: messageText,
+            timestamp: formatTimestamp(),
+          },
+        ]);
+        await refreshProject(project.project_id);
+      }
+    },
+    [
+      clearSessionEvents,
+      closeStream,
+      loadSessionEvents,
+      project,
+      refreshProject,
+      refreshSessions,
+      resetRecent,
+      selectedSessionId,
+      setEvents,
+      setSelectedSessionId,
+    ],
+  );
 
   const submitMessage = useCallback(async () => {
     const message = composer.trim();
@@ -296,6 +351,7 @@ export function useWorkspace(projectId: string | null) {
     exportDocx,
     handleSessionSelect,
     handleNewSession,
+    handleSessionDelete,
   };
 }
 

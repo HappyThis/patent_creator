@@ -165,6 +165,24 @@ export function useWorkspaceStream({
         return;
       }
 
+      if (eventName === 'session_title_updated') {
+        const sessionId = optionalString(payload.session_id);
+        const title = optionalString(payload.title);
+        if (sessionId && title) {
+          setSessions((current) =>
+            current.map((session) =>
+              session.session_id === sessionId
+                ? {
+                    ...session,
+                    title,
+                  }
+                : session,
+            ),
+          );
+        }
+        return;
+      }
+
       if (
         eventName === 'context_compression_started' ||
         eventName === 'context_compression_completed' ||

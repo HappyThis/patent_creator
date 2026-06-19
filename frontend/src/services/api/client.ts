@@ -21,6 +21,12 @@ export type ApiClient = {
     updated_at: string;
   }>;
   listSessions: (project_id: string) => Promise<{ sessions: SessionSummary[] }>;
+  deleteSession: (project_id: string, session_id: string) => Promise<{
+    deleted: boolean;
+    project_id: string;
+    session_id: string;
+    next_session_id: string | null;
+  }>;
   getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: SessionEventRecord[] }>;
   downloadDocx: (project_id: string) => Promise<{ blob: Blob; filename: string | null }>;
   cancelRound: (
@@ -83,6 +89,16 @@ export const apiClient: ApiClient = {
   },
   async listSessions(project_id) {
     return requestJson<{ sessions: SessionSummary[] }>(`/api/projects/${project_id}/sessions`);
+  },
+  async deleteSession(project_id, session_id) {
+    return requestJson<{
+      deleted: boolean;
+      project_id: string;
+      session_id: string;
+      next_session_id: string | null;
+    }>(`/api/projects/${project_id}/sessions/${session_id}`, {
+      method: 'DELETE',
+    });
   },
   async getSessionEvents(project_id, session_id) {
     return requestJson<{ events: SessionEventRecord[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);

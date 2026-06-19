@@ -7,7 +7,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from ...core import ApiError
-from ...schemas import ChatMessageRequest, ContextUsageSummary, SessionEventsResponse, SessionListResponse
+from ...schemas import (
+    ChatMessageRequest,
+    ContextUsageSummary,
+    SessionDeleteResponse,
+    SessionEventsResponse,
+    SessionListResponse,
+)
 from ...services.app_services import AppServices
 from ...services.chat_protocol import format_sse_event
 
@@ -101,6 +107,16 @@ def create_chat_router(services: AppServices) -> APIRouter:
     async def get_session_events(project_id: str, session_id: str) -> SessionEventsResponse:
         services.store.get_project(project_id)
         return SessionEventsResponse(events=services.store.read_session_events(project_id, session_id))
+
+    @router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
+    async def delete_session(project_id: str, session_id: str) -> SessionDeleteResponse:
+        next_session_id = await services.chat.delete_session(project_id, session_id)
+        return SessionDeleteResponse(
+            deleted=True,
+            project_id=project_id,
+            session_id=session_id,
+            next_session_id=next_session_id,
+        )
 
     @router.get("/sessions", response_model=SessionListResponse)
     async def list_sessions(project_id: str) -> SessionListResponse:

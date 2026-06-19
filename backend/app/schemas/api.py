@@ -102,6 +102,7 @@ class SessionEvent(BaseModel):
         "tool_result",
         "context_summary",
         "context_pruned",
+        "session_title",
     ]
     seq: int
     scope: str
@@ -121,12 +122,20 @@ class SessionSummary(BaseModel):
     event_count: int
     last_round_id: str | None = None
     first_user_text: str | None = None
+    title: str | None = None
     is_active: bool = False
     context_usage: ContextUsageSummary | None = None
 
 
 class SessionListResponse(BaseModel):
     sessions: list[SessionSummary]
+
+
+class SessionDeleteResponse(BaseModel):
+    deleted: bool
+    project_id: str
+    session_id: str
+    next_session_id: str | None = None
 
 
 class ExportResponse(BaseModel):
