@@ -30,3 +30,11 @@ backend/.venv/bin/python benchmarks/patent_technical_solution/evaluator/publish_
 - `run_case_stderr.txt`
 - `subject/disclosure.json`
 - 本机绝对路径
+
+## Latest Published Result
+
+| Result ID | Subject model | Judge | Scale | Average score | Completion | Notes |
+| --- | --- | --- | --- | ---: | --- | --- |
+| `20260619-gpt55-baseline-10cases-5x-w10` | `gpt-5.5` | `codex` | 10 cases x 5 repeats, workers=10 | 93.14 | 50/50 scored, artifact_success=50/50 | min=82, max=98, stdev=3.43; published from run `20260619-gpt55-baseline-10cases-5x-w10` |
+
+Previous published baseline: `20260605-patent-tech-solution-10cases-5x-w10`, `deepseek-v4-pro`, average 87.06, min 70, max 96. The current result is +6.08 points higher on the same 10 cases x 5 repeats x 10 workers shape.
