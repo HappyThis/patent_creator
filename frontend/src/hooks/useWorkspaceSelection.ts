@@ -14,8 +14,9 @@ export function useWorkspaceSelection() {
   const [previewFocusTarget, setPreviewFocusTarget] = useState<PreviewFocusTarget | null>(null);
 
   const syncActiveSection = useCallback((sectionId: string | null | undefined) => {
-    if (sectionId) {
-      setActiveSectionId(sectionId);
+    setActiveSectionId(sectionId || '');
+    if (!sectionId) {
+      setActiveBlockId(null);
     }
   }, []);
 

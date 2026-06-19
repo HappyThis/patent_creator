@@ -1,19 +1,24 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:5172';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
-type ApiErrorResponse = {
-  error?: {
-    code?: string;
-    message?: string;
-  };
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function apiErrorMessage(payload: unknown): string | null {
+  if (!isRecord(payload) || !isRecord(payload.error)) {
+    return null;
+  }
+  return typeof payload.error.message === 'string' ? payload.error.message : null;
+}
 
 export async function readApiErrorMessage(response: Response): Promise<string> {
   let message = `Request failed with status ${response.status}`;
 
   try {
-    const payload = (await response.json()) as ApiErrorResponse;
-    if (payload.error?.message) {
-      message = payload.error.message;
+    const payload: unknown = await response.json();
+    const parsedMessage = apiErrorMessage(payload);
+    if (parsedMessage) {
+      message = parsedMessage;
     }
   } catch {
     // Keep the status-based fallback when the backend does not return JSON.
@@ -23,12 +28,14 @@ export async function readApiErrorMessage(response: Response): Promise<string> {
 }
 
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -39,11 +46,10 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
 }
 
 export async function requestFile(path: string, init?: RequestInit): Promise<{ blob: Blob; filename: string | null }> {
+  const headers = new Headers(init?.headers);
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   if (!response.ok) {

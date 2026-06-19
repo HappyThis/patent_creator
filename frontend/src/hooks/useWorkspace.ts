@@ -25,8 +25,11 @@ export function useWorkspace(projectId: string | null) {
     project,
     setProject,
     renderAst,
+    renderUpdatedAt,
     events,
     setEvents,
+    clearSessionEvents,
+    invalidateSessionEventLoads,
     sessions,
     setSessions,
     selectedSessionId,
@@ -88,10 +91,10 @@ export function useWorkspace(projectId: string | null) {
         }
       });
 
-      return () => {
-        cancelled = true;
-        closeStream();
-      };
+    return () => {
+      cancelled = true;
+      closeStream();
+    };
   }, [clearWorkspace, closeStream, loadProject, projectId, setEvents, setIsLoading]);
 
   const handleSessionSelect = useCallback(
@@ -114,7 +117,7 @@ export function useWorkspace(projectId: string | null) {
     closeStream();
     setSelectedSessionId(null);
     resetRecent();
-    setEvents([]);
+    clearSessionEvents();
     trackOptimisticMessage(null);
     setProject((current) =>
       current
@@ -124,7 +127,7 @@ export function useWorkspace(projectId: string | null) {
           }
         : current,
     );
-  }, [closeStream, project, resetRecent, trackOptimisticMessage]);
+  }, [clearSessionEvents, closeStream, project, resetRecent, trackOptimisticMessage]);
 
   const submitMessage = useCallback(async () => {
     const message = composer.trim();
@@ -141,6 +144,7 @@ export function useWorkspace(projectId: string | null) {
       timestamp: formatTimestamp(),
     };
 
+    invalidateSessionEventLoads();
     trackOptimisticMessage(optimisticId);
     setEvents((current) => [...current, optimisticMessage]);
     setComposer('');
@@ -183,6 +187,7 @@ export function useWorkspace(projectId: string | null) {
     activeBlockId,
     activeSectionId,
     composer,
+    invalidateSessionEventLoads,
     project,
     refreshProject,
     selectedSessionId,
@@ -219,37 +224,6 @@ export function useWorkspace(projectId: string | null) {
       await refreshProject(project.project_id);
     }
   }, [isCancelling, project, refreshProject, refreshSessions]);
-
-  const exportMarkdown = useCallback(async () => {
-    if (!project) {
-      return;
-    }
-    try {
-      const result = await apiClient.exportMarkdown(project.project_id);
-      setEvents((current) => [
-        ...current,
-        {
-          id: `export_markdown_${Date.now()}`,
-          kind: 'message',
-          role: 'assistant',
-          text: `Markdown 已导出：\`${result.path}\``,
-          timestamp: formatTimestamp(),
-        },
-      ]);
-    } catch (error: unknown) {
-      const messageText = error instanceof Error ? error.message : '导出 Markdown 失败。';
-      setEvents((current) => [
-        ...current,
-        {
-          id: `export_error_${Date.now()}`,
-          kind: 'message',
-          role: 'assistant',
-          text: messageText,
-          timestamp: formatTimestamp(),
-        },
-      ]);
-    }
-  }, [project]);
 
   const exportDocx = useCallback(async () => {
     if (!project) {
@@ -301,6 +275,7 @@ export function useWorkspace(projectId: string | null) {
 
   return {
     renderAst,
+    renderUpdatedAt,
     events,
     composer,
     isLoading,
@@ -318,7 +293,6 @@ export function useWorkspace(projectId: string | null) {
     setActiveSectionId,
     submitMessage,
     cancelCurrentRound,
-    exportMarkdown,
     exportDocx,
     handleSessionSelect,
     handleNewSession,
@@ -333,5 +307,5 @@ function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

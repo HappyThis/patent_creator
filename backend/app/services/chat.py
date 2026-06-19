@@ -3,25 +3,32 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import defaultdict
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable, TypeVar
 
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.model_profiles import resolve_model_profile
 from ..agents.runtime.openai_compat import OpenAICompatibleClient
-from ..agents.workers import MAIN_AGENT_TOOLS, MainAgentAction, MainAgentToolCall, decide_main_agent_step
+from ..agents.workers import MAIN_AGENT_TOOLS, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
 from ..domain.document_tool_results import tool_failed
 from ..runtime.context import ContextManager
 from ..runtime.executor import ExecutorEngine, ToolRuntimeContext
 from ..tools import DOCUMENT_WRITE_TOOL_NAMES, get_tool_declaration
-from ..schemas import ChatMessageRequest, ChatMessageResponse
+from ..schemas import ChatMessageRequest, ChatMessageResponse, ProjectRecord
 from ..storage.workspace_store import WorkspaceStore
 from .chat_events import ChatEventEmitter
 from .chat_protocol import DEFAULT_CHANGED_PAYLOAD, RoundState, assistant_message_text, build_commit_message
 from .event_bus import SessionEventBus
 
 logger = logging.getLogger("patent_creator.chat")
+LockedResult = TypeVar("LockedResult")
+
+
+@dataclass
+class _ProjectLockState:
+    lock: asyncio.Lock
+    leases: int = 0
 
 
 class ChatService:
@@ -41,7 +48,8 @@ class ChatService:
         self.settings = settings
         self.llm_client = llm_client
         self.events = ChatEventEmitter(store, bus, executor)
-        self._project_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._project_locks: dict[str, _ProjectLockState] = {}
+        self._project_locks_guard = asyncio.Lock()
         self._running_tasks: dict[tuple[str, str, str], asyncio.Task[None]] = {}
 
     async def prepare_round(
@@ -49,7 +57,7 @@ class ChatService:
         project_id: str,
         payload: ChatMessageRequest,
     ) -> tuple[ChatMessageResponse, RoundState]:
-        async with self._project_locks[project_id]:
+        def prepare() -> tuple[ChatMessageResponse, RoundState]:
             project = self.store.get_project(project_id)
             if project.is_busy:
                 raise ApiError(409, "project_busy", "当前已有 session 正在执行，请等待本轮完成后再发送消息。")
@@ -60,10 +68,7 @@ class ChatService:
             session_id = payload.session_id or generate_id("sess")
             first_user_text = payload.message
             if payload.session_id:
-                existing_events = self.store.read_session_events(project_id, payload.session_id)
-                first_user_event = next((event for event in existing_events if event.type == "user_input"), None)
-                if first_user_event:
-                    first_user_text = str(first_user_event.payload.get("text") or payload.message)
+                first_user_text = self.store.first_user_text(project_id, payload.session_id) or payload.message
             message_id = generate_id("msg")
             round_id = generate_id("round")
 
@@ -87,19 +92,27 @@ class ChatService:
                 },
             )
 
-        response = ChatMessageResponse(
-            accepted=True,
-            session_id=session_id,
-            message_id=message_id,
-            round_id=round_id,
-            first_user_text=first_user_text,
-        )
-        return response, RoundState(session_id, message_id, round_id)
+            response = ChatMessageResponse(
+                accepted=True,
+                session_id=session_id,
+                message_id=message_id,
+                round_id=round_id,
+                first_user_text=first_user_text,
+            )
+            return response, RoundState(session_id, message_id, round_id)
+
+        return await self._run_with_project_lock(project_id, prepare)
 
     async def start_round(self, project_id: str, payload: ChatMessageRequest) -> ChatMessageResponse:
         response, state = await self.prepare_round(project_id, payload)
         self.launch_round(project_id, payload, state)
         return response
+
+    async def rename_project(self, project_id: str, project_name: str) -> ProjectRecord:
+        return await self._run_with_project_lock(project_id, lambda: self.store.rename_project(project_id, project_name))
+
+    async def delete_project(self, project_id: str) -> str | None:
+        return await self._run_with_project_lock(project_id, lambda: self.store.delete_project(project_id))
 
     def launch_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id, state.round_id)
@@ -113,8 +126,7 @@ class ChatService:
         task.add_done_callback(discard_finished_task)
 
     async def cancel_round(self, project_id: str, session_id: str, round_id: str) -> dict[str, Any]:
-        task: asyncio.Task[None] | None
-        async with self._project_locks[project_id]:
+        def find_running_task() -> asyncio.Task[None] | None:
             project = self.store.get_project(project_id)
             if (
                 not project.is_busy
@@ -126,7 +138,9 @@ class ChatService:
             task = self._running_tasks.get((project_id, session_id, round_id))
             if task is not None:
                 task.cancel()
+            return task
 
+        task = await self._run_with_project_lock(project_id, find_running_task)
         if task is not None:
             await task
 
@@ -177,8 +191,6 @@ class ChatService:
                     project_id,
                     state.session_id,
                     user_message=payload.message,
-                    active_section_id=payload.active_section_id,
-                    active_block_id=payload.active_block_id,
                     current_message_id=state.message_id,
                     round_id=state.round_id,
                     system_prompt=system_prompt,
@@ -440,7 +452,6 @@ class ChatService:
                 session_id=state.session_id,
                 round_id=state.round_id,
                 message_id=state.message_id,
-                parent_call_id=tool_call.tool_call_id,
                 caller_messages=caller_messages,
                 system_prompt=system_prompt,
                 tools=MAIN_AGENT_TOOLS,
@@ -476,7 +487,7 @@ class ChatService:
         )
 
     async def _set_project_idle(self, project_id: str) -> None:
-        async with self._project_locks[project_id]:
+        def mark_idle() -> None:
             project = self.store.get_project(project_id)
             project.running_session_id = None
             project.running_round_id = None
@@ -484,8 +495,10 @@ class ChatService:
             project.updated_at = now_iso()
             self.store.save_project(project)
 
+        await self._run_with_project_lock(project_id, mark_idle)
+
     async def _mark_round_cancelled(self, project_id: str, session_id: str, round_id: str) -> dict[str, Any]:
-        async with self._project_locks[project_id]:
+        def mark_cancelled() -> tuple[str, bool]:
             project = self.store.get_project(project_id)
             if project.running_session_id == session_id and project.running_round_id == round_id:
                 project.running_session_id = None
@@ -497,17 +510,13 @@ class ChatService:
             message_id = generate_id("msg")
             already_marked = False
             if self.store.session_exists(project_id, session_id):
-                events = self.store.read_session_events(project_id, session_id)
-                round_events = [event for event in events if event.round_id == round_id]
-                user_event = next((event for event in round_events if event.type == "user_input"), None)
-                if user_event:
-                    message_id = user_event.message_id
-                already_marked = any(
-                    event.type == "agent_output"
-                    and event.round_id == round_id
-                    and event.payload.get("code") == "round_cancelled"
-                    for event in round_events
+                round_message_id, already_marked = self.store.round_message_status(
+                    project_id,
+                    session_id,
+                    round_id,
+                    "round_cancelled",
                 )
+                message_id = round_message_id or message_id
                 if not already_marked:
                     self.store.append_session_event(
                         project_id,
@@ -523,6 +532,9 @@ class ChatService:
                         },
                     )
 
+            return message_id, already_marked
+
+        message_id, already_marked = await self._run_with_project_lock(project_id, mark_cancelled)
         payload = {
             "cancelled": True,
             "project_id": project_id,
@@ -537,3 +549,33 @@ class ChatService:
 
     async def _sleep(self, duration: float | None = None) -> None:
         await asyncio.sleep(self.settings.round_step_delay if duration is None else duration)
+
+    async def _run_with_project_lock(
+        self,
+        project_id: str,
+        operation: Callable[[], LockedResult],
+    ) -> LockedResult:
+        lock_state = await self._get_project_lock(project_id)
+        try:
+            async with lock_state.lock:
+                return operation()
+        finally:
+            await self._release_project_lock(project_id, lock_state)
+
+    async def _get_project_lock(self, project_id: str) -> _ProjectLockState:
+        async with self._project_locks_guard:
+            lock_state = self._project_locks.get(project_id)
+            if lock_state is None:
+                lock_state = _ProjectLockState(lock=asyncio.Lock())
+                self._project_locks[project_id] = lock_state
+            lock_state.leases += 1
+            return lock_state
+
+    async def _release_project_lock(self, project_id: str, lock_state: _ProjectLockState) -> None:
+        async with self._project_locks_guard:
+            if self._project_locks.get(project_id) is not lock_state:
+                return
+            lock_state.leases = max(0, lock_state.leases - 1)
+            if lock_state.leases > 0:
+                return
+            self._project_locks.pop(project_id, None)

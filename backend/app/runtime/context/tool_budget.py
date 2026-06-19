@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 from typing import Any
 
@@ -18,20 +17,33 @@ def apply_tool_result_turn_budget(
     project_id: str,
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    budgeted = copy.deepcopy(messages)
+    budgeted: list[dict[str, Any]] | None = None
     index = 0
-    while index < len(budgeted):
-        message = budgeted[index]
+    while index < len(messages):
+        message = messages[index]
         if message.get("role") != "assistant" or not isinstance(message.get("tool_calls"), list):
             index += 1
             continue
         block_indexes: list[int] = []
         index += 1
-        while index < len(budgeted) and budgeted[index].get("role") == "tool":
+        while index < len(messages) and messages[index].get("role") == "tool":
             block_indexes.append(index)
             index += 1
+        if not _tool_block_needs_budget(messages, block_indexes):
+            continue
+        if budgeted is None:
+            budgeted = [dict(item) for item in messages]
         _budget_tool_block(store, project_id, budgeted, block_indexes)
-    return budgeted
+    return budgeted if budgeted is not None else messages
+
+
+def _tool_block_needs_budget(messages: list[dict[str, Any]], block_indexes: list[int]) -> bool:
+    if _tool_block_chars(messages, block_indexes) <= TOOL_RESULT_TURN_BUDGET_CHARS:
+        return False
+    largest_index = max(block_indexes, key=lambda item: _content_len(messages[item]), default=None)
+    if largest_index is None:
+        return False
+    return not _is_processed_tool_result(str(messages[largest_index].get("content") or ""))
 
 
 def _budget_tool_block(

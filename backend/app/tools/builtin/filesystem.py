@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+from collections import deque
 from pathlib import Path
 import time
 from typing import Any, Literal
@@ -59,6 +60,8 @@ class FileSearchArguments(BaseModel):
     context_lines: int = Field(default=0, ge=0, le=5, description="lines 模式下每条命中附带的上下文行数，最大 5。")
     limit: int = Field(default=100, ge=1, le=500, description="最多返回多少条结果，默认 100，最大 500。")
     offset: int = Field(default=0, ge=0, description="分页偏移，从 0 开始。")
+    max_scanned_paths: int = Field(default=_DEFAULT_GLOB_SCANNED_PATHS, ge=1, le=_MAX_GLOB_SCANNED_PATHS)
+    max_elapsed_ms: int = Field(default=int(_DEFAULT_GLOB_SCAN_SECONDS * 1000), ge=100, le=int(_MAX_GLOB_SCAN_SECONDS * 1000))
 
 
 class FileReadArguments(BaseModel):
@@ -193,6 +196,14 @@ def file_search(
     context_lines = int(arguments.get("context_lines") or 0)
     limit = int(arguments.get("limit") or 100)
     offset = int(arguments.get("offset") or 0)
+    scan_budget = min(
+        int(arguments.get("max_scanned_paths") or _DEFAULT_GLOB_SCANNED_PATHS),
+        _MAX_GLOB_SCANNED_PATHS,
+    )
+    time_budget_seconds = min(
+        int(arguments.get("max_elapsed_ms") or int(_DEFAULT_GLOB_SCAN_SECONDS * 1000)) / 1000,
+        _MAX_GLOB_SCAN_SECONDS,
+    )
 
     try:
         matcher = _build_matcher(pattern, regex=regex, case_sensitive=case_sensitive)
@@ -201,7 +212,19 @@ def file_search(
 
     results: list[dict[str, Any]] = []
     total_matches = 0
-    for file_path in _iter_search_files(target, include_glob):
+    scanned = 0
+    skipped_dirs: set[str] = set()
+    stop_reason = "completed"
+    started_at = time.monotonic()
+    for file_path in _iter_search_files(target, include_glob, skipped_dirs):
+        elapsed = time.monotonic() - started_at
+        if elapsed >= time_budget_seconds:
+            stop_reason = "time_budget_exceeded"
+            break
+        if scanned >= scan_budget:
+            stop_reason = "scan_budget_exceeded"
+            break
+        scanned += 1
         file_result = _search_file(
             store,
             project_id,
@@ -209,34 +232,45 @@ def file_search(
             matcher,
             mode=mode,
             context_lines=context_lines,
+            max_line_matches=max(1, offset + limit - len(results)),
         )
         if file_result is None:
             continue
         if mode == "count":
             total_matches += int(file_result.get("count") or 0)
             results.append(file_result)
-            continue
-        if mode == "files":
+        elif mode == "files":
             total_matches += 1
             results.append(file_result)
-            continue
-        line_matches = file_result.get("matches")
-        if isinstance(line_matches, list):
-            total_matches += len(line_matches)
-            results.extend(line_matches)
+        else:
+            line_matches = file_result.get("matches")
+            if isinstance(line_matches, list):
+                total_matches += len(line_matches)
+                results.extend(line_matches)
+        if len(results) >= offset + limit:
+            stop_reason = "limit_reached"
+            break
 
     page = results[offset : offset + limit]
-    next_offset = offset + len(page) if offset + len(page) < len(results) else None
+    truncated = stop_reason != "completed" or offset + len(page) < len(results)
+    next_offset = offset + len(page) if truncated and page else None
     return tool_success(
         {
             "mode": mode,
             "matches": page,
             "returned": len(page),
             "total": len(results),
+            "total_is_lower_bound": truncated,
             "total_line_matches": total_matches,
             "offset": offset,
             "next_offset": next_offset,
-            "truncated": next_offset is not None,
+            "truncated": truncated,
+            "stop_reason": stop_reason,
+            "scanned": scanned,
+            "scan_budget": scan_budget,
+            "elapsed_ms": round((time.monotonic() - started_at) * 1000),
+            "time_budget_ms": int(time_budget_seconds * 1000),
+            "skipped_dirs": sorted(skipped_dirs),
         }
     )
 
@@ -250,7 +284,7 @@ def file_read(
     """按行读取文件片段，可读取项目工作区文件或用户提供的绝对源码路径。
 
     Returns:
-        返回带行号的 content、start_line、end_line、next_start_line 和 truncated。
+        返回带行号的 content、start_line、end_line、next_start_line、truncated 和 total_lines_is_lower_bound。
 
     Rules:
         - 读取源码、文档或工具落盘输出时优先使用本工具，不要用 exec_command 执行 cat、head 或 tail。
@@ -268,25 +302,36 @@ def file_read(
 
     start_line = int(arguments.get("start_line") or 1)
     limit = int(arguments.get("limit") or 120)
+    start_index = max(0, start_line - 1)
+    selected: list[str] = []
+    observed_lines = 0
+    has_more = False
     try:
-        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        with target.open("r", encoding="utf-8", errors="replace") as handle:
+            for observed_lines, line in enumerate(handle, start=1):
+                if observed_lines <= start_index:
+                    continue
+                if len(selected) < limit:
+                    selected.append(line.rstrip("\n\r"))
+                    continue
+                has_more = True
+                break
     except OSError as exc:
         return tool_failed("file_read_failed", f"读取文件失败：{exc}")
 
-    start_index = max(0, start_line - 1)
-    selected = lines[start_index : start_index + limit]
-    end_line = start_index + len(selected)
+    end_line = start_line + len(selected) - 1 if selected else observed_lines
     numbered = "\n".join(f"{index} | {line}" for index, line in enumerate(selected, start=start_line))
-    next_start_line = end_line + 1 if end_line < len(lines) else None
+    next_start_line = end_line + 1 if has_more else None
     return tool_success(
         {
             "path": _relative_path(store, project_id, target),
             "start_line": start_line,
             "end_line": end_line,
-            "total_lines": len(lines),
+            "total_lines": observed_lines,
+            "total_lines_is_lower_bound": has_more,
             "content": numbered,
             "next_start_line": next_start_line,
-            "truncated": next_start_line is not None,
+            "truncated": has_more,
         }
     )
 
@@ -296,12 +341,15 @@ def _resolve_project_path(store: WorkspaceStore, project_id: str, raw_path: str)
         return tool_failed("invalid_operation", "path 字段缺失。")
     root = store.project_dir(project_id).resolve()
     candidate = Path(raw_path)
-    if not candidate.is_absolute():
+    is_external_absolute = candidate.is_absolute()
+    if not is_external_absolute:
         candidate = root / candidate
     try:
         resolved = candidate.resolve()
     except OSError:
         return tool_failed("invalid_operation", f"path 无法解析：{raw_path}")
+    if not is_external_absolute and not resolved.is_relative_to(root):
+        return tool_failed("invalid_operation", f"path must stay within the project workspace: {raw_path}")
     if not resolved.exists():
         return tool_failed("invalid_operation", f"path 不存在：{raw_path}")
     return resolved
@@ -325,7 +373,8 @@ def _resolve_glob_base_and_pattern(
 
     root = store.project_dir(project_id).resolve()
     candidate = Path(raw_path)
-    if not candidate.is_absolute():
+    is_external_absolute = candidate.is_absolute()
+    if not is_external_absolute:
         candidate = root / candidate
 
     parts = candidate.parts
@@ -338,6 +387,8 @@ def _resolve_glob_base_and_pattern(
         resolved_base = base.resolve()
     except OSError:
         return tool_failed("invalid_operation", f"path 无法解析：{raw_path}")
+    if not is_external_absolute and not resolved_base.is_relative_to(root):
+        return tool_failed("invalid_operation", f"path must stay within the project workspace: {raw_path}")
     if not resolved_base.exists():
         return tool_failed("invalid_operation", f"path 不存在：{base}")
     return resolved_base, glob_pattern
@@ -417,22 +468,30 @@ def _display_skipped_dir(base: Path, path: Path) -> str:
         return str(path)
 
 
-def _iter_search_files(target: Path, include_glob: str) -> list[Path]:
+def _iter_search_files(target: Path, include_glob: str, skipped_dirs: set[str]):
     if target.is_file():
-        return [target] if _is_text_candidate(target) else []
-    files: list[Path] = []
-    for path in sorted(target.rglob("*")):
-        if not path.is_file():
-            continue
-        if not _is_text_candidate(path):
-            continue
-        if any(part in _SKIPPED_DIRS for part in path.relative_to(target).parts):
-            continue
-        relative = path.relative_to(target).as_posix()
-        if include_glob not in {"*", "**/*"} and not fnmatch.fnmatch(relative, include_glob):
-            continue
-        files.append(path)
-    return files
+        if _is_text_candidate(target):
+            yield target
+        return
+
+    for current_root, dirnames, filenames in os.walk(target, topdown=True):
+        current = Path(current_root)
+        descend_dirnames = []
+        for dirname in sorted(dirnames):
+            if dirname in _SKIPPED_DIRS:
+                skipped_dirs.add(_display_skipped_dir(target, current / dirname))
+                continue
+            descend_dirnames.append(dirname)
+        dirnames[:] = descend_dirnames
+
+        for filename in sorted(filenames):
+            path = current / filename
+            if not _is_text_candidate(path):
+                continue
+            relative = path.relative_to(target).as_posix()
+            if include_glob not in {"*", "**/*"} and not _matches_relative_glob(relative, include_glob):
+                continue
+            yield path
 
 
 def _is_text_candidate(path: Path) -> bool:
@@ -459,34 +518,93 @@ def _search_file(
     *,
     mode: str,
     context_lines: int,
+    max_line_matches: int,
 ) -> dict[str, Any] | None:
+    rel_path = _relative_path(store, project_id, path)
+    if mode == "files":
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if matcher(line.rstrip("\n\r")):
+                        return {"path": rel_path}
+        except OSError:
+            return None
+        return None
+
+    if mode == "count":
+        count = 0
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if matcher(line.rstrip("\n\r")):
+                        count += 1
+        except OSError:
+            return None
+        return {"path": rel_path, "count": count} if count else None
+
+    if context_lines == 0:
+        matches = []
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for index, line in enumerate(handle, start=1):
+                    text = line.rstrip("\n\r")
+                    if not matcher(text):
+                        continue
+                    matches.append({"path": rel_path, "line": index, "text": text, "context": []})
+                    if len(matches) >= max_line_matches:
+                        break
+        except OSError:
+            return None
+        return {"matches": matches} if matches else None
+
+    matches = []
+    previous_lines: deque[tuple[int, str]] = deque(maxlen=context_lines)
+    pending_matches: list[dict[str, Any]] = []
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle, start=1):
+                text = line.rstrip("\n\r")
+                if pending_matches:
+                    remaining_pending: list[dict[str, Any]] = []
+                    for pending in pending_matches:
+                        pending["context"].append({"line": index, "text": text})
+                        pending["remaining"] -= 1
+                        if pending["remaining"] <= 0:
+                            matches.append(_pending_context_match(rel_path, pending))
+                        else:
+                            remaining_pending.append(pending)
+                    pending_matches = remaining_pending
+                    if len(matches) >= max_line_matches and not pending_matches:
+                        break
+
+                if len(matches) + len(pending_matches) < max_line_matches and matcher(text):
+                    pending_matches.append(
+                        {
+                            "line": index,
+                            "text": text,
+                            "context": [
+                                {"line": line_number, "text": previous_text}
+                                for line_number, previous_text in previous_lines
+                            ]
+                            + [{"line": index, "text": text}],
+                            "remaining": context_lines,
+                        }
+                    )
+                previous_lines.append((index, text))
     except OSError:
         return None
 
-    matching_indexes = [index for index, line in enumerate(lines) if matcher(line)]
-    if not matching_indexes:
-        return None
-    rel_path = _relative_path(store, project_id, path)
-    if mode == "files":
-        return {"path": rel_path}
-    if mode == "count":
-        return {"path": rel_path, "count": len(matching_indexes)}
-    matches = []
-    for index in matching_indexes:
-        start = max(0, index - context_lines)
-        end = min(len(lines), index + context_lines + 1)
-        context = [
-            {"line": line_number, "text": lines[line_number - 1]}
-            for line_number in range(start + 1, end + 1)
-        ]
-        matches.append(
-            {
-                "path": rel_path,
-                "line": index + 1,
-                "text": lines[index],
-                "context": context if context_lines else [],
-            }
-        )
-    return {"matches": matches}
+    for pending in pending_matches:
+        if len(matches) >= max_line_matches:
+            break
+        matches.append(_pending_context_match(rel_path, pending))
+    return {"matches": matches} if matches else None
+
+
+def _pending_context_match(rel_path: str, pending: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": rel_path,
+        "line": pending["line"],
+        "text": pending["text"],
+        "context": pending["context"],
+    }

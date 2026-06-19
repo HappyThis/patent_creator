@@ -74,7 +74,6 @@ class ChatEventEmitter:
             "tool_call_started",
             {
                 "call_id": call_id,
-                "parent_call_id": None,
                 "scope": "main",
                 "tool": tool,
                 "summary": f"开始执行 {tool}",
@@ -97,7 +96,6 @@ class ChatEventEmitter:
             "tool_call_finished",
             {
                 "call_id": call_id,
-                "parent_call_id": None,
                 "scope": "main",
                 "tool": tool,
                 "summary": "执行失败",
@@ -132,7 +130,6 @@ class ChatEventEmitter:
             "tool_call_started",
             {
                 "call_id": call_id,
-                "parent_call_id": None,
                 "scope": "main",
                 "tool": tool,
                 "summary": summary,
@@ -166,7 +163,6 @@ class ChatEventEmitter:
             "tool_call_finished",
             {
                 "call_id": call_id,
-                "parent_call_id": None,
                 "scope": "main",
                 "tool": tool,
                 "summary": summary,

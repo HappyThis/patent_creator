@@ -2,18 +2,18 @@
 
 ```bash
 uv sync
-uv run uvicorn app.api.app:app --reload --host 127.0.0.1 --port 5172
+uv run uvicorn app.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 如果要启用真实 agent 写作能力，需要配置 OpenAI 兼容接口：
 
 ```bash
-export OPENAI_COMPAT_PROVIDER=mimo
-export OPENAI_COMPAT_BASE_URL=https://api.xiaomimimo.com/v1
+export OPENAI_COMPAT_PROVIDER=openai
+export OPENAI_COMPAT_BASE_URL=https://api.yairouter.com
 export OPENAI_COMPAT_API_KEY=your_provider_api_key
-export OPENAI_COMPAT_THINKING=enabled
+export OPENAI_COMPAT_THINKING=disabled
 export OPENAI_COMPAT_MAX_COMPLETION_TOKENS=8192
-export OPENAI_MODEL=mimo-v2.5-pro
+export OPENAI_MODEL=gpt-5.5
 ```
 
 接入 GPT 系列模型时使用 `openai` profile：

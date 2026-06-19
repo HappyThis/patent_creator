@@ -11,7 +11,7 @@ export type ChatMessageEvent = {
 };
 
 type EventStatus = 'running' | 'done' | 'failed';
-type EventScope = 'main' | `subagent:${string}`;
+type EventScope = 'main';
 
 export type ToolCallEvent = {
   id: string;
@@ -21,7 +21,6 @@ export type ToolCallEvent = {
   round_id?: string;
   message_id?: string;
   seq?: number;
-  parent_call_id?: string | null;
   status?: EventStatus;
   scope?: EventScope;
   tool?: string;
@@ -56,8 +55,7 @@ export type ContextStatusEvent = {
   detail?: string;
 };
 
-export type ProcessEvent = ToolCallEvent;
-export type ChatEvent = ChatMessageEvent | ProcessEvent | RoundStatusEvent | ContextStatusEvent;
+export type ChatEvent = ChatMessageEvent | ToolCallEvent | RoundStatusEvent | ContextStatusEvent;
 
 export type SessionEventRecord = {
   id: string;
@@ -75,6 +73,5 @@ export type SessionEventRecord = {
   round_id: string;
   message_id: string;
   call_id?: string | null;
-  parent_call_id?: string | null;
   payload: Record<string, unknown>;
 };

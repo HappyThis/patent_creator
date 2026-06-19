@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import copy
 from typing import Any
 
 from ...core import ApiError, Settings
@@ -32,15 +31,21 @@ class ModelProfile:
         return {"thinking": {"type": self.thinking}}
 
     def prepare_messages_for_request(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        prepared = copy.deepcopy(messages)
-        for message in prepared:
-            message.pop("usage", None)
-        if self.replay_reasoning_content:
-            return prepared
-        for message in prepared:
-            if message.get("role") == "assistant":
-                message.pop("reasoning_content", None)
-        return prepared
+        prepared: list[dict[str, Any]] | None = None
+        for index, message in enumerate(messages):
+            strip_reasoning = (
+                not self.replay_reasoning_content
+                and message.get("role") == "assistant"
+                and "reasoning_content" in message
+            )
+            if "usage" not in message and not strip_reasoning:
+                continue
+            if prepared is None:
+                prepared = [dict(item) for item in messages]
+            prepared[index].pop("usage", None)
+            if strip_reasoning:
+                prepared[index].pop("reasoning_content", None)
+        return prepared if prepared is not None else messages
 
 
 def resolve_model_profile(settings: Settings) -> ModelProfile:

@@ -268,7 +268,7 @@ function Sync-Frontend {
 Import-DotEnv -Path (Join-Path $RepoRoot ".env")
 
 $BackendHost = Get-EnvOrDefault -Name "BACKEND_HOST" -Default "127.0.0.1"
-$BackendPort = Get-EnvOrDefault -Name "BACKEND_PORT" -Default "5172"
+$BackendPort = Get-EnvOrDefault -Name "BACKEND_PORT" -Default "8000"
 $FrontendHost = Get-EnvOrDefault -Name "FRONTEND_HOST" -Default "127.0.0.1"
 $FrontendPort = Get-EnvOrDefault -Name "FRONTEND_PORT" -Default "5173"
 $ViteApiBaseUrl = Get-EnvOrDefault -Name "VITE_API_BASE_URL" -Default "http://${BackendHost}:${BackendPort}"

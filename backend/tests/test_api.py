@@ -9,7 +9,9 @@ import httpx
 import pytest
 
 from app.api.app import create_app
+from app.core import ApiError
 from app.core.config import Settings
+from app.schemas import ChatMessageRequest
 from app.services import AppServices
 
 
@@ -332,6 +334,7 @@ async def test_delete_project_removes_project_from_workspace(tmp_path: Path) -> 
         assert delete_response.json()["deleted"] is True
         assert delete_response.json()["project_id"] == project_id
         assert not services.store.project_dir(project_id).exists()
+        assert project_id not in services.chat._project_locks
 
         missing_response = await client.get(f"/api/projects/{project_id}")
         assert missing_response.status_code == 404
@@ -340,6 +343,65 @@ async def test_delete_project_removes_project_from_workspace(tmp_path: Path) -> 
         assert projects_response.status_code == 200
         project_ids = [project["project_id"] for project in projects_response.json()["projects"]]
         assert project_ids == []
+
+
+@pytest.mark.anyio
+async def test_project_lock_cleanup_keeps_lock_with_concurrent_lease(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    project_id = "proj_lock_waiter"
+
+    first_lock_state = await services.chat._get_project_lock(project_id)
+    await first_lock_state.lock.acquire()
+    second_lock_state = await services.chat._get_project_lock(project_id)
+    waiter = asyncio.create_task(second_lock_state.lock.acquire())
+    try:
+        assert second_lock_state is first_lock_state
+        assert first_lock_state.leases == 2
+
+        first_lock_state.lock.release()
+        await services.chat._release_project_lock(project_id, first_lock_state)
+
+        assert services.chat._project_locks[project_id] is first_lock_state
+        assert first_lock_state.leases == 1
+        await waiter
+    finally:
+        if not waiter.done():
+            waiter.cancel()
+        if first_lock_state.lock.locked():
+            first_lock_state.lock.release()
+
+    await services.chat._release_project_lock(project_id, first_lock_state)
+    assert project_id not in services.chat._project_locks
+
+
+@pytest.mark.anyio
+async def test_project_lock_cleanup_after_missing_project_errors(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    missing_project_id = "proj_missing_lock"
+
+    with pytest.raises(ApiError):
+        await services.chat.prepare_round(missing_project_id, ChatMessageRequest(message="hello"))
+    assert missing_project_id not in services.chat._project_locks
+
+    with pytest.raises(ApiError):
+        await services.chat.rename_project(missing_project_id, "missing")
+    assert missing_project_id not in services.chat._project_locks
+
+    with pytest.raises(ApiError):
+        await services.chat.delete_project(missing_project_id)
+    assert missing_project_id not in services.chat._project_locks
 
 
 @pytest.mark.anyio
@@ -406,11 +468,31 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert all(not scope.startswith("subagent:") for scope in scopes)
         assert event_types[-1] == "agent_output"
 
+        services.store.append_session_event(
+            project_id,
+            "sess_inactive_for_list",
+            event_type="user_input",
+            scope="main",
+            round_id="round_inactive_for_list",
+            message_id="msg_inactive_for_list",
+            payload={"text": "非当前会话"},
+        )
         sessions_response = await client.get(f"/api/projects/{project_id}/sessions")
         assert sessions_response.status_code == 200
         sessions = sessions_response.json()["sessions"]
-        assert sessions[0]["session_id"] == session_id
-        assert sessions[0]["is_active"] is True
+        sessions_by_id = {session["session_id"]: session for session in sessions}
+        assert sessions_by_id[session_id]["is_active"] is True
+        assert sessions_by_id[session_id]["context_usage"]["status"] in {"ok", "over_limit"}
+        assert sessions_by_id["sess_inactive_for_list"]["is_active"] is False
+        assert sessions_by_id["sess_inactive_for_list"]["context_usage"] is None
+
+        projects_after_chat_response = await client.get("/api/projects")
+        assert projects_after_chat_response.status_code == 200
+        assert projects_after_chat_response.json()["projects"][0]["active_session_context"] is None
+
+        project_detail_response = await client.get(f"/api/projects/{project_id}")
+        assert project_detail_response.status_code == 200
+        assert project_detail_response.json()["active_session_context"]["status"] in {"ok", "over_limit"}
 
         document_response = await client.get(f"/api/projects/{project_id}/document")
         assert document_response.status_code == 200
@@ -425,13 +507,6 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert export_path.exists()
         assert "关键创新点及权利要求建议" in export_path.read_text(encoding="utf-8")
 
-        docx_export_response = await client.post(f"/api/projects/{project_id}/export/docx")
-        assert docx_export_response.status_code == 200
-        docx_export_path = Path(docx_export_response.json()["path"])
-        assert docx_export_path.exists()
-        assert docx_export_path.suffix == ".docx"
-        assert docx_export_path.read_bytes()[:2] == b"PK"
-
         docx_download_response = await client.post(f"/api/projects/{project_id}/export/docx/download")
         assert docx_download_response.status_code == 200
         assert (
@@ -439,6 +514,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
             == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         assert "filename=" in docx_download_response.headers["content-disposition"]
+        assert "x-export-path" not in docx_download_response.headers
         assert docx_download_response.content[:2] == b"PK"
 
         second_stream_events = await collect_stream_events(
@@ -523,6 +599,67 @@ async def test_session_stream_can_attach_to_running_round(tmp_path: Path) -> Non
 
     assert events[0][0] == "stream_attached"
     assert ("assistant_delta", {"round_id": round_id, "message_id": message_id, "text": "恢复后的流式文本"}) in events
+    assert events[-1][0] == "round_failed"
+
+
+@pytest.mark.anyio
+async def test_session_stream_replays_buffered_current_round_events(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_compat_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    project = services.store.create_project("resume buffered project")
+    project_id = project.project_id
+    session_id = "sess_buffered"
+    round_id = "round_buffered"
+    message_id = "msg_buffered"
+    services.store.append_session_event(
+        project_id,
+        session_id,
+        event_type="user_input",
+        scope="main",
+        round_id=round_id,
+        message_id=message_id,
+        payload={"text": "continue writing"},
+    )
+    project.active_session_id = session_id
+    project.running_session_id = session_id
+    project.running_round_id = round_id
+    project.is_busy = True
+    services.store.save_project(project)
+    await services.bus.publish(
+        (project_id, session_id),
+        "assistant_delta",
+        {
+            "round_id": round_id,
+            "message_id": message_id,
+            "text": "delta-before-connect",
+        },
+    )
+    await services.bus.publish(
+        (project_id, session_id),
+        "round_failed",
+        {
+            "round_id": round_id,
+            "message_id": message_id,
+            "reply": "test done",
+        },
+    )
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        events = await collect_session_stream_events(client, project_id, session_id)
+
+    assert events[0][0] == "stream_attached"
+    assert (
+        "assistant_delta",
+        {"round_id": round_id, "message_id": message_id, "text": "delta-before-connect"},
+    ) in events
     assert events[-1][0] == "round_failed"
 
 

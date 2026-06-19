@@ -1,6 +1,5 @@
 from .main_agent import (
     MAIN_AGENT_TOOLS,
-    MainAgentAction,
     MainAgentToolCall,
     SupportsGenerateWithTools,
     decide_main_agent_step,
@@ -8,7 +7,6 @@ from .main_agent import (
 
 __all__ = [
     "MAIN_AGENT_TOOLS",
-    "MainAgentAction",
     "MainAgentToolCall",
     "SupportsGenerateWithTools",
     "decide_main_agent_step",

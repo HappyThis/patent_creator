@@ -5,7 +5,7 @@ import { buildDocumentStats } from '../features/preview/documentStats';
 import { PreviewPanel } from '../features/preview/PreviewPanel';
 import { apiClient } from '../services/api/client';
 import { useWorkspace } from '../hooks/useWorkspace';
-import type { ProjectState, RenderAst } from '../types';
+import type { ProjectState } from '../types';
 
 type WorkspaceStyle = CSSProperties & {
   '--right-pane-width': string;
@@ -28,13 +28,9 @@ function clampSideWidth(value: number) {
   return Math.min(Math.max(value, MIN_SIDE_WIDTH), Math.min(MAX_SIDE_WIDTH, viewportLimit));
 }
 
-function disclosureSignature(renderAst: RenderAst) {
-  return JSON.stringify(renderAst);
-}
-
 function App() {
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const previousDisclosureSignatureRef = useRef<string | null>(null);
+  const previousDisclosureUpdatedAtRef = useRef<string | null>(null);
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -44,6 +40,7 @@ function App() {
   const [disclosureWidth, setDisclosureWidth] = useState(460);
   const {
     renderAst,
+    renderUpdatedAt,
     events,
     composer,
     isLoading,
@@ -63,8 +60,7 @@ function App() {
     handleSessionSelect,
     handleNewSession,
   } = useWorkspace(selectedProjectId);
-  const documentStats = buildDocumentStats(renderAst);
-  const currentDisclosureSignature = useMemo(() => disclosureSignature(renderAst), [renderAst]);
+  const documentStats = useMemo(() => buildDocumentStats(renderAst), [renderAst]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -108,31 +104,34 @@ function App() {
   }, []);
 
   useEffect(() => {
-    previousDisclosureSignatureRef.current = null;
+    previousDisclosureUpdatedAtRef.current = null;
     setHasUnseenDisclosureUpdate(false);
   }, [selectedProjectId]);
 
   useEffect(() => {
     if (!selectedProjectId) {
-      previousDisclosureSignatureRef.current = null;
+      previousDisclosureUpdatedAtRef.current = null;
       setHasUnseenDisclosureUpdate(false);
       return;
     }
+    if (!renderUpdatedAt) {
+      return;
+    }
     if (isLoading) {
-      previousDisclosureSignatureRef.current = currentDisclosureSignature;
+      previousDisclosureUpdatedAtRef.current = renderUpdatedAt;
       return;
     }
 
-    const previousSignature = previousDisclosureSignatureRef.current;
-    previousDisclosureSignatureRef.current = currentDisclosureSignature;
+    const previousUpdatedAt = previousDisclosureUpdatedAtRef.current;
+    previousDisclosureUpdatedAtRef.current = renderUpdatedAt;
 
-    if (previousSignature === null || previousSignature === currentDisclosureSignature) {
+    if (previousUpdatedAt === null || previousUpdatedAt === renderUpdatedAt) {
       return;
     }
     if (!isDisclosureOpen) {
       setHasUnseenDisclosureUpdate(true);
     }
-  }, [currentDisclosureSignature, isDisclosureOpen, isLoading, selectedProjectId]);
+  }, [isDisclosureOpen, isLoading, renderUpdatedAt, selectedProjectId]);
 
   useEffect(() => {
     if (isDisclosureOpen) {
@@ -149,7 +148,7 @@ function App() {
 
   const handleReturnHome = useCallback(() => {
     window.history.pushState(null, '', '/');
-    previousDisclosureSignatureRef.current = null;
+    previousDisclosureUpdatedAtRef.current = null;
     setSelectedProjectId(null);
     setIsDisclosureOpen(false);
     setHasUnseenDisclosureUpdate(false);
@@ -188,19 +187,19 @@ function App() {
 
   useEffect(() => {
     const normalizeSideWidths = () => {
-      let nextDisclosureWidth = disclosureWidth;
-      if (isDisclosureOpen) {
-        nextDisclosureWidth = clampSideWidth(nextDisclosureWidth);
+      if (!isDisclosureOpen) {
+        return;
       }
-      if (nextDisclosureWidth !== disclosureWidth) {
-        setDisclosureWidth(nextDisclosureWidth);
-      }
+      setDisclosureWidth((current) => {
+        const next = clampSideWidth(current);
+        return next === current ? current : next;
+      });
     };
 
     normalizeSideWidths();
     window.addEventListener('resize', normalizeSideWidths);
     return () => window.removeEventListener('resize', normalizeSideWidths);
-  }, [disclosureWidth, isDisclosureOpen]);
+  }, [isDisclosureOpen]);
 
   const beginResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {

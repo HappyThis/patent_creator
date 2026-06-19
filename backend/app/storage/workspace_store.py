@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import shutil
 import subprocess
 import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
+
+from pydantic import ValidationError
 
 from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
@@ -17,6 +21,8 @@ from ..schemas import ProjectRecord, SessionEvent, SessionSummary
 
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
 CURRENT_PROJECT_POINTER = "current_project_id"
+STORAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+logger = logging.getLogger("patent_creator.workspace_store")
 
 
 class WorkspaceStore:
@@ -93,7 +99,8 @@ class WorkspaceStore:
         for path in self.projects_dir.glob("*/project.json"):
             try:
                 projects.append(ProjectRecord.model_validate(self.read_json(path)))
-            except Exception:
+            except (OSError, json.JSONDecodeError, ValidationError) as exc:
+                logger.warning("skipping invalid project metadata path=%s error=%s", path, exc)
                 continue
         projects.sort(key=lambda project: project.updated_at, reverse=True)
         return projects
@@ -125,16 +132,11 @@ class WorkspaceStore:
             round_id = project.running_round_id
             message_id: str | None = None
             if session_id and round_id and self.session_exists(project.project_id, session_id):
-                events = self.read_session_events(project.project_id, session_id)
-                round_events = [event for event in events if event.round_id == round_id]
-                user_event = next((event for event in round_events if event.type == "user_input"), None)
-                anchor_event = user_event or (round_events[-1] if round_events else None)
-                message_id = anchor_event.message_id if anchor_event else None
-                already_marked = any(
-                    event.type == "agent_output"
-                    and event.round_id == round_id
-                    and event.payload.get("code") == "round_interrupted_by_restart"
-                    for event in events
+                message_id, already_marked = self.round_message_status(
+                    project.project_id,
+                    session_id,
+                    round_id,
+                    "round_interrupted_by_restart",
                 )
                 if not already_marked:
                     self.append_session_event(
@@ -166,8 +168,8 @@ class WorkspaceStore:
             if project_id:
                 try:
                     return self.get_project(project_id)
-                except ApiError:
-                    pass
+                except ApiError as exc:
+                    logger.info("current project pointer is stale project_id=%s error=%s", project_id, exc.code)
 
         projects = self.list_projects()
         if not projects:
@@ -209,14 +211,10 @@ class WorkspaceStore:
         message_id: str,
         payload: dict[str, Any],
         call_id: str | None = None,
-        parent_call_id: str | None = None,
     ) -> SessionEvent:
         path = self.session_file(project_id, session_id)
         path.parent.mkdir(exist_ok=True)
-        seq = 1
-        if path.exists():
-            with path.open("r", encoding="utf-8") as handle:
-                seq = sum(1 for _ in handle) + 1
+        seq = self._next_session_event_seq(path)
         event = SessionEvent(
             id=generate_id("evt"),
             ts=now_iso(),
@@ -226,23 +224,80 @@ class WorkspaceStore:
             round_id=round_id,
             message_id=message_id,
             call_id=call_id,
-            parent_call_id=parent_call_id,
             payload=payload,
         )
         with path.open("a", encoding="utf-8") as handle:
             handle.write(event.model_dump_json(ensure_ascii=False) + "\n")
         return event
 
+    def _next_session_event_seq(self, path: Path) -> int:
+        if not path.exists():
+            return 1
+
+        line = _read_last_nonempty_line(path)
+        if line is None:
+            return 1
+        try:
+            return int(SessionEvent.model_validate_json(line).seq) + 1
+        except (ValueError, ValidationError):
+            with path.open("r", encoding="utf-8") as handle:
+                return sum(1 for raw_line in handle if raw_line.strip()) + 1
+
     def read_session_events(self, project_id: str, session_id: str) -> list[SessionEvent]:
+        return list(self.iter_session_events(project_id, session_id))
+
+    def iter_session_events(self, project_id: str, session_id: str) -> Iterator[SessionEvent]:
         path = self.session_file(project_id, session_id)
         if not path.exists():
             raise ApiError(404, "session_not_found", f"session_id 不存在：{session_id}")
-        events: list[SessionEvent] = []
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if line.strip():
-                    events.append(SessionEvent.model_validate_json(line))
-        return events
+                    yield SessionEvent.model_validate_json(line)
+
+    def first_user_text(self, project_id: str, session_id: str) -> str | None:
+        path = self.session_file(project_id, session_id)
+        if not path.exists():
+            raise ApiError(404, "session_not_found", f"session_id 不存在：{session_id}")
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                event = SessionEvent.model_validate_json(line)
+                if event.type != "user_input":
+                    continue
+                text = event.payload.get("text")
+                return text if isinstance(text, str) else None
+        return None
+
+    def round_message_status(
+        self,
+        project_id: str,
+        session_id: str,
+        round_id: str,
+        marker_code: str,
+    ) -> tuple[str | None, bool]:
+        path = self.session_file(project_id, session_id)
+        if not path.exists():
+            raise ApiError(404, "session_not_found", f"session_id 不存在：{session_id}")
+
+        user_message_id: str | None = None
+        last_round_message_id: str | None = None
+        already_marked = False
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                event = SessionEvent.model_validate_json(line)
+                if event.round_id != round_id:
+                    continue
+                last_round_message_id = event.message_id
+                if user_message_id is None and event.type == "user_input":
+                    user_message_id = event.message_id
+                if event.type == "agent_output" and event.payload.get("code") == marker_code:
+                    already_marked = True
+
+        return user_message_id or last_round_message_id, already_marked
 
     def list_sessions(self, project_id: str, active_session_id: str | None = None) -> list[SessionSummary]:
         sessions_dir = self.project_dir(project_id) / "sessions"
@@ -252,21 +307,48 @@ class WorkspaceStore:
         summaries: list[SessionSummary] = []
         for path in sorted(sessions_dir.glob("*.jsonl")):
             session_id = path.stem
-            events = self.read_session_events(project_id, session_id)
-            last_event = events[-1] if events else None
-            first_user_event = next((event for event in events if event.type == "user_input"), None)
-            summaries.append(
-                SessionSummary(
-                    session_id=session_id,
-                    updated_at=last_event.ts if last_event else now_iso(),
-                    event_count=len(events),
-                    last_round_id=last_event.round_id if last_event else None,
-                    first_user_text=first_user_event.payload.get("text") if first_user_event else None,
-                    is_active=session_id == active_session_id,
+            try:
+                summaries.append(self._session_summary_from_file(session_id, path, active_session_id))
+            except (OSError, UnicodeDecodeError, ValueError, ValidationError) as exc:
+                logger.warning(
+                    "skipping invalid session log project_id=%s session_id=%s path=%s error=%s",
+                    project_id,
+                    session_id,
+                    path,
+                    exc,
                 )
-            )
         summaries.sort(key=lambda summary: summary.updated_at, reverse=True)
         return summaries
+
+    def _session_summary_from_file(
+        self,
+        session_id: str,
+        path: Path,
+        active_session_id: str | None,
+    ) -> SessionSummary:
+        event_count = 0
+        last_line: str | None = None
+        first_user_text: str | None = None
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                event_count += 1
+                last_line = line
+                if first_user_text is None:
+                    event = SessionEvent.model_validate_json(line)
+                    if event.type == "user_input":
+                        text = event.payload.get("text")
+                        first_user_text = text if isinstance(text, str) else None
+        last_event = SessionEvent.model_validate_json(last_line) if last_line else None
+        return SessionSummary(
+            session_id=session_id,
+            updated_at=last_event.ts if last_event else now_iso(),
+            event_count=event_count,
+            last_round_id=last_event.round_id if last_event else None,
+            first_user_text=first_user_text,
+            is_active=session_id == active_session_id,
+        )
 
     def export_markdown(self, project_id: str) -> Path:
         disclosure = self.get_disclosure(project_id)
@@ -325,7 +407,7 @@ class WorkspaceStore:
         return True, None
 
     def project_dir(self, project_id: str) -> Path:
-        return self.projects_dir / project_id
+        return self.projects_dir / _validated_storage_id(project_id, "project_id")
 
     def project_file(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "project.json"
@@ -334,7 +416,7 @@ class WorkspaceStore:
         return self.project_dir(project_id) / "disclosure.json"
 
     def session_file(self, project_id: str, session_id: str) -> Path:
-        return self.project_dir(project_id) / "sessions" / f"{session_id}.jsonl"
+        return self.project_dir(project_id) / "sessions" / f"{_validated_storage_id(session_id, 'session_id')}.jsonl"
 
     def figures_dir(self, project_id: str) -> Path:
         path = self.project_dir(project_id) / "assets" / "figures"
@@ -346,7 +428,8 @@ class WorkspaceStore:
         for path in sorted(self.figures_dir(project_id).glob("fig_*.json")):
             try:
                 figure = self.read_json(path)
-            except Exception:
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("skipping invalid figure metadata project_id=%s path=%s error=%s", project_id, path, exc)
                 continue
             if isinstance(figure.get("figure_id"), str):
                 figures.append(self._normalize_figure(figure))
@@ -412,7 +495,7 @@ class WorkspaceStore:
         return f"fig_{max_value + 1:06d}"
 
     def figure_json_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figures_dir(project_id) / f"{figure_id}.json"
+        return self.figures_dir(project_id) / f"{_validated_storage_id(figure_id, 'figure_id')}.json"
 
     def figure_summaries(self, project_id: str) -> list[dict[str, Any]]:
         return [figure_summary(figure) for figure in self.list_figures(project_id)]
@@ -449,3 +532,27 @@ class WorkspaceStore:
 def _make_writable_and_retry(function: Any, path: str, _exc_info: Any) -> None:
     os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
     function(path)
+
+
+def _validated_storage_id(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not STORAGE_ID_PATTERN.fullmatch(value):
+        raise ApiError(422, f"invalid_{field_name}", f"{field_name} 格式无效：{value}")
+    return value
+
+
+def _read_last_nonempty_line(path: Path, chunk_size: int = 4096) -> str | None:
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        position = handle.tell()
+        buffer = b""
+        while position > 0:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            handle.seek(position)
+            buffer = handle.read(read_size) + buffer
+            lines = buffer.splitlines()
+            candidates = lines if position == 0 else lines[1:]
+            for line in reversed(candidates):
+                if line.strip():
+                    return line.decode("utf-8")
+    return None

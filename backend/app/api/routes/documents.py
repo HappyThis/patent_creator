@@ -44,7 +44,6 @@ def create_document_router(services: AppServices) -> APIRouter:
 
     @router.get("/document")
     async def get_document(project_id: str) -> dict:
-        services.store.get_project(project_id)
         return services.store.get_disclosure(project_id)
 
     return router

@@ -1,5 +1,5 @@
-import { ReactNode, useState } from 'react';
-import type { ChatEvent, ChatMessageEvent, ProcessEvent } from '../../types';
+import { ReactNode, useMemo, useState } from 'react';
+import type { ChatEvent, ChatMessageEvent, ToolCallEvent } from '../../types';
 import { TimelineList } from '../timeline/TimelineList';
 import { MarkdownContent } from '../../components/MarkdownContent';
 
@@ -11,7 +11,7 @@ type StatusEvent = Extract<ChatEvent, { kind: 'round_status' | 'context_status' 
 
 type TraceBlock =
   | { kind: 'message'; event: ChatMessageEvent }
-  | { kind: 'process'; items: ProcessEvent[] }
+  | { kind: 'process'; items: ToolCallEvent[] }
   | { kind: 'status'; event: StatusEvent };
 
 type RenderBlock =
@@ -23,12 +23,12 @@ type RenderBlock =
       traceBlocks: TraceBlock[];
       durationLabel: string | null;
     }
-  | { kind: 'process'; items: ProcessEvent[] }
+  | { kind: 'process'; items: ToolCallEvent[] }
   | { kind: 'status'; event: StatusEvent };
 
 export function ChatThread({ events }: ChatThreadProps) {
   const [hoveredAssistantRound, setHoveredAssistantRound] = useState<string | null>(null);
-  const blocks = buildRenderBlocks(events);
+  const blocks = useMemo(() => buildRenderBlocks(events), [events]);
 
   return (
     <section className="chat-thread">
@@ -139,7 +139,7 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
     finalMessage: ChatMessageEvent | null;
     traceBlocks: TraceBlock[];
   } | null = null;
-  let pendingProcess: ProcessEvent[] = [];
+  let pendingProcess: ToolCallEvent[] = [];
 
   const flushProcessToRound = () => {
     if (pendingProcess.length === 0) {

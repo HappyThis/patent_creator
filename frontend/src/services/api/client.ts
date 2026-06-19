@@ -22,8 +22,6 @@ export type ApiClient = {
   }>;
   listSessions: (project_id: string) => Promise<{ sessions: SessionSummary[] }>;
   getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: SessionEventRecord[] }>;
-  exportMarkdown: (project_id: string) => Promise<{ path: string }>;
-  exportDocx: (project_id: string) => Promise<{ path: string }>;
   downloadDocx: (project_id: string) => Promise<{ blob: Blob; filename: string | null }>;
   cancelRound: (
     project_id: string,
@@ -88,16 +86,6 @@ export const apiClient: ApiClient = {
   },
   async getSessionEvents(project_id, session_id) {
     return requestJson<{ events: SessionEventRecord[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);
-  },
-  async exportMarkdown(project_id) {
-    return requestJson<{ path: string }>(`/api/projects/${project_id}/export/markdown`, {
-      method: 'POST',
-    });
-  },
-  async exportDocx(project_id) {
-    return requestJson<{ path: string }>(`/api/projects/${project_id}/export/docx`, {
-      method: 'POST',
-    });
   },
   async downloadDocx(project_id) {
     return requestFile(`/api/projects/${project_id}/export/docx/download`, {

@@ -1,21 +1,18 @@
-import type { ChatEvent, ProcessEvent, SessionEventRecord } from '../../types';
+import type { ChatEvent, SessionEventRecord, ToolCallEvent } from '../../types';
 
-type ToolState = {
-  id: string;
-  kind: 'tool_call';
-  timestamp?: string;
-  timestamp_ms?: number;
-  round_id?: string;
-  message_id?: string;
-  seq?: number;
-  parent_call_id?: string | null;
-  title: string;
-  tool?: string;
-  scope?: ProcessEvent['scope'];
-  status?: ProcessEvent['status'];
-  summary?: string;
-  detail?: string;
-};
+const MAX_TOOL_DETAIL_CHARS = 12_000;
+
+function findEventIndexFromEnd(
+  events: ChatEvent[],
+  predicate: (event: ChatEvent) => boolean,
+): number {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (predicate(events[index])) {
+      return index;
+    }
+  }
+  return -1;
+}
 
 export function formatTimestamp(value?: string): string {
   if (!value) {
@@ -36,7 +33,25 @@ function formatToolDetail(payload: unknown): string {
   if (payload == null) {
     return '无详细结果';
   }
-  return JSON.stringify(payload, null, 2);
+  const detail = JSON.stringify(payload, null, 2);
+  if (detail.length <= MAX_TOOL_DETAIL_CHARS) {
+    return detail;
+  }
+  return `${detail.slice(0, MAX_TOOL_DETAIL_CHARS)}\n\n... 已截断 ${detail.length - MAX_TOOL_DETAIL_CHARS} 个字符，仅用于前端展示。`;
+}
+
+function eventScope(value: unknown): ToolCallEvent['scope'] | undefined {
+  return value === 'main' ? 'main' : undefined;
+}
+
+function mergeToolCallEvent(existing: ChatEvent, updated: ToolCallEvent): ToolCallEvent {
+  if (existing.kind !== 'tool_call') {
+    return updated;
+  }
+  return {
+    ...existing,
+    ...updated,
+  };
 }
 
 export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
@@ -94,7 +109,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
     }
 
     if (event.type === 'tool_call') {
-      const item: ToolState = {
+      const item: ToolCallEvent = {
         id: event.call_id || event.id,
         kind: 'tool_call',
         timestamp: formatTimestamp(event.ts),
@@ -102,10 +117,9 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
-        parent_call_id: event.parent_call_id,
         title: String(event.payload.tool ?? 'tool_call'),
         tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
-        scope: event.scope as ProcessEvent['scope'],
+        scope: eventScope(event.scope),
         status: 'running',
         summary: typeof event.payload.tool === 'string' ? `开始执行 ${event.payload.tool}` : '开始执行',
         detail: formatToolDetail(event.payload.arguments),
@@ -115,14 +129,13 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       continue;
     }
 
+    if (event.type !== 'tool_result') {
+      continue;
+    }
+
     const toolId = event.call_id || event.id;
-    const nextStatus =
-      event.payload.status === 'failed'
-        ? 'failed'
-        : event.payload.status === 'success'
-          ? 'done'
-          : 'done';
-    const updatedItem: ToolState = {
+    const nextStatus = event.payload.status === 'failed' ? 'failed' : 'done';
+    const updatedItem: ToolCallEvent = {
       id: toolId,
       kind: 'tool_call',
       timestamp: formatTimestamp(event.ts),
@@ -130,10 +143,9 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       round_id: event.round_id,
       message_id: event.message_id,
       seq: event.seq,
-      parent_call_id: event.parent_call_id,
       title: String(event.payload.tool ?? 'tool_call'),
       tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
-      scope: event.scope as ProcessEvent['scope'],
+      scope: eventScope(event.scope),
       status: nextStatus,
       summary: nextStatus === 'failed' ? '执行失败' : '执行完成',
       detail: formatToolDetail(event.payload.output ?? event.payload),
@@ -145,10 +157,7 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       events.push(updatedItem);
       continue;
     }
-    events[existingIndex] = {
-      ...(events[existingIndex] as ToolState),
-      ...updatedItem,
-    };
+    events[existingIndex] = mergeToolCallEvent(events[existingIndex], updatedItem);
   }
 
   return events;
@@ -173,7 +182,7 @@ export function applyContextCompressionEvent(
     status,
     summary: typeof payload.summary === 'string' ? payload.summary : fallbackSummary,
   };
-  const existingIndex = current.findIndex((item) => item.kind === 'context_status' && item.id === id);
+  const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'context_status' && item.id === id);
   if (existingIndex === -1) {
     return [...current, nextEvent];
   }
@@ -188,33 +197,29 @@ export function applyRunningToolEvent(
   status: 'running' | 'done' | 'failed',
 ): ChatEvent[] {
   const toolId = String(payload.call_id ?? `call_${Date.now()}`);
-  const detail = payload.result ? formatToolDetail(payload.result) : undefined;
-  const nextEvent: ProcessEvent = {
+  const detail = Object.prototype.hasOwnProperty.call(payload, 'result') ? formatToolDetail(payload.result) : undefined;
+  const nextEvent: ToolCallEvent = {
     id: toolId,
     kind: 'tool_call',
     timestamp: formatTimestamp(),
     timestamp_ms: Date.now(),
     round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
     message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
-    parent_call_id: typeof payload.parent_call_id === 'string' ? payload.parent_call_id : null,
     title: String(payload.tool ?? 'tool_call'),
     tool: typeof payload.tool === 'string' ? payload.tool : undefined,
-    scope: payload.scope as ProcessEvent['scope'],
+    scope: eventScope(payload.scope),
     status,
     summary: typeof payload.summary === 'string' ? payload.summary : undefined,
     detail,
   };
 
-  const existingIndex = current.findIndex((item) => item.kind === 'tool_call' && item.id === toolId);
+  const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'tool_call' && item.id === toolId);
   if (existingIndex === -1) {
     return [...current, nextEvent];
   }
 
   const next = [...current];
-  next[existingIndex] = {
-    ...(next[existingIndex] as ProcessEvent),
-    ...nextEvent,
-  };
+  next[existingIndex] = mergeToolCallEvent(next[existingIndex], nextEvent);
   return next;
 }
 
@@ -229,7 +234,7 @@ export function applyAssistantDelta(
   if (!delta) {
     return current;
   }
-  const existingIndex = current.findIndex((item) => item.kind === 'message' && item.id === messageId);
+  const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'message' && item.id === messageId);
   if (existingIndex === -1) {
     return [
       ...current,

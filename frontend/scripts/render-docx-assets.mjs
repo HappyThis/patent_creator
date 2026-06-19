@@ -191,7 +191,11 @@ body {
     }, svg);
   } catch (error) {
     await page.locator('#asset').evaluate((element, message) => {
-      element.innerHTML = `<div class="missing">${message}</div>`;
+      element.replaceChildren();
+      const missing = document.createElement('div');
+      missing.className = 'missing';
+      missing.textContent = message;
+      element.appendChild(missing);
     }, error instanceof Error ? error.message : 'Mermaid render failed');
   }
   const locator = page.locator('#asset');
@@ -216,21 +220,24 @@ async function main() {
   const outputDir = path.resolve(args.output);
   const manifestPath = path.resolve(args.manifest);
   await fs.mkdir(outputDir, { recursive: true });
-  const payload = JSON.parse(await fs.readFile(inputPath, 'utf8'));
+  const payload = JSON.parse((await fs.readFile(inputPath, 'utf8')).replace(/^\uFEFF/, ''));
   const items = Array.isArray(payload.items) ? payload.items : [];
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({
-    viewport: { width: 1200, height: 900 },
-    deviceScaleFactor: 2,
-  });
   const assets = {};
-  for (const item of items) {
-    const result = item.kind === 'figure'
-      ? await renderMermaidAsset(page, item, outputDir)
-      : await renderHtmlAsset(page, item, outputDir);
-    assets[item.id] = result;
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1200, height: 900 },
+      deviceScaleFactor: 2,
+    });
+    for (const item of items) {
+      const result = item.kind === 'figure'
+        ? await renderMermaidAsset(page, item, outputDir)
+        : await renderHtmlAsset(page, item, outputDir);
+      assets[item.id] = result;
+    }
+  } finally {
+    await browser.close();
   }
-  await browser.close();
   await fs.writeFile(manifestPath, JSON.stringify({ assets }, null, 2), 'utf8');
 }
 

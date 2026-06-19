@@ -4,10 +4,13 @@ import katex from 'katex';
 import { isSectionDirectlyEmpty, SectionStatus } from './documentStats';
 import { PreviewFigure } from './PreviewFigure';
 
+const FIGURE_REF_PATTERN = /\[([^\]]+)\]\(figure:(fig_\d{6})\)/g;
+const FORMULA_REF_PATTERN = /\[([^\]]+)\]\(formula:([A-Za-z0-9_-]+)\)/g;
+
 type RenderPreviewNodesProps = {
   nodes: RenderNode[];
-  recentSectionIds: string[];
-  recentBlockIds: string[];
+  recentSectionIds: ReadonlySet<string>;
+  recentBlockIds: ReadonlySet<string>;
   sectionStatusById: Record<string, SectionStatus>;
   figuresById: Record<string, FigureRenderAsset>;
   formulaNumberById?: Record<string, number>;
@@ -29,7 +32,7 @@ export function renderPreviewNodes({
     if (node.type === 'section') {
       sectionIndex += 1;
       const indexPath = [...parentIndexPath, sectionIndex];
-      const sectionChanged = recentSectionIds.includes(node.id);
+      const sectionChanged = recentSectionIds.has(node.id);
       const hasChildSections = node.children.some((child) => child.type === 'section');
       const hasSubtreeContent = sectionStatusById[node.id]?.filled ?? !isSectionDirectlyEmpty(node);
       const isEmpty = !hasChildSections && !hasSubtreeContent;
@@ -61,7 +64,7 @@ export function renderPreviewNodes({
       );
     }
 
-    const blockChanged = recentBlockIds.includes(node.id);
+    const blockChanged = recentBlockIds.has(node.id);
     if (node.type === 'title' || node.type === 'paragraph') {
       return (
         <p
@@ -283,9 +286,8 @@ type MathToken = {
 };
 
 function findNextFigureRef(text: string, offset: number): FigureToken | null {
-  const pattern = /\[([^\]]+)\]\(figure:(fig_\d{6})\)/g;
-  pattern.lastIndex = offset;
-  const match = pattern.exec(text);
+  FIGURE_REF_PATTERN.lastIndex = offset;
+  const match = FIGURE_REF_PATTERN.exec(text);
   if (!match) {
     return null;
   }
@@ -299,9 +301,8 @@ function findNextFigureRef(text: string, offset: number): FigureToken | null {
 }
 
 function findNextFormulaRef(text: string, offset: number): FormulaRefToken | null {
-  const pattern = /\[([^\]]+)\]\(formula:([A-Za-z0-9_-]+)\)/g;
-  pattern.lastIndex = offset;
-  const match = pattern.exec(text);
+  FORMULA_REF_PATTERN.lastIndex = offset;
+  const match = FORMULA_REF_PATTERN.exec(text);
   if (!match) {
     return null;
   }

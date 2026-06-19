@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..core import now_iso
-from .disclosure import find_section, next_block_id, next_section_id, section_title_text
+from .disclosure import next_block_id, next_section_id, section_title_text
 from .document_schema import BLOCK_TYPES
 from .document_tool_results import ToolResult, tool_failed, tool_success
 from .document_tree import dedupe, get_required_section

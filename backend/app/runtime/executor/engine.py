@@ -14,7 +14,6 @@ class ToolRuntimeContext:
     session_id: str | None = None
     round_id: str | None = None
     message_id: str | None = None
-    parent_call_id: str | None = None
     caller_messages: list[dict[str, Any]] | None = None
     system_prompt: str | None = None
     tools: list[dict[str, Any]] | None = None

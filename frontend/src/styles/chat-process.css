@@ -50,10 +50,6 @@
   border: 0;
 }
 
-.command-item.has-children {
-  padding-bottom: 2px;
-}
-
 .command-item-summary {
   list-style: none;
   display: grid;
@@ -246,12 +242,6 @@
   line-height: 1.35;
 }
 
-.command-child-count {
-  color: #9a9387;
-  font-size: 11px;
-  line-height: 1.45;
-}
-
 .command-output-shell {
   margin: 8px 0 0 17px;
   border: 1px solid var(--chat-soft-line);
@@ -280,13 +270,4 @@
   line-height: 1.55;
   font-family: Consolas, "SFMono-Regular", "Courier New", monospace;
   white-space: pre-wrap;
-}
-
-.command-children {
-  margin: 10px 0 0 4px;
-  padding-left: 14px;
-  border-left: 1px solid var(--chat-line);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }

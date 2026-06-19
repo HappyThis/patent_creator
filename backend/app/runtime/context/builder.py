@@ -14,8 +14,7 @@ from .compression import (
     prepare_compressed_markdown_messages,
 )
 from .history import (
-    MAIN_CONTEXT_EVENT_TYPES,
-    latest_context_summary_marker,
+    main_context_events_after_latest_summary,
     project_main_event_segments,
     restore_main_chat_messages,
 )
@@ -53,8 +52,6 @@ class ContextManager:
         session_id: str | None,
         *,
         user_message: str,
-        active_section_id: str | None,
-        active_block_id: str | None,
         current_message_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """从 session log 恢复主 agent messages，并把当前用户输入作为最后一条 user message。"""
@@ -63,8 +60,6 @@ class ContextManager:
             project_id,
             session_id,
             user_message=user_message,
-            active_section_id=active_section_id,
-            active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
         messages = apply_tool_result_turn_budget(self.store, project_id, messages)
@@ -76,8 +71,6 @@ class ContextManager:
         session_id: str | None,
         *,
         user_message: str,
-        active_section_id: str | None,
-        active_block_id: str | None,
         current_message_id: str | None = None,
     ) -> list[dict[str, Any]]:
         history = self._restore_main_chat_messages(
@@ -94,8 +87,6 @@ class ContextManager:
         session_id: str | None,
         *,
         user_message: str,
-        active_section_id: str | None,
-        active_block_id: str | None,
         current_message_id: str | None,
         round_id: str,
         system_prompt: str,
@@ -108,8 +99,6 @@ class ContextManager:
             project_id,
             session_id,
             user_message=user_message,
-            active_section_id=active_section_id,
-            active_block_id=active_block_id,
             current_message_id=current_message_id,
         )
         raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
@@ -185,8 +174,6 @@ class ContextManager:
                 project_id,
                 session_id,
                 user_message=user_message,
-                active_section_id=active_section_id,
-                active_block_id=active_block_id,
                 current_message_id=current_message_id,
             )
             raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
@@ -275,9 +262,8 @@ class ContextManager:
         if not session_id or not self.store.session_exists(project_id, session_id):
             return [{"role": "user", "content": current_user_message or ""}] if current_user_message else []
 
-        events = self.store.read_session_events(project_id, session_id)
         messages = restore_main_chat_messages(
-            events,
+            self.store.iter_session_events(project_id, session_id),
             current_user_message=current_user_message,
             current_message_id=current_message_id,
         )
@@ -294,15 +280,9 @@ class ContextManager:
         llm_client: SupportsContextCompression,
         usage_before: ContextUsage,
     ) -> dict[str, Any] | None:
-        events = self.store.read_session_events(project_id, session_id)
-        compression_marker = latest_context_summary_marker(events)
-        candidate_events = [
-            event
-            for event in events
-            if event.scope == "main"
-            and event.type in MAIN_CONTEXT_EVENT_TYPES
-            and event.seq >= compression_marker["cursor_seq"]
-        ]
+        compression_marker, candidate_events = main_context_events_after_latest_summary(
+            self.store.iter_session_events(project_id, session_id)
+        )
         segments = project_main_event_segments(candidate_events)
         if not segments:
             logger.info(

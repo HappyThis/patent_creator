@@ -156,6 +156,7 @@ class ScriptedLLMClient:
 def make_settings(tmp_path: Path) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
+        log_dir=tmp_path / "logs",
         git_user_name="Test User",
         git_user_email="test@example.com",
         openai_compat_api_key="test-key",

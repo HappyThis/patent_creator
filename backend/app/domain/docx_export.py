@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +49,7 @@ class InlineToken:
 
 
 class DocxExportError(RuntimeError):
-    pass
+    """Raised when DOCX asset rendering or export fails."""
 
 
 def export_disclosure_docx(
@@ -61,24 +62,28 @@ def export_disclosure_docx(
     render_ast = build_render_ast(disclosure, figures=figures)
     figures_by_id = {str(figure.get("figure_id")): figure for figure in figures}
     formula_numbers = collect_formula_numbers(render_ast.get("children", []))
-    asset_manifest = render_assets(render_ast, figures_by_id, project_dir)
+    asset_manifest, asset_dir = render_assets(render_ast, figures_by_id, project_dir)
 
-    document = Document()
-    configure_document(document)
+    try:
+        document = Document()
+        configure_document(document)
 
-    for index, node in enumerate(render_ast.get("children", []), start=1):
-        if node.get("type") == "section":
-            render_section(
-                document,
-                node,
-                index_path=[index],
-                figures_by_id=figures_by_id,
-                formula_numbers=formula_numbers,
-                assets=asset_manifest,
-            )
+        for index, node in enumerate(render_ast.get("children", []), start=1):
+            if node.get("type") == "section":
+                render_section(
+                    document,
+                    node,
+                    index_path=[index],
+                    figures_by_id=figures_by_id,
+                    formula_numbers=formula_numbers,
+                    assets=asset_manifest,
+                )
 
-    export_path.parent.mkdir(parents=True, exist_ok=True)
-    document.save(export_path)
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        document.save(export_path)
+    finally:
+        if asset_dir is not None:
+            shutil.rmtree(asset_dir, ignore_errors=True)
     return export_path
 
 
@@ -130,7 +135,7 @@ def render_assets(
     render_ast: dict[str, Any],
     figures_by_id: dict[str, dict[str, Any]],
     project_dir: Path,
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], Path | None]:
     items: list[dict[str, str]] = []
 
     def add_inline_math(latex: str) -> str:
@@ -178,19 +183,19 @@ def render_assets(
 
     visit(render_ast.get("children", []))
     if not items:
-        return {}
+        return {}, None
 
     asset_dir = project_dir / "exports" / f"docx-assets-{uuid4().hex[:8]}"
     input_path = asset_dir / "input.json"
     output_dir = asset_dir / "images"
     manifest_path = asset_dir / "manifest.json"
     asset_dir.mkdir(parents=True, exist_ok=True)
-    input_path.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    repo_root = Path(__file__).resolve().parents[3]
-    frontend_root = repo_root / "frontend"
-    script_path = frontend_root / "scripts" / "render-docx-assets.mjs"
     try:
+        input_path.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        repo_root = Path(__file__).resolve().parents[3]
+        frontend_root = repo_root / "frontend"
+        script_path = frontend_root / "scripts" / "render-docx-assets.mjs"
         result = subprocess.run(
             [
                 "node",
@@ -208,20 +213,62 @@ def render_assets(
             check=False,
             timeout=90,
         )
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or "unknown renderer error"
+            raise DocxExportError(f"DOCX asset renderer failed: {message}")
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assets = _validate_asset_manifest(manifest, items, output_dir)
     except OSError as exc:
+        shutil.rmtree(asset_dir, ignore_errors=True)
         raise DocxExportError(f"DOCX asset renderer failed to start: {exc}") from exc
     except subprocess.TimeoutExpired as exc:
+        shutil.rmtree(asset_dir, ignore_errors=True)
         raise DocxExportError("DOCX asset renderer timed out.") from exc
+    except json.JSONDecodeError as exc:
+        shutil.rmtree(asset_dir, ignore_errors=True)
+        raise DocxExportError(f"DOCX asset renderer returned invalid JSON: {exc}") from exc
+    except DocxExportError:
+        shutil.rmtree(asset_dir, ignore_errors=True)
+        raise
 
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip() or "unknown renderer error"
-        raise DocxExportError(f"DOCX asset renderer failed: {message}")
-
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assets = dict(manifest.get("assets") or {})
     for latex, asset_id in inline_asset_by_latex.items():
         if asset_id in assets:
             assets[f"inline:{latex}"] = assets[asset_id]
+    return assets, asset_dir
+
+
+def _validate_asset_manifest(
+    manifest: Any,
+    items: list[dict[str, str]],
+    output_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("assets"), dict):
+        raise DocxExportError("DOCX asset renderer returned an invalid manifest.")
+
+    assets: dict[str, dict[str, Any]] = {}
+    raw_assets = manifest["assets"]
+    output_root = output_dir.resolve()
+    for item in items:
+        asset_id = item["id"]
+        raw_asset = raw_assets.get(asset_id)
+        if not isinstance(raw_asset, dict):
+            raise DocxExportError(f"DOCX asset renderer did not return asset: {asset_id}")
+        asset_path = raw_asset.get("path")
+        width_px = raw_asset.get("width_px")
+        height_px = raw_asset.get("height_px")
+        if not isinstance(asset_path, str) or not asset_path:
+            raise DocxExportError(f"DOCX asset renderer returned an invalid path for asset: {asset_id}")
+        resolved_asset_path = Path(asset_path).resolve()
+        if not resolved_asset_path.is_relative_to(output_root):
+            raise DocxExportError(f"DOCX asset renderer returned an out-of-directory path for asset: {asset_id}")
+        if not resolved_asset_path.is_file():
+            raise DocxExportError(f"DOCX asset renderer returned a missing file for asset: {asset_id}")
+        if not isinstance(width_px, (int, float)) or width_px <= 0:
+            raise DocxExportError(f"DOCX asset renderer returned an invalid width for asset: {asset_id}")
+        if not isinstance(height_px, (int, float)) or height_px <= 0:
+            raise DocxExportError(f"DOCX asset renderer returned an invalid height for asset: {asset_id}")
+        assets[asset_id] = {**raw_asset, "path": str(resolved_asset_path)}
     return assets
 
 

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.agents.prompts import build_main_agent_system_prompt
-from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_split_main_agent_system_prompt
+from app.agents.prompts.main_agent import build_main_agent_system_prompt as build_direct_main_agent_system_prompt
 
 
 def test_agent_prompt_entrypoint_is_main_agent_only() -> None:
-    assert build_main_agent_system_prompt is build_split_main_agent_system_prompt
+    assert build_main_agent_system_prompt is build_direct_main_agent_system_prompt
 
 
 def test_main_agent_prompt_requires_reading_source_before_uncertain_document_answers() -> None:

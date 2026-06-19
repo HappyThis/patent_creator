@@ -75,27 +75,40 @@ async function openSseStream(
 
   const done = (async () => {
     let buffer = '';
+    const emitBufferedEvents = (flush = false) => {
+      while (true) {
+        const boundary = findSseEventBoundary(buffer);
+        if (!boundary) {
+          break;
+        }
+        const chunk = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary.length);
+        const parsed = parseSseChunk(chunk);
+        if (!parsed) {
+          continue;
+        }
+        onEvent(parsed.event, parsed.payload);
+      }
+
+      if (flush && buffer.trim()) {
+        const parsed = parseSseChunk(buffer);
+        buffer = '';
+        if (parsed) {
+          onEvent(parsed.event, parsed.payload);
+        }
+      }
+    };
+
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
+          buffer += decoder.decode();
+          emitBufferedEvents(true);
           break;
         }
         buffer += decoder.decode(value, { stream: true });
-
-        while (true) {
-          const boundary = buffer.indexOf('\n\n');
-          if (boundary === -1) {
-            break;
-          }
-          const chunk = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const parsed = parseSseChunk(chunk);
-          if (!parsed) {
-            continue;
-          }
-          onEvent(parsed.event, parsed.payload);
-        }
+        emitBufferedEvents();
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -113,8 +126,27 @@ async function openSseStream(
   };
 }
 
-function parseSseChunk(chunk: string): { event: string; payload: Record<string, unknown> } | null {
-  const lines = chunk.split('\n');
+function findSseEventBoundary(buffer: string): { index: number; length: number } | null {
+  const boundaries = [
+    { index: buffer.indexOf('\r\n\r\n'), length: 4 },
+    { index: buffer.indexOf('\n\n'), length: 2 },
+    { index: buffer.indexOf('\r\r'), length: 2 },
+  ].filter((boundary) => boundary.index !== -1);
+
+  if (boundaries.length === 0) {
+    return null;
+  }
+  return boundaries.reduce((earliest, boundary) =>
+    boundary.index < earliest.index ? boundary : earliest,
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function parseSseChunk(chunk: string): { event: string; payload: Record<string, unknown> } | null {
+  const lines = chunk.split(/\r\n|\n|\r/);
   let eventName = '';
   const dataLines: string[] = [];
 
@@ -122,12 +154,12 @@ function parseSseChunk(chunk: string): { event: string; payload: Record<string, 
     if (!line || line.startsWith(':')) {
       continue;
     }
-    if (line.startsWith('event: ')) {
-      eventName = line.slice(7).trim();
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim();
       continue;
     }
-    if (line.startsWith('data: ')) {
-      dataLines.push(line.slice(6));
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart());
     }
   }
 
@@ -135,8 +167,18 @@ function parseSseChunk(chunk: string): { event: string; payload: Record<string, 
     return null;
   }
 
+  let payload: unknown;
+  try {
+    payload = JSON.parse(dataLines.join('\n'));
+  } catch {
+    return null;
+  }
+  if (!isRecord(payload)) {
+    return null;
+  }
+
   return {
     event: eventName,
-    payload: JSON.parse(dataLines.join('\n')) as Record<string, unknown>,
+    payload,
   };
 }

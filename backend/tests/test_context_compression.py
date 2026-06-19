@@ -122,6 +122,15 @@ def test_prepare_messages_for_request_strips_usage_metadata(tmp_path: Path) -> N
     assert prepared == [{"role": "assistant", "content": "上一轮"}]
 
 
+def test_prepare_messages_for_request_reuses_messages_when_no_metadata_is_stripped(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path, git_user_name="Test User", git_user_email="test@example.com")
+    messages = [{"role": "user", "content": "继续"}]
+
+    prepared = prepare_messages_for_model_request(messages, settings)
+
+    assert prepared is messages
+
+
 def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_path: Path) -> None:
     store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
     project = store.create_project("一种图像检测方法")
@@ -172,8 +181,6 @@ def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_
         project.project_id,
         session_id,
         user_message="继续",
-        active_section_id=None,
-        active_block_id=None,
     )
 
     tool_message = next(message for message in messages if message.get("role") == "tool")
@@ -187,11 +194,26 @@ def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_
         project.project_id,
         session_id,
         user_message="继续",
-        active_section_id=None,
-        active_block_id=None,
     )
     payload_again = json.loads(next(message for message in messages_again if message.get("role") == "tool")["content"])
     assert payload_again["output"]["tool_result_path"] == payload["output"]["tool_result_path"]
+
+
+def test_tool_result_turn_budget_reuses_messages_when_no_truncation_is_needed(tmp_path: Path) -> None:
+    store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
+    project = store.create_project("一种图像检测方法")
+    messages = [
+        {"role": "assistant", "content": "", "tool_calls": []},
+        {
+            "role": "tool",
+            "tool_call_id": "call_small",
+            "content": json.dumps({"status": "success", "output": {"text": "small"}}, ensure_ascii=False),
+        },
+    ]
+
+    budgeted = apply_tool_result_turn_budget(store, project.project_id, messages)
+
+    assert budgeted is messages
 
 
 def test_tool_result_turn_budget_stops_when_largest_result_is_already_processed(tmp_path: Path) -> None:

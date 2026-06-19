@@ -8,6 +8,7 @@ from ...schemas import (
     ProjectCreateRequest,
     ProjectDeleteResponse,
     ProjectListResponse,
+    ProjectRecord,
     ProjectSummary,
     ProjectUpdateRequest,
 )
@@ -18,11 +19,10 @@ from ...storage.workspace_store import DEFAULT_DISCLOSURE_TITLE
 def create_project_router(services: AppServices) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    def build_project_summary(project_id: str) -> ProjectSummary:
-        project = services.store.get_project(project_id)
+    def build_project_summary(project: ProjectRecord, *, include_context: bool = True) -> ProjectSummary:
         summary = ProjectSummary.model_validate(project.model_dump())
-        if project.active_session_id:
-            usage = services.context_manager.context_usage(project_id, project.active_session_id)
+        if include_context and project.active_session_id:
+            usage = services.context_manager.context_usage(project.project_id, project.active_session_id)
             summary.active_session_context = ContextUsageSummary.model_validate(usage.model_dump()) if usage else None
         return summary
 
@@ -30,7 +30,7 @@ def create_project_router(services: AppServices) -> APIRouter:
     async def list_projects() -> ProjectListResponse:
         projects = services.store.list_projects_with_current_first()
         return ProjectListResponse(
-            projects=[build_project_summary(project.project_id) for project in projects]
+            projects=[build_project_summary(project, include_context=False) for project in projects]
         )
 
     @router.post("/projects", response_model=ProjectSummary)
@@ -43,23 +43,23 @@ def create_project_router(services: AppServices) -> APIRouter:
             project_name,
             disclosure_title=disclosure_title or DEFAULT_DISCLOSURE_TITLE,
         )
-        return build_project_summary(project.project_id)
+        return build_project_summary(project)
 
     @router.get("/projects/{project_id}", response_model=ProjectSummary)
     async def get_project(project_id: str) -> ProjectSummary:
-        return build_project_summary(project_id)
+        return build_project_summary(services.store.get_project(project_id))
 
     @router.patch("/projects/{project_id}", response_model=ProjectSummary)
     async def rename_project(project_id: str, payload: ProjectUpdateRequest) -> ProjectSummary:
         project_name = payload.project_name.strip()
         if not project_name:
             raise ApiError(422, "invalid_project_name", "项目名不能为空。")
-        project = services.store.rename_project(project_id, project_name)
-        return build_project_summary(project.project_id)
+        project = await services.chat.rename_project(project_id, project_name)
+        return build_project_summary(project)
 
     @router.delete("/projects/{project_id}", response_model=ProjectDeleteResponse)
     async def delete_project(project_id: str) -> ProjectDeleteResponse:
-        next_project_id = services.store.delete_project(project_id)
+        next_project_id = await services.chat.delete_project(project_id)
         return ProjectDeleteResponse(deleted=True, project_id=project_id, next_project_id=next_project_id)
 
     return router

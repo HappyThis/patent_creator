@@ -18,6 +18,31 @@ type DocumentChangePayload = {
   active_block_id?: string | null;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : undefined;
+}
+
+function nullableString(value: unknown): string | null | undefined {
+  return typeof value === 'string' || value === null ? value : undefined;
+}
+
+function documentChangePayload(payload: Record<string, unknown>): DocumentChangePayload {
+  return {
+    changed_section_ids: stringArray(payload.changed_section_ids),
+    changed_block_ids: stringArray(payload.changed_block_ids),
+    active_section_id: nullableString(payload.active_section_id),
+    active_block_id: nullableString(payload.active_block_id),
+  };
+}
+
 type WorkspaceStreamArgs = {
   project: ProjectState | null;
   setProject: Dispatch<SetStateAction<ProjectState | null>>;
@@ -58,6 +83,7 @@ export function useWorkspaceStream({
     streamRef.current = null;
     runningStreamKeyRef.current = null;
     streamingAssistantIdRef.current = null;
+    optimisticUserMessageIdRef.current = null;
   }, []);
 
   const trackOptimisticMessage = useCallback((messageId: string | null) => {
@@ -67,7 +93,7 @@ export function useWorkspaceStream({
   const consumeStreamEvent = useCallback(
     async (project_id: string, eventName: string, payload: Record<string, unknown>) => {
       if (eventName === 'stream_attached') {
-        const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
+        const roundId = optionalString(payload.round_id);
         if (roundId && !streamingAssistantIdRef.current) {
           streamingAssistantIdRef.current = `assistant_stream_${roundId}`;
         }
@@ -81,17 +107,17 @@ export function useWorkspaceStream({
       }
 
       if (eventName === 'round_started') {
-        const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
-        const messageId = typeof payload.message_id === 'string' ? payload.message_id : undefined;
-        const sessionId = typeof payload.session_id === 'string' ? payload.session_id : undefined;
+        const roundId = optionalString(payload.round_id);
+        const messageId = optionalString(payload.message_id);
+        const sessionId = optionalString(payload.session_id);
         const firstUserText = typeof payload.first_user_text === 'string' ? payload.first_user_text : null;
         setProject((current) =>
           current
             ? {
                 ...current,
-                active_session_id: String(payload.session_id ?? current.active_session_id ?? ''),
-                running_session_id: String(payload.session_id ?? current.running_session_id ?? ''),
-                running_round_id: String(payload.round_id ?? current.running_round_id ?? ''),
+                active_session_id: sessionId ?? current.active_session_id,
+                running_session_id: sessionId ?? current.running_session_id,
+                running_round_id: roundId ?? current.running_round_id,
                 is_busy: true,
               }
             : current,
@@ -132,8 +158,8 @@ export function useWorkspaceStream({
             messageId,
             delta,
             formatTimestamp(),
-            typeof payload.round_id === 'string' ? payload.round_id : undefined,
-            typeof payload.message_id === 'string' ? payload.message_id : undefined,
+            optionalString(payload.round_id),
+            optionalString(payload.message_id),
           ),
         );
         return;
@@ -162,14 +188,13 @@ export function useWorkspaceStream({
       }
 
       if (eventName === 'tool_call_finished') {
-        const result = payload.result as Record<string, unknown> | undefined;
-        const status = result?.status === 'failed' ? 'failed' : 'done';
+        const status = isRecord(payload.result) && payload.result.status === 'failed' ? 'failed' : 'done';
         setEvents((current) => applyRunningToolEvent(current, payload, status));
         return;
       }
 
       if (eventName === 'document_changed') {
-        const documentPayload = payload as DocumentChangePayload;
+        const documentPayload = documentChangePayload(payload);
         focusDocumentChange(documentPayload);
         await refreshRenderAst(project_id, {
           focus_section_id: documentPayload.active_section_id,
@@ -189,22 +214,22 @@ export function useWorkspaceStream({
               current,
               reply,
               timestamp,
-              typeof payload.round_id === 'string' ? payload.round_id : undefined,
-              typeof payload.message_id === 'string' ? payload.message_id : undefined,
+              optionalString(payload.round_id),
+              optionalString(payload.message_id),
             ),
           );
         }
         const changed = payload.changed === true;
         const committed = payload.committed === true;
-        const commitError = payload.commit_error as Record<string, unknown> | null | undefined;
+        const commitError = isRecord(payload.commit_error) ? payload.commit_error : null;
         if (commitError || (changed && !committed)) {
           setEvents((current) => [
             ...current,
             {
               id: `round_status_${Date.now()}_${current.length}`,
               kind: 'round_status',
-              round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
-              message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+              round_id: optionalString(payload.round_id),
+              message_id: optionalString(payload.message_id),
               status: 'failed',
               summary: '本轮修改已完成，但版本提交失败。',
               detail: commitError ? String(commitError.message ?? '') : undefined,
@@ -231,8 +256,8 @@ export function useWorkspaceStream({
             role: 'assistant',
             text: String(payload.reply ?? '本轮处理失败。'),
             timestamp: formatTimestamp(),
-            round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
-            message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+            round_id: optionalString(payload.round_id),
+            message_id: optionalString(payload.message_id),
           },
         ]);
         await refreshProject(project_id);
@@ -248,8 +273,8 @@ export function useWorkspaceStream({
             current,
             reply,
             formatTimestamp(),
-            typeof payload.round_id === 'string' ? payload.round_id : undefined,
-            typeof payload.message_id === 'string' ? payload.message_id : undefined,
+            optionalString(payload.round_id),
+            optionalString(payload.message_id),
           ),
         );
         const nextProject = await refreshProject(project_id);
@@ -286,11 +311,15 @@ export function useWorkspaceStream({
     streamingAssistantIdRef.current = roundId ? `assistant_stream_${roundId}` : null;
 
     let cancelled = false;
+    let attachedHandle: ChatStreamHandle | null = null;
     void (async () => {
       try {
         setSelectedSessionId(sessionId);
         await loadSessionEvents(projectId, sessionId);
         if (cancelled || streamRef.current) {
+          if (!streamRef.current) {
+            runningStreamKeyRef.current = null;
+          }
           return;
         }
         const handle = await sseClient.streamSession(projectId, sessionId, (eventName, eventPayload) => {
@@ -298,8 +327,10 @@ export function useWorkspaceStream({
         });
         if (cancelled) {
           handle.close();
+          runningStreamKeyRef.current = null;
           return;
         }
+        attachedHandle = handle;
         streamRef.current = handle;
         void handle.done
           .catch(async (error: unknown) => {
@@ -322,13 +353,16 @@ export function useWorkspaceStream({
           .finally(() => {
             if (streamRef.current === handle) {
               streamRef.current = null;
+              runningStreamKeyRef.current = null;
               streamingAssistantIdRef.current = null;
             }
           });
       } catch (error: unknown) {
         if (cancelled) {
+          runningStreamKeyRef.current = null;
           return;
         }
+        runningStreamKeyRef.current = null;
         const messageText = error instanceof Error ? error.message : '恢复流式连接失败。';
         setEvents((current) => [
           ...current,
@@ -346,6 +380,12 @@ export function useWorkspaceStream({
 
     return () => {
       cancelled = true;
+      if (attachedHandle && streamRef.current === attachedHandle) {
+        attachedHandle.close();
+        streamRef.current = null;
+        runningStreamKeyRef.current = null;
+        streamingAssistantIdRef.current = null;
+      }
     };
   }, [
     consumeStreamEvent,

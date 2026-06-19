@@ -136,6 +136,30 @@ def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
     assert read_result["status"] == "success"
     assert read_result["output"]["content"] == "1 | def alpha():"
     assert read_result["output"]["next_start_line"] == 2
+    assert read_result["output"]["total_lines_is_lower_bound"] is True
+
+    final_read_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_read",
+        {"path": "src/alpha.py", "start_line": 2, "limit": 10},
+    )
+    assert final_read_result["status"] == "success"
+    assert final_read_result["output"]["content"] == "2 |     return 'needle'"
+    assert final_read_result["output"]["next_start_line"] is None
+    assert final_read_result["output"]["total_lines_is_lower_bound"] is False
+
+    beyond_eof_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_read",
+        {"path": "src/alpha.py", "start_line": 10, "limit": 10},
+    )
+    assert beyond_eof_result["status"] == "success"
+    assert beyond_eof_result["output"]["content"] == ""
+    assert beyond_eof_result["output"]["end_line"] == 2
+    assert beyond_eof_result["output"]["next_start_line"] is None
+    assert beyond_eof_result["output"]["total_lines"] == 2
 
     external_dir = tmp_path / "external_repo"
     external_dir.mkdir()
@@ -170,6 +194,27 @@ def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
     assert external_search["output"]["matches"][0]["path"] == str(external_file)
 
 
+def test_file_tools_reject_relative_paths_outside_project(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    external_file = workspace.parent / "outside.txt"
+    external_file.write_text("outside needle\n", encoding="utf-8")
+
+    read_result = run_builtin_tool(executor, project_id, "file_read", {"path": "../outside.txt"})
+    assert read_result["status"] == "failed"
+    assert read_result["output"]["code"] == "invalid_operation"
+    assert "project workspace" in read_result["output"]["message"]
+
+    glob_result = run_builtin_tool(executor, project_id, "file_glob", {"path": "../*.txt"})
+    assert glob_result["status"] == "failed"
+    assert glob_result["output"]["code"] == "invalid_operation"
+    assert "project workspace" in glob_result["output"]["message"]
+
+    absolute_read = run_builtin_tool(executor, project_id, "file_read", {"path": str(external_file)})
+    assert absolute_read["status"] == "success"
+    assert "outside needle" in absolute_read["output"]["content"]
+
+
 def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
     workspace = executor.store.project_dir(project_id)
@@ -193,6 +238,100 @@ def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:
     assert glob_result["output"]["total_is_lower_bound"] is True
 
 
+def test_file_search_stops_at_scan_budget(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    many_dir = workspace / "many"
+    many_dir.mkdir()
+    for index in range(10):
+        (many_dir / f"{index:02d}.txt").write_text("needle\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"path": "many", "pattern": "needle", "limit": 100, "max_scanned_paths": 3},
+    )
+
+    assert search_result["status"] == "success"
+    assert search_result["output"]["stop_reason"] == "scan_budget_exceeded"
+    assert search_result["output"]["truncated"] is True
+    assert search_result["output"]["scanned"] == 3
+    assert search_result["output"]["scan_budget"] == 3
+    assert search_result["output"]["returned"] == 3
+    assert search_result["output"]["total_is_lower_bound"] is True
+
+
+def test_file_search_files_mode_stops_after_page_is_filled(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    many_dir = workspace / "many"
+    many_dir.mkdir()
+    for index in range(10):
+        (many_dir / f"{index:02d}.txt").write_text("needle\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"path": "many", "pattern": "needle", "mode": "files", "limit": 3, "max_scanned_paths": 100},
+    )
+
+    assert search_result["status"] == "success"
+    assert search_result["output"]["stop_reason"] == "limit_reached"
+    assert search_result["output"]["truncated"] is True
+    assert search_result["output"]["scanned"] == 3
+    assert search_result["output"]["returned"] == 3
+    assert search_result["output"]["total_is_lower_bound"] is True
+
+
+def test_file_search_lines_mode_does_not_collect_past_limit(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    log_file = workspace / "many-lines.txt"
+    log_file.write_text("\n".join("needle" for _ in range(20)) + "\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"path": "many-lines.txt", "pattern": "needle", "limit": 3},
+    )
+
+    assert search_result["status"] == "success"
+    assert search_result["output"]["stop_reason"] == "limit_reached"
+    assert search_result["output"]["truncated"] is True
+    assert search_result["output"]["returned"] == 3
+    assert search_result["output"]["total"] == 3
+    assert search_result["output"]["total_line_matches"] == 3
+    assert search_result["output"]["total_is_lower_bound"] is True
+
+
+def test_file_search_context_lines_mode_does_not_collect_past_limit(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    log_file = workspace / "many-lines.txt"
+    log_file.write_text("\n".join(f"line {index} needle" for index in range(20)) + "\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"path": "many-lines.txt", "pattern": "needle", "context_lines": 1, "limit": 3},
+    )
+
+    assert search_result["status"] == "success"
+    assert search_result["output"]["stop_reason"] == "limit_reached"
+    assert search_result["output"]["truncated"] is True
+    assert search_result["output"]["returned"] == 3
+    assert search_result["output"]["total_line_matches"] == 3
+    assert [match["line"] for match in search_result["output"]["matches"]] == [1, 2, 3]
+    assert search_result["output"]["matches"][0]["context"] == [
+        {"line": 1, "text": "line 0 needle"},
+        {"line": 2, "text": "line 1 needle"},
+    ]
+
+
 def test_file_glob_skips_heavy_directories_during_scan(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
     workspace = executor.store.project_dir(project_id)
@@ -208,3 +347,39 @@ def test_file_glob_skips_heavy_directories_during_scan(tmp_path: Path) -> None:
     assert glob_result["status"] == "success"
     assert glob_result["output"]["matches"] == ["src/visible.py"]
     assert "node_modules" in glob_result["output"]["skipped_dirs"]
+
+
+def test_file_search_skips_heavy_directories_during_scan(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    source_dir = workspace / "src"
+    source_dir.mkdir()
+    (source_dir / "visible.py").write_text("needle\n", encoding="utf-8")
+    vendor_dir = workspace / "node_modules"
+    vendor_dir.mkdir()
+    (vendor_dir / "hidden.py").write_text("needle\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(executor, project_id, "file_search", {"pattern": "needle", "limit": 100})
+
+    assert search_result["status"] == "success"
+    assert [match["path"] for match in search_result["output"]["matches"]] == ["src/visible.py"]
+    assert "node_modules" in search_result["output"]["skipped_dirs"]
+
+
+def test_file_search_double_star_include_glob_matches_root_files(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    (workspace / "root.py").write_text("needle\n", encoding="utf-8")
+    source_dir = workspace / "src"
+    source_dir.mkdir()
+    (source_dir / "nested.py").write_text("needle\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"pattern": "needle", "include_glob": "**/*.py", "limit": 100},
+    )
+
+    assert search_result["status"] == "success"
+    assert [match["path"] for match in search_result["output"]["matches"]] == ["root.py", "src/nested.py"]

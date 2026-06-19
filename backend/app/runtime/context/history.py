@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from ...schemas import SessionEvent
 from .compression import prepare_compressed_markdown_messages
@@ -23,32 +23,29 @@ class MessageSegment:
     messages: list[dict[str, Any]]
 
 
+@dataclass(frozen=True, slots=True)
+class ContextEventScan:
+    marker: dict[str, Any]
+    events: list[SessionEvent]
+    current_message_exists: bool
+
+
 def restore_main_chat_messages(
-    events: list[SessionEvent],
+    events: Iterable[SessionEvent],
     *,
     current_user_message: str | None = None,
     current_message_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    marker = latest_context_summary_marker(events)
-    messages: list[dict[str, Any]] = []
-    if marker["compressed_markdown"]:
-        messages.extend(prepare_compressed_markdown_messages(marker["compressed_markdown"]))
+    scan = _scan_main_context_events_after_latest_summary(events, current_message_id=current_message_id)
 
-    visible = [
-        event
-        for event in events
-        if event.scope == "main" and event.seq >= marker["cursor_seq"] and event.type in MAIN_CONTEXT_EVENT_TYPES
-    ]
-    messages.extend(project_main_events(visible))
+    messages: list[dict[str, Any]] = []
+    if scan.marker["compressed_markdown"]:
+        messages.extend(prepare_compressed_markdown_messages(scan.marker["compressed_markdown"]))
+
+    messages.extend(project_main_events(scan.events))
 
     if current_user_message is not None:
-        current_message_exists = bool(
-            current_message_id
-            and any(
-                event.message_id == current_message_id and event.type == "user_input" for event in events
-            )
-        )
-        if current_message_exists:
+        if scan.current_message_exists:
             return messages
         if current_message_id:
             messages.append({"role": "user", "content": current_user_message})
@@ -57,17 +54,32 @@ def restore_main_chat_messages(
     return messages
 
 
-def latest_context_summary_marker(events: list[SessionEvent]) -> dict[str, Any]:
-    marker = next(
-        (
-            event
-            for event in reversed(events)
-            if event.scope == "main" and event.type == "context_summary"
-        ),
-        None,
-    )
-    if marker is None:
-        return {"cursor_seq": 1, "compressed_markdown": ""}
+def main_context_events_after_latest_summary(events: Iterable[SessionEvent]) -> tuple[dict[str, Any], list[SessionEvent]]:
+    scan = _scan_main_context_events_after_latest_summary(events)
+    return scan.marker, scan.events
+
+
+def _scan_main_context_events_after_latest_summary(
+    events: Iterable[SessionEvent],
+    *,
+    current_message_id: str | None = None,
+) -> ContextEventScan:
+    marker = {"cursor_seq": 1, "compressed_markdown": ""}
+    candidate_events: list[SessionEvent] = []
+    current_message_exists = False
+    for event in events:
+        if current_message_id and event.message_id == current_message_id and event.type == "user_input":
+            current_message_exists = True
+        if event.scope == "main" and event.type == "context_summary":
+            marker = _context_summary_marker_from_event(event)
+            candidate_events = []
+            continue
+        if event.scope == "main" and event.seq >= marker["cursor_seq"] and event.type in MAIN_CONTEXT_EVENT_TYPES:
+            candidate_events.append(event)
+    return ContextEventScan(marker=marker, events=candidate_events, current_message_exists=current_message_exists)
+
+
+def _context_summary_marker_from_event(marker: SessionEvent) -> dict[str, Any]:
     cursor_seq = int(marker.payload.get("cursor_seq_after") or marker.payload.get("covered_seq_end") or 0) + (
         0 if marker.payload.get("cursor_seq_after") else 1
     )

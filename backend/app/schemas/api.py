@@ -108,7 +108,6 @@ class SessionEvent(BaseModel):
     round_id: str
     message_id: str
     call_id: str | None = None
-    parent_call_id: str | None = None
     payload: dict[str, Any]
 
 

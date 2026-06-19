@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from .disclosure import STANDARD_SECTION_TITLES, find_section, section_title_text
+from .disclosure import STANDARD_SECTION_TITLES, section_title_text
 from .document_tool_results import ToolResult, tool_failed, tool_success
 
 DEFAULT_PREVIEW_CHARS = 40

@@ -1,4 +1,4 @@
-import { RefObject, useEffect } from 'react';
+import { RefObject, useEffect, useMemo } from 'react';
 import { RenderAst } from '../../types';
 import { PreviewFocusTarget } from '../../hooks/useWorkspaceSelection';
 import { DocumentStats } from './documentStats';
@@ -25,7 +25,12 @@ export function PreviewPanel({
   onActiveSectionChange,
   onExport,
 }: PreviewPanelProps) {
-  const figuresById = Object.fromEntries((renderAst.figures ?? []).map((figure) => [figure.figure_id, figure]));
+  const figuresById = useMemo(
+    () => Object.fromEntries((renderAst.figures ?? []).map((figure) => [figure.figure_id, figure])),
+    [renderAst.figures],
+  );
+  const recentSectionIdSet = useMemo(() => new Set(recentSectionIds), [recentSectionIds]);
+  const recentBlockIdSet = useMemo(() => new Set(recentBlockIds), [recentBlockIds]);
 
   useEffect(() => {
     if (!previewRef.current) {
@@ -50,7 +55,9 @@ export function PreviewPanel({
       return;
     }
 
+    let frameId: number | null = null;
     const updateActiveSection = () => {
+      frameId = null;
       const sections = Array.from(
         container.querySelectorAll<HTMLElement>('.preview-section[data-anchor]'),
       );
@@ -74,10 +81,21 @@ export function PreviewPanel({
         onActiveSectionChange(currentSectionId);
       }
     };
+    const scheduleActiveSectionUpdate = () => {
+      if (frameId !== null) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(updateActiveSection);
+    };
 
     updateActiveSection();
-    container.addEventListener('scroll', updateActiveSection, { passive: true });
-    return () => container.removeEventListener('scroll', updateActiveSection);
+    container.addEventListener('scroll', scheduleActiveSectionUpdate, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', scheduleActiveSectionUpdate);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
   }, [onActiveSectionChange, previewRef, renderAst]);
 
   return (
@@ -99,8 +117,8 @@ export function PreviewPanel({
         <article className="document-card">
           {renderPreviewNodes({
             nodes: renderAst.children,
-            recentSectionIds,
-            recentBlockIds,
+            recentSectionIds: recentSectionIdSet,
+            recentBlockIds: recentBlockIdSet,
             sectionStatusById: stats.sectionStatusById,
             figuresById,
           })}
