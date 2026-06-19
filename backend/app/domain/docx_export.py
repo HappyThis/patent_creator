@@ -1,0 +1,631 @@
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+from uuid import uuid4
+
+from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
+
+from .disclosure import build_render_ast
+from .figures import figure_caption
+
+FIGURE_REF_PATTERN = re.compile(r"\[([^\]]+)\]\(figure:(fig_\d{6})\)")
+FORMULA_REF_PATTERN = re.compile(r"\[([^\]]+)\]\(formula:([A-Za-z0-9_-]+)\)")
+
+BODY_FONT_PT = 12
+BODY_LINE_SPACING = 1.9
+BODY_PARAGRAPH_AFTER_PT = 9
+HEADING_1_PT = 18
+HEADING_2_PT = 14.25
+HEADING_BEFORE_PT = 25.5
+HEADING_AFTER_PT = 12
+FIGURE_BEFORE_PT = 21
+FIGURE_CAPTION_AFTER_PT = 27
+FORMULA_BEFORE_PT = 13.5
+FORMULA_AFTER_PT = 16.5
+TABLE_BEFORE_PT = 15
+TABLE_AFTER_PT = 21
+SPACER_BASE_LINE_PT = 12
+
+
+@dataclass(frozen=True)
+class InlineToken:
+    type: str
+    start: int
+    end: int
+    text: str = ""
+    label: str = ""
+    target_id: str = ""
+
+
+class DocxExportError(RuntimeError):
+    pass
+
+
+def export_disclosure_docx(
+    *,
+    disclosure: dict[str, Any],
+    figures: list[dict[str, Any]],
+    export_path: Path,
+    project_dir: Path,
+) -> Path:
+    render_ast = build_render_ast(disclosure, figures=figures)
+    figures_by_id = {str(figure.get("figure_id")): figure for figure in figures}
+    formula_numbers = collect_formula_numbers(render_ast.get("children", []))
+    asset_manifest = render_assets(render_ast, figures_by_id, project_dir)
+
+    document = Document()
+    configure_document(document)
+
+    for index, node in enumerate(render_ast.get("children", []), start=1):
+        if node.get("type") == "section":
+            render_section(
+                document,
+                node,
+                index_path=[index],
+                figures_by_id=figures_by_id,
+                formula_numbers=formula_numbers,
+                assets=asset_manifest,
+            )
+
+    export_path.parent.mkdir(parents=True, exist_ok=True)
+    document.save(export_path)
+    return export_path
+
+
+def configure_document(document: Document) -> None:
+    section = document.sections[0]
+    section.top_margin = Inches(0.55)
+    section.bottom_margin = Inches(0.62)
+    section.left_margin = Inches(0.78)
+    section.right_margin = Inches(0.78)
+
+    styles = document.styles
+    normal = styles["Normal"]
+    normal.font.name = "Calibri"
+    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    normal.font.size = Pt(BODY_FONT_PT)
+    normal.font.color.rgb = RGBColor(0x2E, 0x39, 0x42)
+    normal.paragraph_format.line_spacing = BODY_LINE_SPACING
+    normal.paragraph_format.space_after = Pt(BODY_PARAGRAPH_AFTER_PT)
+
+    for name in ("Heading 1", "Heading 2", "Heading 3"):
+        style = styles[name]
+        style.font.name = "Calibri"
+        style._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+        style.font.bold = True
+        style.font.color.rgb = RGBColor(0x0D, 0x16, 0x24)
+        style.paragraph_format.space_before = Pt(HEADING_BEFORE_PT)
+        style.paragraph_format.space_after = Pt(HEADING_AFTER_PT)
+        style.paragraph_format.line_spacing = 1.35
+    styles["Heading 1"].font.size = Pt(HEADING_1_PT)
+    styles["Heading 2"].font.size = Pt(HEADING_2_PT)
+    styles["Heading 3"].font.size = Pt(HEADING_2_PT)
+
+
+def collect_formula_numbers(nodes: Iterable[dict[str, Any]]) -> dict[str, int]:
+    formula_numbers: dict[str, int] = {}
+
+    def visit(items: Iterable[dict[str, Any]]) -> None:
+        for item in items:
+            if item.get("type") == "section":
+                visit(item.get("children", []))
+            elif item.get("type") == "formula":
+                formula_numbers[str(item["id"])] = len(formula_numbers) + 1
+
+    visit(nodes)
+    return formula_numbers
+
+
+def render_assets(
+    render_ast: dict[str, Any],
+    figures_by_id: dict[str, dict[str, Any]],
+    project_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    items: list[dict[str, str]] = []
+
+    def add_inline_math(latex: str) -> str:
+        asset_id = f"inline_{len(items) + 1:06d}_{uuid4().hex[:8]}"
+        items.append({"id": asset_id, "kind": "inline_formula", "latex": latex})
+        return asset_id
+
+    inline_asset_by_latex: dict[str, str] = {}
+    block_formula_ids: set[str] = set()
+    figure_ids: set[str] = set()
+
+    def scan_text(text: str) -> None:
+        for token in parse_inline_tokens(text):
+            if token.type == "math" and token.text not in inline_asset_by_latex:
+                inline_asset_by_latex[token.text] = add_inline_math(token.text)
+
+    def visit(nodes: Iterable[dict[str, Any]]) -> None:
+        for node in nodes:
+            node_type = node.get("type")
+            if node_type == "section":
+                visit(node.get("children", []))
+            elif node_type in {"title", "paragraph"}:
+                scan_text(str(node.get("text") or ""))
+            elif node_type == "list":
+                for item in node.get("items", []):
+                    scan_text(str(item))
+            elif node_type == "table":
+                for value in node.get("columns", []):
+                    scan_text(str(value))
+                for row in node.get("rows", []):
+                    for value in row:
+                        scan_text(str(value))
+            elif node_type == "formula":
+                block_id = str(node["id"])
+                if block_id not in block_formula_ids:
+                    block_formula_ids.add(block_id)
+                    items.append({"id": f"block_{block_id}", "kind": "block_formula", "latex": str(node.get("latex") or "")})
+            elif node_type == "figure":
+                figure_id = str(node.get("figure_id") or "")
+                figure = figures_by_id.get(figure_id)
+                source = figure.get("source", {}) if isinstance(figure, dict) else {}
+                if figure_id and source.get("type") == "mermaid" and figure_id not in figure_ids:
+                    figure_ids.add(figure_id)
+                    items.append({"id": f"figure_{figure_id}", "kind": "figure", "mermaid": str(source.get("content") or "")})
+
+    visit(render_ast.get("children", []))
+    if not items:
+        return {}
+
+    asset_dir = project_dir / "exports" / f"docx-assets-{uuid4().hex[:8]}"
+    input_path = asset_dir / "input.json"
+    output_dir = asset_dir / "images"
+    manifest_path = asset_dir / "manifest.json"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    input_path.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    repo_root = Path(__file__).resolve().parents[3]
+    frontend_root = repo_root / "frontend"
+    script_path = frontend_root / "scripts" / "render-docx-assets.mjs"
+    try:
+        result = subprocess.run(
+            [
+                "node",
+                str(script_path),
+                "--input",
+                str(input_path),
+                "--output",
+                str(output_dir),
+                "--manifest",
+                str(manifest_path),
+            ],
+            cwd=frontend_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=90,
+        )
+    except OSError as exc:
+        raise DocxExportError(f"DOCX asset renderer failed to start: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise DocxExportError("DOCX asset renderer timed out.") from exc
+
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "unknown renderer error"
+        raise DocxExportError(f"DOCX asset renderer failed: {message}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assets = dict(manifest.get("assets") or {})
+    for latex, asset_id in inline_asset_by_latex.items():
+        if asset_id in assets:
+            assets[f"inline:{latex}"] = assets[asset_id]
+    return assets
+
+
+def render_section(
+    document: Document,
+    node: dict[str, Any],
+    *,
+    index_path: list[int],
+    figures_by_id: dict[str, dict[str, Any]],
+    formula_numbers: dict[str, int],
+    assets: dict[str, dict[str, Any]],
+) -> None:
+    heading = document.add_paragraph()
+    configure_heading_paragraph(heading, level=len(index_path), is_first=len(index_path) == 1 and index_path[0] == 1)
+    prefix = heading.add_run(f"{'.'.join(str(part) for part in index_path)}. ")
+    style_heading_run(prefix, level=len(index_path), is_prefix=True)
+    title = heading.add_run(str(node.get("title") or "").strip())
+    style_heading_run(title, level=len(index_path), is_prefix=False)
+
+    children = node.get("children", [])
+    has_child_sections = any(child.get("type") == "section" for child in children)
+    has_direct_content = any(child.get("type") != "section" for child in children)
+    if not has_child_sections and not has_direct_content:
+        return
+
+    child_section_index = 0
+    for child in children:
+        if child.get("type") == "section":
+            child_section_index += 1
+            render_section(
+                document,
+                child,
+                index_path=[*index_path, child_section_index],
+                figures_by_id=figures_by_id,
+                formula_numbers=formula_numbers,
+                assets=assets,
+            )
+        else:
+            render_block(document, child, figures_by_id=figures_by_id, formula_numbers=formula_numbers, assets=assets)
+
+
+def render_block(
+    document: Document,
+    node: dict[str, Any],
+    *,
+    figures_by_id: dict[str, dict[str, Any]],
+    formula_numbers: dict[str, int],
+    assets: dict[str, dict[str, Any]],
+) -> None:
+    node_type = node.get("type")
+    if node_type in {"title", "paragraph"}:
+        paragraph = document.add_paragraph()
+        configure_body_paragraph(paragraph)
+        if node_type == "paragraph":
+            paragraph.paragraph_format.first_line_indent = Pt(BODY_FONT_PT * 2)
+        append_inline_content(paragraph, str(node.get("text") or ""), figures_by_id, formula_numbers, assets)
+    elif node_type == "list":
+        style = "List Number" if node.get("ordered") else "List Bullet"
+        for item in node.get("items", []):
+            paragraph = document.add_paragraph(style=style)
+            configure_body_paragraph(paragraph, after_pt=6)
+            append_inline_content(paragraph, str(item), figures_by_id, formula_numbers, assets)
+    elif node_type == "table":
+        render_table(document, node, figures_by_id, formula_numbers, assets)
+    elif node_type == "formula":
+        render_formula(document, node, formula_numbers, assets)
+    elif node_type == "figure":
+        render_figure(document, node, figures_by_id, assets)
+    elif node_type == "image":
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run(str(node.get("alt") or node.get("src") or "image"))
+        run.italic = True
+        run.font.color.rgb = RGBColor(0x6F, 0x77, 0x80)
+
+
+def render_table(
+    document: Document,
+    node: dict[str, Any],
+    figures_by_id: dict[str, dict[str, Any]],
+    formula_numbers: dict[str, int],
+    assets: dict[str, dict[str, Any]],
+) -> None:
+    columns = [str(value) for value in node.get("columns", [])]
+    rows = [[str(value) for value in row] for row in node.get("rows", [])]
+    if not columns:
+        return
+
+    add_vertical_space(document, TABLE_BEFORE_PT)
+    table = document.add_table(rows=1, cols=len(columns))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = True
+    set_table_borders(table, "D4DBE6")
+
+    for index, column in enumerate(columns):
+        cell = table.rows[0].cells[index]
+        set_cell_shading(cell, "E8E0D4")
+        set_cell_margins(cell, top=150, start=180, bottom=150, end=180)
+        paragraph = cell.paragraphs[0]
+        configure_table_paragraph(paragraph)
+        append_inline_content(paragraph, column, figures_by_id, formula_numbers, assets)
+        for run in paragraph.runs:
+            run.bold = True
+
+    for row in rows:
+        cells = table.add_row().cells
+        for index, cell in enumerate(cells):
+            set_cell_margins(cell, top=150, start=180, bottom=150, end=180)
+            paragraph = cell.paragraphs[0]
+            configure_table_paragraph(paragraph)
+            append_inline_content(paragraph, row[index] if index < len(row) else "", figures_by_id, formula_numbers, assets)
+
+    add_vertical_space(document, TABLE_AFTER_PT)
+
+
+def render_formula(
+    document: Document,
+    node: dict[str, Any],
+    formula_numbers: dict[str, int],
+    assets: dict[str, dict[str, Any]],
+) -> None:
+    asset = assets.get(f"block_{node.get('id')}")
+    number = formula_numbers.get(str(node.get("id")))
+    add_vertical_space(document, FORMULA_BEFORE_PT)
+    table = document.add_table(rows=1, cols=3)
+    table.autofit = False
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    remove_table_borders(table)
+    table.columns[0].width = Inches(0.55)
+    table.columns[1].width = Inches(5.0)
+    table.columns[2].width = Inches(0.55)
+    left_cell, formula_cell, number_cell = table.rows[0].cells
+    left_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    formula_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    number_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    set_cell_width(left_cell, 0.55)
+    set_cell_width(formula_cell, 5.0)
+    set_cell_width(number_cell, 0.55)
+
+    paragraph = formula_cell.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.line_spacing = 1.0
+    if asset:
+        add_picture(paragraph, asset, max_width=Inches(5.35))
+    else:
+        append_plain_text(paragraph, str(node.get("latex") or ""))
+
+    number_paragraph = number_cell.paragraphs[0]
+    number_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    number_paragraph.paragraph_format.line_spacing = 1.0
+    if number:
+        run = number_paragraph.add_run(f"({number})")
+        run.font.size = Pt(10.5)
+        run.font.color.rgb = RGBColor(0x6F, 0x77, 0x80)
+    add_vertical_space(document, FORMULA_AFTER_PT)
+
+
+def render_figure(
+    document: Document,
+    node: dict[str, Any],
+    figures_by_id: dict[str, dict[str, Any]],
+    assets: dict[str, dict[str, Any]],
+) -> None:
+    figure_id = str(node.get("figure_id") or "")
+    figure = figures_by_id.get(figure_id)
+    asset = assets.get(f"figure_{figure_id}")
+    add_vertical_space(document, FIGURE_BEFORE_PT)
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.line_spacing = 1.0
+    if asset:
+        add_picture(paragraph, asset, max_width=Inches(5.7))
+    else:
+        run = paragraph.add_run(figure_id)
+        run.italic = True
+        run.font.color.rgb = RGBColor(0x6F, 0x77, 0x80)
+
+    if figure:
+        caption = document.add_paragraph()
+        caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        caption.paragraph_format.space_before = Pt(7.5)
+        caption.paragraph_format.space_after = Pt(FIGURE_CAPTION_AFTER_PT)
+        caption.paragraph_format.line_spacing = 1.55
+        run = caption.add_run(figure_caption(figure))
+        run.font.size = Pt(9.5)
+        run.font.color.rgb = RGBColor(0x5F, 0x66, 0x70)
+
+
+def append_inline_content(
+    paragraph: Any,
+    text: str,
+    figures_by_id: dict[str, dict[str, Any]],
+    formula_numbers: dict[str, int],
+    assets: dict[str, dict[str, Any]],
+) -> None:
+    cursor = 0
+    for token in parse_inline_tokens(text):
+        if token.start > cursor:
+            append_plain_text(paragraph, unescape_inline_text(text[cursor:token.start]))
+        if token.type == "math":
+            asset = assets.get(f"inline:{token.text}")
+            if asset:
+                add_picture(paragraph, asset, inline=True)
+            else:
+                append_plain_text(paragraph, token.label)
+        elif token.type == "figure":
+            figure = figures_by_id.get(token.target_id)
+            run = paragraph.add_run(str(figure.get("label") if figure else token.label))
+            style_reference_run(run)
+        elif token.type == "formula":
+            number = formula_numbers.get(token.target_id)
+            run = paragraph.add_run(f"式({number})" if number else token.label)
+            style_reference_run(run)
+        cursor = token.end
+    if cursor < len(text):
+        append_plain_text(paragraph, unescape_inline_text(text[cursor:]))
+
+
+def append_plain_text(paragraph: Any, text: str) -> None:
+    if text:
+        paragraph.add_run(text)
+
+
+def parse_inline_tokens(text: str) -> list[InlineToken]:
+    tokens: list[InlineToken] = []
+    cursor = 0
+    while cursor < len(text):
+        candidates = [
+            find_next_figure_ref(text, cursor),
+            find_next_formula_ref(text, cursor),
+            find_next_inline_math(text, cursor),
+        ]
+        token = min((candidate for candidate in candidates if candidate), key=lambda item: item.start, default=None)
+        if token is None:
+            break
+        tokens.append(token)
+        cursor = token.end
+    return tokens
+
+
+def find_next_figure_ref(text: str, offset: int) -> InlineToken | None:
+    match = FIGURE_REF_PATTERN.search(text, offset)
+    if not match:
+        return None
+    return InlineToken("figure", match.start(), match.end(), label=match.group(1), target_id=match.group(2))
+
+
+def find_next_formula_ref(text: str, offset: int) -> InlineToken | None:
+    match = FORMULA_REF_PATTERN.search(text, offset)
+    if not match:
+        return None
+    return InlineToken("formula", match.start(), match.end(), label=match.group(1), target_id=match.group(2))
+
+
+def find_next_inline_math(text: str, offset: int) -> InlineToken | None:
+    for start in range(offset, len(text)):
+        if text[start] != "$" or is_escaped(text, start) or (start + 1 < len(text) and text[start + 1] == "$"):
+            continue
+        for end in range(start + 1, len(text)):
+            if text[end] == "\n":
+                break
+            if text[end] == "$" and not is_escaped(text, end):
+                latex = text[start + 1 : end].strip()
+                if not latex:
+                    break
+                return InlineToken("math", start, end + 1, text=latex, label=text[start : end + 1])
+    return None
+
+
+def is_escaped(text: str, index: int) -> bool:
+    slash_count = 0
+    cursor = index - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        slash_count += 1
+        cursor -= 1
+    return slash_count % 2 == 1
+
+
+def unescape_inline_text(text: str) -> str:
+    return text.replace(r"\$", "$")
+
+
+def style_reference_run(run: Any) -> None:
+    run.font.color.rgb = RGBColor(0x8A, 0x64, 0x26)
+    run.underline = True
+
+
+def configure_heading_paragraph(paragraph: Any, *, level: int, is_first: bool = False) -> None:
+    paragraph.paragraph_format.space_before = Pt(0 if is_first else HEADING_BEFORE_PT)
+    paragraph.paragraph_format.space_after = Pt(HEADING_AFTER_PT)
+    paragraph.paragraph_format.line_spacing = 1.35
+    paragraph.paragraph_format.keep_with_next = True
+    paragraph.paragraph_format.keep_together = True
+
+
+def style_heading_run(run: Any, *, level: int, is_prefix: bool) -> None:
+    run.font.name = "Calibri"
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    run.font.bold = True
+    run.font.size = Pt(HEADING_1_PT if level == 1 else HEADING_2_PT)
+    run.font.color.rgb = RGBColor(0x8A, 0x64, 0x26) if is_prefix else RGBColor(0x0D, 0x16, 0x24)
+
+
+def configure_body_paragraph(paragraph: Any, *, after_pt: float = BODY_PARAGRAPH_AFTER_PT) -> None:
+    paragraph.paragraph_format.line_spacing = BODY_LINE_SPACING
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(after_pt)
+
+
+def configure_table_paragraph(paragraph: Any) -> None:
+    paragraph.paragraph_format.line_spacing = BODY_LINE_SPACING
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+
+
+def add_vertical_space(document: Document, height_pt: float) -> None:
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.line_spacing = 1.0
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(max(height_pt - SPACER_BASE_LINE_PT, 0))
+    run = paragraph.add_run()
+    run.font.size = Pt(1)
+    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    run.add_text(" ")
+
+
+def add_picture(paragraph: Any, asset: dict[str, Any], *, max_width: Any | None = None, inline: bool = False) -> None:
+    path = str(asset.get("path") or "")
+    if not path:
+        return
+    width_px = max(float(asset.get("width_px") or 1), 1.0)
+    height_px = max(float(asset.get("height_px") or 1), 1.0)
+    run = paragraph.add_run()
+    if inline:
+        height_pt = min(max(height_px * 0.42, 8.5), 12.5)
+        run.add_picture(path, height=Pt(height_pt))
+        return
+    if max_width is None:
+        run.add_picture(path)
+        return
+    max_width_inches = max_width.inches
+    if width_px / height_px < 0.55:
+        max_width_inches = min(max_width_inches, 2.1)
+    target_width_inches = min(width_px / 96.0, max_width_inches)
+    run.add_picture(path, width=Inches(target_width_inches))
+
+
+def set_table_borders(table: Any, color: str) -> None:
+    tbl_pr = table._tbl.tblPr
+    borders = tbl_pr.first_child_found_in("w:tblBorders")
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        tag = f"w:{edge}"
+        element = borders.find(qn(tag))
+        if element is None:
+            element = OxmlElement(tag)
+            borders.append(element)
+        element.set(qn("w:val"), "single")
+        element.set(qn("w:sz"), "6")
+        element.set(qn("w:space"), "0")
+        element.set(qn("w:color"), color)
+
+
+def remove_table_borders(table: Any) -> None:
+    tbl_pr = table._tbl.tblPr
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        element = OxmlElement(f"w:{edge}")
+        element.set(qn("w:val"), "nil")
+        borders.append(element)
+    tbl_pr.append(borders)
+
+
+def set_cell_shading(cell: Any, fill: str) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:fill"), fill)
+
+
+def set_cell_margins(cell: Any, *, top: int, start: int, bottom: int, end: int) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    margins = tc_pr.first_child_found_in("w:tcMar")
+    if margins is None:
+        margins = OxmlElement("w:tcMar")
+        tc_pr.append(margins)
+    for edge, value in (("top", top), ("start", start), ("bottom", bottom), ("end", end)):
+        element = margins.find(qn(f"w:{edge}"))
+        if element is None:
+            element = OxmlElement(f"w:{edge}")
+            margins.append(element)
+        element.set(qn("w:w"), str(value))
+        element.set(qn("w:type"), "dxa")
+
+
+def set_cell_width(cell: Any, width_inches: float) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    width = tc_pr.find(qn("w:tcW"))
+    if width is None:
+        width = OxmlElement("w:tcW")
+        tc_pr.append(width)
+    width.set(qn("w:w"), str(int(width_inches * 1440)))
+    width.set(qn("w:type"), "dxa")

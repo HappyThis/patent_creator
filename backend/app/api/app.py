@@ -50,6 +50,7 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Disposition", "X-Export-Path"],
     )
 
     @app.exception_handler(ApiError)

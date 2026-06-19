@@ -251,6 +251,39 @@ export function useWorkspace(projectId: string | null) {
     }
   }, [project]);
 
+  const exportDocx = useCallback(async () => {
+    if (!project) {
+      return;
+    }
+    try {
+      const result = await apiClient.downloadDocx(project.project_id);
+      const filename = result.filename ?? `${project.project_id}.docx`;
+      downloadBlob(result.blob, filename);
+      setEvents((current) => [
+        ...current,
+        {
+          id: `export_docx_${Date.now()}`,
+          kind: 'message',
+          role: 'assistant',
+          text: `DOCX 已开始下载：\`${filename}\``,
+          timestamp: formatTimestamp(),
+        },
+      ]);
+    } catch (error: unknown) {
+      const messageText = error instanceof Error ? error.message : '导出 DOCX 失败。';
+      setEvents((current) => [
+        ...current,
+        {
+          id: `export_docx_error_${Date.now()}`,
+          kind: 'message',
+          role: 'assistant',
+          text: messageText,
+          timestamp: formatTimestamp(),
+        },
+      ]);
+    }
+  }, [project]);
+
   const sessionTabs = useMemo(
     () => buildSessionTabs(sessions, selectedSessionId),
     [selectedSessionId, sessions],
@@ -286,7 +319,19 @@ export function useWorkspace(projectId: string | null) {
     submitMessage,
     cancelCurrentRound,
     exportMarkdown,
+    exportDocx,
     handleSessionSelect,
     handleNewSession,
   };
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }

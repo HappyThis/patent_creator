@@ -59,7 +59,7 @@ function App() {
     setActiveSectionId,
     submitMessage,
     cancelCurrentRound,
-    exportMarkdown,
+    exportDocx,
     handleSessionSelect,
     handleNewSession,
   } = useWorkspace(selectedProjectId);
@@ -340,7 +340,7 @@ function App() {
               stats={documentStats}
               previewRef={previewRef}
               onActiveSectionChange={setActiveSectionId}
-              onExport={exportMarkdown}
+              onExport={exportDocx}
             />
           </div>
         ) : null}

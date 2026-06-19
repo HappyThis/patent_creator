@@ -46,7 +46,6 @@ export function renderPreviewNodes({
           data-anchor={node.anchor}
         >
           {node.level === 2 ? <h2>{heading}</h2> : <h3>{heading}</h3>}
-          {isEmpty ? <p className="preview-empty-hint">内容待补充</p> : null}
           <div className="preview-children">
             {renderPreviewNodes({
               nodes: node.children,

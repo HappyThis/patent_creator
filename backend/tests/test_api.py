@@ -425,6 +425,22 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         assert export_path.exists()
         assert "关键创新点及权利要求建议" in export_path.read_text(encoding="utf-8")
 
+        docx_export_response = await client.post(f"/api/projects/{project_id}/export/docx")
+        assert docx_export_response.status_code == 200
+        docx_export_path = Path(docx_export_response.json()["path"])
+        assert docx_export_path.exists()
+        assert docx_export_path.suffix == ".docx"
+        assert docx_export_path.read_bytes()[:2] == b"PK"
+
+        docx_download_response = await client.post(f"/api/projects/{project_id}/export/docx/download")
+        assert docx_download_response.status_code == 200
+        assert (
+            docx_download_response.headers["content-type"]
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert "filename=" in docx_download_response.headers["content-disposition"]
+        assert docx_download_response.content[:2] == b"PK"
+
         second_stream_events = await collect_stream_events(
             client,
             project_id,

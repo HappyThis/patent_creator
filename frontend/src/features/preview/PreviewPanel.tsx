@@ -86,8 +86,8 @@ export function PreviewPanel({
         className="preview-export-button"
         type="button"
         onClick={onExport}
-        aria-label="下载 Markdown"
-        title="下载 Markdown"
+        aria-label="导出 DOCX"
+        title="导出 DOCX"
       >
         <svg className="preview-export-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 4v10" />

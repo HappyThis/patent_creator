@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
+from ..domain.docx_export import DocxExportError, export_disclosure_docx
 from ..domain.figures import build_figure_record, figure_summary, mermaid_layout_warnings, update_figure_record, validate_mermaid_source
 from ..schemas import ProjectRecord, SessionEvent, SessionSummary
 
@@ -272,6 +273,20 @@ class WorkspaceStore:
         export_path = self.project_dir(project_id) / "exports" / f"{project_id}-{uuid4().hex[:8]}.md"
         export_path.write_text(disclosure_to_markdown(disclosure), encoding="utf-8")
         return export_path
+
+    def export_docx(self, project_id: str) -> Path:
+        disclosure = self.get_disclosure(project_id)
+        project_dir = self.project_dir(project_id)
+        export_path = project_dir / "exports" / f"{project_id}-{uuid4().hex[:8]}.docx"
+        try:
+            return export_disclosure_docx(
+                disclosure=disclosure,
+                figures=self.list_figures(project_id),
+                export_path=export_path,
+                project_dir=project_dir,
+            )
+        except DocxExportError as exc:
+            raise ApiError(500, "docx_export_failed", str(exc)) from exc
 
     def commit_workspace(self, project_id: str, message: str) -> tuple[bool, dict[str, str] | None]:
         workspace = self.project_dir(project_id)
