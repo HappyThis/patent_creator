@@ -57,13 +57,13 @@ Patent Creator 把“能否写出好的技术方案和交底书正文”视为�
 
 这个 benchmark 会反过来推动 agent 工具、上下文管理和写作策略的改进。
 
-### Current benchmark snapshot
+### 当前 benchmark 快照
 
-The following score comes from a published benchmark result snapshot in this repository. It summarizes the current technical-solution writing loop and does not represent a final product ceiling.
+以下分数来自仓库中已经发布的 benchmark 结果快照，用于说明当前技术方案写作链路的大致表现，不代表最终产品能力上限。
 
-| Benchmark | Result ID | Scale | Average score | Completion | Notes |
+| Benchmark | 结果 ID | 规模 | 平均分 | 通过情况 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| Patent technical solution benchmark | `20260619-gpt55-baseline-10cases-5x-w10` | 10 cases x 5 repeats | 93.14 / 100 | 50/50 scored, artifact_success=50/50 | subject=`gpt-5.5`, judge=`codex`, min=82, max=98, workers=10 |
+| 专利技术方案 benchmark | `20260619-gpt55-baseline-10cases-5x-w10` | 10 cases x 5 repeats | 93.14 / 100 | 50/50 scored，artifact_success=50/50 | subject=`gpt-5.5`，judge=`codex`，min=82，max=98，workers=10 |
 
 ## 当前状态
 

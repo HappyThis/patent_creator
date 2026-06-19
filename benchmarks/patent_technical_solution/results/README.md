@@ -31,10 +31,10 @@ backend/.venv/bin/python benchmarks/patent_technical_solution/evaluator/publish_
 - `subject/disclosure.json`
 - 本机绝对路径
 
-## Latest Published Result
+## 最新发布结果
 
-| Result ID | Subject model | Judge | Scale | Average score | Completion | Notes |
+| 结果 ID | Subject 模型 | Judge | 规模 | 平均分 | 完成情况 | 备注 |
 | --- | --- | --- | --- | ---: | --- | --- |
-| `20260619-gpt55-baseline-10cases-5x-w10` | `gpt-5.5` | `codex` | 10 cases x 5 repeats, workers=10 | 93.14 | 50/50 scored, artifact_success=50/50 | min=82, max=98, stdev=3.43; published from run `20260619-gpt55-baseline-10cases-5x-w10` |
+| `20260619-gpt55-baseline-10cases-5x-w10` | `gpt-5.5` | `codex` | 10 cases x 5 repeats，workers=10 | 93.14 | 50/50 scored，artifact_success=50/50 | min=82，max=98，stdev=3.43；来源 run 为 `20260619-gpt55-baseline-10cases-5x-w10` |
 
-Previous published baseline: `20260605-patent-tech-solution-10cases-5x-w10`, `deepseek-v4-pro`, average 87.06, min 70, max 96. The current result is +6.08 points higher on the same 10 cases x 5 repeats x 10 workers shape.
+上一版已发布基线为 `20260605-patent-tech-solution-10cases-5x-w10`，subject 模型为 `deepseek-v4-pro`，平均分 87.06，min=70，max=96。在同样 10 cases x 5 repeats x 10 workers 的配置下，本次结果高出 +6.08 分。
