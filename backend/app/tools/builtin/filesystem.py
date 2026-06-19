@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 from collections import deque
@@ -9,6 +8,7 @@ import time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from wcmatch import glob as wcmatch_glob
 
 from ...domain.document_tool_results import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
@@ -29,7 +29,8 @@ _SKIPPED_DIRS = {
     "build",
 }
 _DEFAULT_TEXT_FILE_MAX_BYTES = 1_000_000
-_GLOB_CHARS = frozenset("*?[")
+_GLOB_CHARS = frozenset("*?[{")
+_WCMATCH_GLOB_FLAGS = wcmatch_glob.GLOBSTAR | wcmatch_glob.BRACE | wcmatch_glob.EXTGLOB | wcmatch_glob.DOTMATCH
 _DEFAULT_GLOB_SCANNED_PATHS = 3_000
 _MAX_GLOB_SCANNED_PATHS = 10_000
 _DEFAULT_GLOB_SCAN_SECONDS = 1.5
@@ -41,7 +42,6 @@ class FileGlobArguments(BaseModel):
     pattern: str = Field(default="*", description="glob 模式，例如 **/*.py 或 src/**/*.ts。也可直接把 glob 写在 path 中。")
     limit: int = Field(default=100, ge=1, le=500, description="最多返回多少条结果，默认 100，最大 500。")
     offset: int = Field(default=0, ge=0, description="分页偏移，从 0 开始。")
-
 
     max_scanned_paths: int = Field(default=_DEFAULT_GLOB_SCANNED_PATHS, ge=1, le=_MAX_GLOB_SCANNED_PATHS)
     max_elapsed_ms: int = Field(default=int(_DEFAULT_GLOB_SCAN_SECONDS * 1000), ge=100, le=int(_MAX_GLOB_SCAN_SECONDS * 1000))
@@ -115,7 +115,7 @@ def file_glob(
     scanned = 0
     stop_reason = "completed"
 
-    for path in _iter_glob_candidates(base, pattern, skipped_dirs):
+    for path in _iter_glob_candidates(base, skipped_dirs):
         elapsed = time.monotonic() - started_at
         if elapsed >= time_budget_seconds:
             stop_reason = "time_budget_exceeded"
@@ -124,7 +124,8 @@ def file_glob(
             stop_reason = "scan_budget_exceeded"
             break
         scanned += 1
-        if not _matches_relative_glob(path.relative_to(base).as_posix(), pattern):
+        relative = path.relative_to(base).as_posix()
+        if not _matches_relative_glob(relative, pattern):
             continue
         if not _is_allowed_result_path(path):
             continue
@@ -411,14 +412,9 @@ def _is_allowed_result_path(path: Path) -> bool:
     return not any(part in _SKIPPED_DIRS for part in path.parts)
 
 
-def _iter_glob_candidates(base: Path, pattern: str, skipped_dirs: set[str]):
-    max_depth = _literal_glob_depth(pattern)
+def _iter_glob_candidates(base: Path, skipped_dirs: set[str]):
     for current_root, dirnames, filenames in os.walk(base, topdown=True):
         current = Path(current_root)
-        try:
-            root_depth = len(current.relative_to(base).parts)
-        except ValueError:
-            root_depth = 0
 
         descend_dirnames = []
         for dirname in sorted(dirnames):
@@ -426,40 +422,19 @@ def _iter_glob_candidates(base: Path, pattern: str, skipped_dirs: set[str]):
                 skipped_dirs.add(_display_skipped_dir(base, current / dirname))
                 continue
             yield current / dirname
-            if max_depth is None or root_depth + 1 < max_depth:
-                descend_dirnames.append(dirname)
+            descend_dirnames.append(dirname)
         dirnames[:] = descend_dirnames
 
         for filename in sorted(filenames):
             yield current / filename
 
 
-def _literal_glob_depth(pattern: str) -> int | None:
-    parts = [part for part in pattern.replace("\\", "/").split("/") if part and part != "."]
-    if "**" in parts:
-        return None
-    return max(1, len(parts))
-
-
 def _matches_relative_glob(relative_path: str, pattern: str) -> bool:
-    path_parts = tuple(part for part in relative_path.replace("\\", "/").split("/") if part)
-    pattern_parts = tuple(part for part in pattern.replace("\\", "/").split("/") if part and part != ".")
-    return _match_glob_parts(path_parts, pattern_parts)
-
-
-def _match_glob_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...]) -> bool:
-    if not pattern_parts:
-        return not path_parts
-    head, *tail = pattern_parts
-    tail_tuple = tuple(tail)
-    if head == "**":
-        return _match_glob_parts(path_parts, tail_tuple) or (
-            bool(path_parts) and _match_glob_parts(path_parts[1:], pattern_parts)
-        )
-    if not path_parts:
-        return False
-    return fnmatch.fnmatchcase(path_parts[0], head) and _match_glob_parts(path_parts[1:], tail_tuple)
-
+    return wcmatch_glob.globmatch(
+        relative_path.replace("\\", "/"),
+        pattern.replace("\\", "/"),
+        flags=_WCMATCH_GLOB_FLAGS,
+    )
 
 def _display_skipped_dir(base: Path, path: Path) -> str:
     try:
@@ -489,7 +464,7 @@ def _iter_search_files(target: Path, include_glob: str, skipped_dirs: set[str]):
             if not _is_text_candidate(path):
                 continue
             relative = path.relative_to(target).as_posix()
-            if include_glob not in {"*", "**/*"} and not _matches_relative_glob(relative, include_glob):
+            if not _matches_relative_glob(relative, include_glob):
                 continue
             yield path
 

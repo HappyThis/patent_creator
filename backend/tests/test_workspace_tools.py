@@ -383,3 +383,53 @@ def test_file_search_double_star_include_glob_matches_root_files(tmp_path: Path)
 
     assert search_result["status"] == "success"
     assert [match["path"] for match in search_result["output"]["matches"]] == ["root.py", "src/nested.py"]
+
+
+def test_file_search_include_glob_supports_brace_expansion(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    source_dir = workspace / "src"
+    source_dir.mkdir()
+    (source_dir / "a.ts").write_text("needle\n", encoding="utf-8")
+    (source_dir / "b.tsx").write_text("needle\n", encoding="utf-8")
+    (source_dir / "c.js").write_text("needle\n", encoding="utf-8")
+    (source_dir / "d.md").write_text("needle\n", encoding="utf-8")
+    (source_dir / "e.py").write_text("needle\n", encoding="utf-8")
+
+    search_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"pattern": "needle", "include_glob": "**/*.{ts,tsx,js,md}", "limit": 100},
+    )
+
+    assert search_result["status"] == "success"
+    assert [match["path"] for match in search_result["output"]["matches"]] == [
+        "src/a.ts",
+        "src/b.tsx",
+        "src/c.js",
+        "src/d.md",
+    ]
+    assert search_result["output"]["scanned"] == 4
+
+
+def test_file_glob_pattern_supports_brace_expansion(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    source_dir = workspace / "src"
+    nested_dir = source_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    (source_dir / "a.ts").write_text("ok", encoding="utf-8")
+    (source_dir / "b.tsx").write_text("ok", encoding="utf-8")
+    (nested_dir / "c.md").write_text("ok", encoding="utf-8")
+    (source_dir / "d.py").write_text("ok", encoding="utf-8")
+
+    glob_result = run_builtin_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"pattern": "src/**/*.{ts,md}", "limit": 100},
+    )
+
+    assert glob_result["status"] == "success"
+    assert glob_result["output"]["matches"] == ["src/a.ts", "src/nested/c.md"]
