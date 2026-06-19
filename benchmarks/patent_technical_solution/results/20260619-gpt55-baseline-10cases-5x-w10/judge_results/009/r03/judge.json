@@ -1,0 +1,32 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 23,
+    "mechanism_coherence": 14,
+    "technical_effect": 10,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住了模型生成编排代码、浏览器私有能力留在主页面、生成代码不能污染主页面这三个核心矛盾。",
+    "核心构思完整，覆盖隔离运行单元、动态工具注册表、工具描述下发、名称规范化映射、代理调度、主页面真实执行、安全校验、日志、异常、超时和资源释放。",
+    "动态工具部分写得较深入，说明了工具快照、schema、批准策略、可用状态、版本、结果截断和规范化名称到原始名称的映射。",
+    "受控调度协议具备可实施粒度，包含会话标识、命名空间、规范化工具名、参数、调用序号、超时配置、来源校验、参数校验和结构化错误返回。",
+    "技术效果能够从技术手段自然推出：隔离容器降低污染风险，主页面代理保留客户端能力，快照和校验限制非法调用，日志与 cleanup 支持可控执行和资源回收。"
+  ],
+  "weaknesses": [
+    "协议状态机没有像参考方案那样明确列出 ready、execute、tool-call、tool-result、execution-result、cleanup 等完整消息阶段，虽然多数含义已隐含在流程中。",
+    "并发调用关联机制主要用调用序号和执行标识描述，未明确说明 pending promise 表、call id 与乱序返回匹配规则。",
+    "工具来源或 provider 维度不如参考方案明确，主要以命名空间和注册表表达，跨来源工具冲突隔离的细节略少。"
+  ],
+  "missing_key_mechanisms": [
+    "明确的 ready/execute/execution-result/cleanup 状态流转和失败分支。",
+    "并发工具调用的 call id 到 pending promise 的关联表及迟到结果处理规则。",
+    "多 provider 或多来源动态工具的来源字段、冲突消解和来源级授权校验。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到高分深度。它不是简单的 iframe 或 postMessage 描述，而是形成了隔离执行容器、动态工具描述、名称规范化、代理协议、主页面工具注册表、安全校验、异常日志、超时取消和资源释放的组合机制，基本覆盖本题参考路径的关键技术特征。扣分主要在协议状态和并发关联机制没有完全显式化，provider/source 校验粒度也稍弱；这些缺口不破坏方案成立，因此不触发无协议、无命名规范化、无 cleanup 等上限规则。"
+}

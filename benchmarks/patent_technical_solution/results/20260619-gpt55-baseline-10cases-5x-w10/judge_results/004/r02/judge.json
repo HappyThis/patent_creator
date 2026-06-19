@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 94,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 19,
+    "technical_depth": 23,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住了本题核心：不是保存自然语言日志，而是建立可查询、可关联、可评估、可复用的单次 agent run 运行抽象。",
+    "运行记录字段设计较完整，覆盖 run_id、触发来源、任务、agent、会话、项目、活动、审计、输入摘要、输出摘要、成本、评估和外部引用等关键要素。",
+    "能够把现有任务派发、队列领取、会话调用、任务结果写回、token_usage、quality_reviews、eval_runs、eval_traces、mcp_call_log、活动流和审计流组织到同一运行链路中，符合复用现有体系的约束。",
+    "生命周期机制较深入，包含 created、claimed、dispatched、in_progress、completed、reviewing、approved、rejected、failed、retrying、abandoned 等状态，并提出幂等键、原子领取、迟到数据补偿、待归因和归因置信度。",
+    "评估附着和工具化查询写得充分，覆盖质量评审、多层 eval、MCP 调用统计、REST/MCP 查询、权限脱敏和外部复用。"
+  ],
+  "weaknesses": [
+    "运行级事件通知机制没有像参考方案那样单独形成清晰契约，更多是散落在状态变化、事件广播、activities/audit_log 兼容描述中。",
+    "排行榜或长期聚合能力只作为扩展空间和按项目聚合成本质量提到，缺少更明确的 agent 维度、任务维度、时间维度排名/统计生成规则。",
+    "部分归因补偿规则采用时间窗口、agent_name、session_id、task_id 的启发式匹配，虽可实施，但对冲突消解、匹配优先级和人工纠错边界说明略少。",
+    "个别表述把一些可能需要新增的 correlation 信息、外部引用或审计关联说得较确定，需要在正式交底中区分现有字段与新增字段。"
+  ],
+  "missing_key_mechanisms": [
+    "明确的 run.created、run.updated、run.completed、run.evaluated 等运行级事件发布与订阅契约。",
+    "面向排行榜和长期能力分析的聚合指标生成规则，例如按 agent、任务类型、时间窗口聚合成功率、成本、评估通过率。",
+    "迟到归因发生多候选冲突时的优先级、置信度阈值和回滚/更正机制。",
+    "更明确的权限模型，例如外部工具按 workspace、project、task 或 agent 范围读取 run 摘要与详情的校验规则。"
+  ],
+  "unsupported_claims": [
+    "“后续会话、评论、任务状态或审计事件出现同一 correlation 信息”作为现有事实依据不足；快照中可见任务 metadata、dispatch_session_id、activities、audit_log，但未确认各来源已有统一 correlation 字段。",
+    "“任务 outcome 中与本次执行相关的评分、工具调用次数、工具成功率、收敛情况和漂移指标”表述偏确定；快照中这些指标主要来自 eval_runs、eval_traces、mcp_call_log、token_usage 等表，不能确认 task outcome 本身已承载这些评分指标。"
+  ],
+  "score_rationale": "该方案达到高分档：统一运行对象、来源溯源、生命周期桥接、评估附着、成本归因、MCP/REST 查询、幂等状态机、迟到数据补偿和既有活动/审计兼容均有明确机制，技术深度与参考方案基本等价，并且不是普通日志表或历史页面。扣分主要来自运行级事件通知和排行榜聚合规则不够独立清晰，以及少量现有 correlation/任务 outcome 指标表述依据不足。上述问题不构成核心依赖事实错误，因此不适用“核心依赖未确认事实总分不高于75分”的上限；方案也明确解释了协同和效果因果关系，不触发无核心构思或无协同机理的上限。"
+}

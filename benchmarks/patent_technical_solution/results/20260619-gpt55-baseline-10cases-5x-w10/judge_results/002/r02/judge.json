@@ -1,0 +1,36 @@
+{
+  "status": "scored",
+  "total_score": 86,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 18,
+    "technical_depth": 20,
+    "mechanism_coherence": 13,
+    "technical_effect": 9,
+    "feasibility": 8,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住外部提交场景中的快速确认、幂等重试、后台执行、状态查询、取消清理和中断恢复问题。",
+    "提出了以持久化任务记录为协调对象的核心构思，并把幂等键、任务阶段、requestId、消息标识、取消标记和清理期限纳入同一状态模型。",
+    "幂等接收流程较具体，说明了重复提交时复用既有任务和用户消息，避免重复追加输入和重复启动推理。",
+    "能结合项目快照中已有的 Durable Object、SQLite 消息持久化、请求上下文、可恢复流、串行 turn queue 和 AbortController 机制，形成较可实施的扩展方案。",
+    "恢复方案明确不依赖内存队列或 AbortController，而是依据落盘任务阶段、消息、流元数据和 fiber 证据重建状态，技术效果因果链较完整。"
+  ],
+  "weaknesses": [
+    "输入应用边界仍不够强。方案是在接收事务中直接写入用户消息，而不是清楚区分“任务已接收但输入尚未进入会话”和“输入已应用到会话”的两个 checkpoint；虽然稳定 user_message_id 能缓解重复写入，但恢复和取消语义不如参考标尺清晰。",
+    "后台领取和终态更新缺少明确的条件更新规则，例如 claim 时按 accepted/queued 条件改为 running，完成或失败时校验 requestId、当前阶段和未取消/未清理后再写入终态。",
+    "清理策略提出删除关联用户消息和助手消息，未说明已进入会话历史的内容何时可以删除、何时只能清理任务元数据或流片段，存在破坏会话历史一致性的风险。",
+    "running 中断恢复主要围绕 streaming 流元数据展开，对“助手消息已持久化但任务状态未写 completed”“模型已结束但终态更新丢失”等迟到或半完成状态分支说明不足。",
+    "幂等键可由内容摘要和时间窗口派生，但没有说明如何避免同一调用方在窗口内提交两条内容相同但业务上不同的任务被错误折叠。"
+  ],
+  "missing_key_mechanisms": [
+    "显式的 input_applied 或 applied_message_id checkpoint，以及基于该 checkpoint 的写入前崩溃、写入后崩溃恢复分支。",
+    "任务领取和终态写入的 compare-and-set 条件，例如只有当前状态仍为 queued/running 且 requestId 匹配时才允许推进。",
+    "迟到完成、取消、清理之间的优先级规则，防止完成回调覆盖 cancelled 或 cleaned。",
+    "清理已应用任务时保护会话历史的策略，例如仅清理任务索引、流片段和过期元数据，或用可审计 tombstone 替代直接删除对话消息。",
+    "针对无活动流但已有助手消息、已有 fiber 记录但无流、任务 running 超时但输入已应用等恢复场景的完整状态判定矩阵。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到高于普通异步队列的深度：它有持久任务实体、幂等接收、稳定消息标识、后台串行执行、取消传播和落盘恢复，且能合理复用项目中已有 AIChatAgent 的 SQLite、turn queue、requestId、resumable stream 和 AbortController 能力。因此不适用“无幂等标识”或“无接收与输入应用区分则通常不高于 75”的上限，因为方案至少通过事务化任务记录加 user_message_id 建立了一个输入已应用边界。也不严格适用“无条件终态更新通常不高于 82”的上限，因为其单调阶段、执行锁、requestId 和队列代际提供了部分终态保护思路；但缺少明确 CAS/条件终态规则，所以不能进入 90 分以上。整体属于方向正确且机制较完整的强答案，但相对参考深度仍缺少显式输入应用 checkpoint、终态防覆盖和清理不破坏会话历史的关键机制，评分为 86。"
+}

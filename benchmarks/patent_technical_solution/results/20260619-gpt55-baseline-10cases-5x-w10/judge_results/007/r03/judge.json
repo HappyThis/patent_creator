@@ -1,0 +1,32 @@
+{
+  "status": "scored",
+  "total_score": 93,
+  "dimension_scores": {
+    "technical_problem": 14,
+    "core_concept": 19,
+    "technical_depth": 23,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住浏览器本地生命周期清理与服务端 durable agent turn 生命周期错误耦合的问题，并明确区分观察端断开与用户显式停止。",
+    "核心方案覆盖 request id/stream id 跟踪、服务端 AbortController 注册表、显式取消控制帧、恢复协议、多观察端和工具 continuation 取消传播，机制密度接近参考方案。",
+    "给出了 retain-on-disconnect、cancel-on-disconnect、grace-period-retain 等可配置策略，能适配不同应用对断开即取消或持续执行的偏好。",
+    "对恢复流程描述较完整，包括重新挂载或多标签页通过 stream resume request、resuming、ack、none 等帧重新观察仍在运行的 turn。",
+    "技术效果能从解耦、显式取消和恢复兼容自然推出，具备专利交底书所需的可保护技术特征。"
+  ],
+  "weaknesses": [
+    "显式取消后的迟到 chunk、完成帧或错误帧如何过滤、归档或避免污染 UI 只被间接覆盖，没有形成独立明确的取消后消息处理规则。",
+    "配置策略虽列出名称和方向，但未进一步给出更完整的策略判定矩阵，例如无观察端、宽限期超时、跨标签取消权限与 continuation 父子信号之间的优先级冲突。",
+    "对服务端取消后的最终状态广播和本地 active request 集合清理时序描述略简，尤其是取消后是否保留 request id 直到 done 帧以屏蔽在途消息。"
+  ],
+  "missing_key_mechanisms": [
+    "显式取消后按 request id 记录 cancelled/terminal 状态，并在服务端 done 到达前持续过滤或隔离同一 request id 的迟到分块。",
+    "配置策略冲突时的优先级规则，例如显式停止优先于 retain-on-disconnect、父级任务取消是否级联 continuation、跨标签取消是否需要会话所有权校验。",
+    "宽限期 retain 策略下无观察端计时、恢复重置计时和超时后服务端取消或继续执行的精确状态转换。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到高分档。它不是简单提出“刷新后不取消”或“增加停止按钮”，而是形成了本地流生命周期与服务端 turn 生命周期解耦、活动 request/stream 标识跟踪、显式取消通道、服务端 AbortSignal 传播、恢复兼容、工具 continuation 和多标签观察的组合机制，与参考方案的核心深度基本等价。各要素如何协同也较清楚：客户端默认只做本地 finish，显式 stop 才发送带 request id 的取消帧；服务端按 request id 查找 AbortController 并中断模型流、工具或 continuation；恢复连接再用 stream id/request id 接管观察。扣分主要来自迟到消息处理和配置矩阵仍不够明确，尤其是显式取消后如何保持 request id 屏蔽在途 chunk、done 或错误帧没有充分展开。因此不触发 rubric 中“没有显式取消能力、没有活动 turn 标识、没有配置行为矩阵、没有恢复/continuation 边界”的上限，但未给满分。"
+}

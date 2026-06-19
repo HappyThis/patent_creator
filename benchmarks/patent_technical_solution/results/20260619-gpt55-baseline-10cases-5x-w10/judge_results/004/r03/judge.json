@@ -1,0 +1,34 @@
+{
+  "status": "scored",
+  "total_score": 95,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 23,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住了本题的核心问题：现有任务、agent、会话、事件、成本、评估事实分散，缺少以一次 agent 执行为单位的统一运行抽象。",
+    "提出了稳定 run_id、运行主记录、运行事件、产物、指标、评估附件和外部引用索引的组合模型，技术构思完整。",
+    "覆盖生命周期自动桥接、幂等创建、事件追加、状态推进、token/成本吸收、质量评审和多层 eval 附着，明显不是普通日志表或历史页面。",
+    "能说明任务、会话、agent、CLI connection、heartbeat、spawn、activity、SSE、MCP、评估和查询入口如何汇入同一运行视图，协同机理较清楚。",
+    "工具化查询、workspace 隔离、索引、聚合统计和排行榜扩展均有可实施粒度，适合作为交底书中的可保护技术方案。"
+  ],
+  "weaknesses": [
+    "运行事件与对外事件通知之间的边界略混合，虽然提到 SSE 入口和运行事件追加，但没有单独说明 run.created、run.status_changed、run.evaluation_attached 等运行级通知契约。",
+    "运行主记录、运行事件和原始对象之间的一致性策略还可更具体，例如原始任务状态回滚、重复 token 上报、评估补录冲突时的合并规则。",
+    "部分聚合指标如 trace 收敛度、漂移幅度、工具调用成功率被列为统计项，但没有展开其与运行粒度绑定的最小计算字段。"
+  ],
+  "missing_key_mechanisms": [
+    "运行级事件发布契约：运行创建、状态变化、完成、失败、评估附着时向 dashboard、监控或外部工具发布可订阅事件的明确机制。",
+    "幂等键冲突和父子 run/retry 的一致性规则：同一任务多次派发、agent 重试、spawn 重启、token 重复上报时如何判定同一运行或新运行。",
+    "评估附件与具体运行输入/输出范围的绑定规则：例如评估结果针对全量输出、单个产物、trace 片段还是重试后的最终 run。"
+  ],
+  "unsupported_claims": [
+    "方案提到保存 SSE 事件标识；快照中的 SSE ServerEvent 是进程内广播对象，未见稳定持久化事件 id。若该标识作为新增运行事件 id 生成则可成立，但不能直接视为已有 SSE 标识。"
+  ],
+  "score_rationale": "该方案与参考路径基本达到等价深度，并且覆盖了统一运行对象、来源溯源、生命周期自动桥接、评估附着、聚合统计、事件/活动入口复用和 REST/MCP/CLI/dashboard 查询。项目快照中确有任务、agent、activities、quality_reviews、token_usage、direct_connections、spawn_history、mcp_call_log、eval_runs/eval_traces 和 SSE event bus 等基础对象，因此核心事实依赖基本成立。扣分主要在运行级事件通知契约和一致性细节仍可更精确，且个别现有标识声明略超出快照依据；这些问题不触发 75 或 80 分上限，因为核心方案并不依赖该单点事实成立。"
+}
