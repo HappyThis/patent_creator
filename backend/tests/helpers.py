@@ -33,6 +33,7 @@ class ScriptedLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
+        on_audit_event: Any = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -53,7 +54,6 @@ class ScriptedLLMClient:
             message = {
                 "role": "assistant",
                 "content": str(result.get("text") or ""),
-                "reasoning_content": "测试推理内容。",
             }
             if "usage" in result:
                 message["usage"] = result["usage"]
@@ -65,7 +65,6 @@ class ScriptedLLMClient:
             message = {
                 "role": "assistant",
                 "content": "",
-                "reasoning_content": "测试工具调用推理内容。",
                 "tool_calls": [
                     {
                         "id": str(call.get("tool_call_id") or ""),
@@ -170,7 +169,7 @@ def make_settings(tmp_path: Path) -> Settings:
         log_dir=tmp_path / "logs",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
         round_step_delay=0.0,
         round_finish_delay=0.0,
     )

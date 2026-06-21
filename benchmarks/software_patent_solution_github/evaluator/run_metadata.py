@@ -51,7 +51,6 @@ def capture_model_config() -> dict[str, Any]:
         "context_compression": {
             "max_tokens": _env_int("PATENT_CREATOR_CONTEXT_MAX_TOKENS", 128000),
             "compress_threshold_ratio": _env_float("PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO", 0.8),
-            "reserved_output_tokens": _env_int("PATENT_CREATOR_CONTEXT_RESERVED_OUTPUT_TOKENS", 8000),
             "token_char_coefficient": _env_float("PATENT_CREATOR_CONTEXT_TOKEN_CHAR_COEFFICIENT", 0.5),
             "compression_timeout": _env_float("PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT", 180.0),
         },

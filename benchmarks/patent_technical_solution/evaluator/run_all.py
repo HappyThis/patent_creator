@@ -314,17 +314,18 @@ def render_report(
     if subject:
         lines.extend(
             [
-                f"- Subject 模型：`{subject.get('provider', '-')}` / `{subject.get('model', '-')}`",
+                f"- Subject API：`{subject.get('api', 'responses')}`",
+                f"- Subject 模型：`{subject.get('model', '-')}`",
                 f"- Base URL：`{subject.get('base_url', '-')}`",
-                f"- Thinking：`{subject.get('thinking', '-')}`；reasoning_effort：`{subject.get('reasoning_effort', '-')}`；max_completion_tokens：`{subject.get('max_completion_tokens', '-')}`",
+                f"- Reasoning effort：`{subject.get('reasoning_effort', '-')}`；max_output_tokens：`{subject.get('max_output_tokens', '-')}`",
+                f"- Web search：`{subject.get('web_search_enabled', '-')}`；context_size：`{subject.get('web_search_context_size', '-')}`",
             ]
         )
     if context:
         lines.append(
-            "- 压缩配置：max_tokens=`{max_tokens}`，threshold_ratio=`{ratio}`，reserved_output=`{reserved}`，token_char_coefficient=`{coef}`".format(
+            "- 压缩配置：max_tokens=`{max_tokens}`，threshold_ratio=`{ratio}`，token_char_coefficient=`{coef}`".format(
                 max_tokens=context.get("max_tokens", "-"),
                 ratio=context.get("compress_threshold_ratio", "-"),
-                reserved=context.get("reserved_output_tokens", "-"),
                 coef=context.get("token_char_coefficient", "-"),
             )
         )

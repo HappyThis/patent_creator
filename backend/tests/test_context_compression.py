@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.agents.runtime.model_profiles import prepare_messages_for_model_request
+from app.agents.runtime.message_preparation import prepare_messages_for_model_request
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.runtime.context import ContextManager
@@ -99,34 +99,28 @@ def test_usage_estimate_prefers_latest_usage_plus_tail() -> None:
     assert token_count_with_estimation(messages, char_coefficient=0.5) == 102
 
 
-def test_compression_threshold_does_not_subtract_reserved_output_tokens(tmp_path: Path) -> None:
+def test_compression_threshold_uses_ratio_of_max_tokens(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path, git_user_name="Test User", git_user_email="test@example.com")
     settings.context_max_tokens = 1000
-    settings.context_reserved_output_tokens = 200
     settings.context_compress_threshold_ratio = 0.8
 
     usage = usage_for_messages([{"role": "user", "content": "abcd"}], settings)
 
     assert usage.threshold_tokens == 800
-    assert usage.reserved_output_tokens == 200
 
 
 def test_prepare_messages_for_request_strips_usage_metadata(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path, git_user_name="Test User", git_user_email="test@example.com")
-
     prepared = prepare_messages_for_model_request(
-        [{"role": "assistant", "content": "上一轮", "reasoning_content": "不回放", "usage": {"total_tokens": 100}}],
-        settings,
+        [{"role": "assistant", "content": "上一轮", "usage": {"total_tokens": 100}}],
     )
 
     assert prepared == [{"role": "assistant", "content": "上一轮"}]
 
 
 def test_prepare_messages_for_request_reuses_messages_when_no_metadata_is_stripped(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path, git_user_name="Test User", git_user_email="test@example.com")
     messages = [{"role": "user", "content": "继续"}]
 
-    prepared = prepare_messages_for_model_request(messages, settings)
+    prepared = prepare_messages_for_model_request(messages)
 
     assert prepared is messages
 
@@ -158,8 +152,6 @@ def test_context_manager_persists_raw_tool_result_when_turn_budget_exceeded(tmp_
                 ],
             },
             "model": "test",
-            "provider": "test",
-            "thinking": "disabled",
         },
     )
     store.append_session_event(

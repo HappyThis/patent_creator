@@ -75,7 +75,7 @@ def test_main_agent_registers_figure_kit() -> None:
     assert set(properties) == {"action", "ref", "title", "mermaid"}
 
 
-def test_tool_schemas_inline_local_definitions_for_provider_compatibility() -> None:
+def test_tool_schemas_inline_local_definitions_for_responses_api() -> None:
     def walk(value: object) -> list[object]:
         if isinstance(value, dict):
             return [value, *(item for child in value.values() for item in walk(child))]

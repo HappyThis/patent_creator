@@ -16,3 +16,4 @@ __pycache__/
 /backend/**/__pycache__/
 /backend/data/
 /.env
+/.tmp/

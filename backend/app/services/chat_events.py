@@ -21,8 +21,6 @@ class ChatEventEmitter:
         *,
         message: dict[str, Any],
         model: str,
-        provider: str,
-        thinking: str,
     ) -> None:
         self.store.append_session_event(
             project_id,
@@ -34,10 +32,26 @@ class ChatEventEmitter:
             payload={
                 "message": message,
                 "model": model,
-                "provider": provider,
-                "thinking": thinking,
             },
         )
+
+    async def audit_events(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        events: list[dict[str, Any]],
+    ) -> None:
+        for event in events:
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="llm_audit",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload=event,
+            )
 
     async def agent_output(self, project_id: str, state: RoundState, text: str) -> None:
         self.store.append_session_event(

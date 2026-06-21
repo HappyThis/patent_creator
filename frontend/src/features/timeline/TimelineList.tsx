@@ -7,11 +7,15 @@ type TimelineListProps = {
 };
 
 export function TimelineList({ items, label = '执行过程', defaultOpen = false }: TimelineListProps) {
+  const isSearchOnly = items.length > 0 && items.every((item) => item.tool === 'web_search');
+  const effectiveLabel = label === '执行过程' && isSearchOnly ? '搜索记录' : label;
+  const metaLabel = isSearchOnly ? `${items.length} 条搜索记录` : `${items.length} 个工具调用`;
+
   return (
     <details className="process-group" open={defaultOpen}>
       <summary className="process-summary">
-        <span>{label}</span>
-        <span className="process-summary-meta">{items.length} 个工具调用</span>
+        <span>{effectiveLabel}</span>
+        <span className="process-summary-meta">{metaLabel}</span>
       </summary>
 
       <div className="process-body">
@@ -33,14 +37,14 @@ function renderToolCall(item: ToolCallEvent) {
       <summary className="command-item-summary">
         <span className={`status-dot ${item.status ?? 'plain'}`} />
         <span className="command-label">
-          <span className="command-title">{item.tool ?? item.title}</span>
+          <span className="command-title">{item.title || item.tool}</span>
           <span className="command-description">{describeTool(item.tool ?? item.title)}</span>
         </span>
       </summary>
       <div className="command-output-shell">
         <div className="command-output-header">
           <span>{formatToolScope(item)}</span>
-          <span>{item.status === 'done' ? '成功' : item.status === 'failed' ? '失败' : '进行中'}</span>
+          <span>{item.status === 'done' ? '完成' : item.status === 'failed' ? '失败' : '进行中'}</span>
         </div>
         <pre className="command-output-body">
           {item.summary ? `${item.summary}\n\n` : ''}
@@ -62,6 +66,7 @@ function describeTool(toolName: string): string {
     file_search: '搜索文件内容',
     file_read: '读取文件片段',
     exec_command: '执行本地或网络检索命令',
+    web_search: '搜索网页并读取公开来源',
   };
   return descriptions[toolName] ?? '执行工具调用';
 }

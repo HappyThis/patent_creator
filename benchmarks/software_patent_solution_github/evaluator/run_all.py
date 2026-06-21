@@ -318,10 +318,9 @@ def render_report(
         )
     if context:
         lines.append(
-            "- 压缩配置：max_tokens=`{max_tokens}`，threshold_ratio=`{ratio}`，reserved_output=`{reserved}`，token_char_coefficient=`{coef}`".format(
+            "- 压缩配置：max_tokens=`{max_tokens}`，threshold_ratio=`{ratio}`，token_char_coefficient=`{coef}`".format(
                 max_tokens=context.get("max_tokens", "-"),
                 ratio=context.get("compress_threshold_ratio", "-"),
-                reserved=context.get("reserved_output_tokens", "-"),
                 coef=context.get("token_char_coefficient", "-"),
             )
         )

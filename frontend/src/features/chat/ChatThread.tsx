@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState } from 'react';
+import { ClipboardEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import type { ChatEvent, ChatMessageEvent, ToolCallEvent } from '../../types';
 import { TimelineList } from '../timeline/TimelineList';
 import { MarkdownContent } from '../../components/MarkdownContent';
@@ -28,7 +28,9 @@ type RenderBlock =
 
 export function ChatThread({ events }: ChatThreadProps) {
   const [hoveredAssistantRound, setHoveredAssistantRound] = useState<string | null>(null);
-  const blocks = useMemo(() => buildRenderBlocks(events), [events]);
+  const hasLiveRound = useMemo(() => hasLiveAssistantRound(events), [events]);
+  const liveNowMs = useLiveNow(hasLiveRound);
+  const blocks = useMemo(() => buildRenderBlocks(events, liveNowMs), [events, liveNowMs]);
 
   return (
     <section className="chat-thread">
@@ -48,15 +50,17 @@ export function ChatThread({ events }: ChatThreadProps) {
 
           return (
             <div key={`assistant_round_${block.roundKey}_${index}`} className="assistant-round" {...hoverProps}>
-              {block.traceBlocks.length > 0 ? (
+              {block.traceBlocks.length > 0 || block.durationLabel ? (
                 <details className="assistant-round-trace">
                   <summary>
                     <span>过程记录</span>
                     <small>{formatTraceSummary(block.traceBlocks, block.durationLabel)}</small>
                   </summary>
-                  <div className="assistant-round-trace-body">
-                    {block.traceBlocks.map((traceBlock, traceIndex) => renderTraceBlock(traceBlock, traceIndex))}
-                  </div>
+                  {block.traceBlocks.length > 0 ? (
+                    <div className="assistant-round-trace-body">
+                      {block.traceBlocks.map((traceBlock, traceIndex) => renderTraceBlock(traceBlock, traceIndex))}
+                    </div>
+                  ) : null}
                 </details>
               ) : null}
               {renderMessage(block.finalMessage, 'assistant', isTimeVisible)}
@@ -84,14 +88,49 @@ function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], 
         showRoundTime ? 'show-round-time' : '',
       ].filter(Boolean).join(' ')}
     >
-      <div className={`message-bubble ${role}`}>
-        <div className="markdown-body">
-          <MarkdownContent>{event.text ?? ''}</MarkdownContent>
-        </div>
+      <div
+        className={`message-bubble ${role}`}
+        onCopy={role === 'user' ? (copyEvent) => copyPlainUserMessage(copyEvent, event.text ?? '') : undefined}
+      >
+        {role === 'user' ? (
+          <div className="plain-message-text">{event.text ?? ''}</div>
+        ) : (
+          <div className="markdown-body">
+            <MarkdownContent>{event.text ?? ''}</MarkdownContent>
+          </div>
+        )}
       </div>
       <time>{event.timestamp}</time>
     </article>
   );
+}
+
+function useLiveNow(active: boolean) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    setNowMs(Date.now());
+    const timerId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timerId);
+  }, [active]);
+
+  return active ? nowMs : null;
+}
+
+function copyPlainUserMessage(event: ClipboardEvent<HTMLDivElement>, fallbackText: string) {
+  const selectedText = window.getSelection()?.toString();
+  const text = selectedText && selectedText.trim() ? stripSelectionBoundaryNewlines(selectedText) : fallbackText;
+  event.clipboardData.setData('text/plain', text);
+  event.preventDefault();
+}
+
+function stripSelectionBoundaryNewlines(value: string) {
+  return value.replace(/^(?:\r?\n)+/, '').replace(/(?:\r?\n)+$/, '');
 }
 
 function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
@@ -132,14 +171,17 @@ function renderStatus(event: StatusEvent, key = event.id) {
   );
 }
 
-function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
+function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): RenderBlock[] {
   const blocks: RenderBlock[] = [];
   let pendingRound: {
     roundKey: string;
     finalMessage: ChatMessageEvent | null;
     traceBlocks: TraceBlock[];
+    startedAtMs: number | null;
+    isStreaming: boolean;
   } | null = null;
   let pendingProcess: ToolCallEvent[] = [];
+  const roundStartTimes = new Map<string, number>();
 
   const flushProcessToRound = () => {
     if (pendingProcess.length === 0) {
@@ -184,7 +226,12 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
       roundKey: pendingRound.roundKey,
       finalMessage: pendingRound.finalMessage,
       traceBlocks: pendingRound.traceBlocks,
-      durationLabel: formatRoundDuration(pendingRound.traceBlocks, pendingRound.finalMessage),
+      durationLabel: formatRoundDuration(
+        pendingRound.traceBlocks,
+        pendingRound.finalMessage,
+        pendingRound.startedAtMs,
+        pendingRound.isStreaming ? liveNowMs : null,
+      ),
     });
     pendingRound = null;
   };
@@ -193,6 +240,10 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
     if (event.kind === 'message' && event.role === 'user') {
       flushRound();
       blocks.push({ kind: 'user_message', event });
+      const roundKey = event.round_id ?? event.message_id ?? event.id;
+      if (event.timestamp_ms) {
+        roundStartTimes.set(roundKey, event.timestamp_ms);
+      }
       continue;
     }
 
@@ -202,13 +253,20 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = { roundKey, finalMessage: null, traceBlocks: [] };
+        pendingRound = {
+          roundKey,
+          finalMessage: null,
+          traceBlocks: [],
+          startedAtMs: roundStartTimes.get(roundKey) ?? null,
+          isStreaming: false,
+        };
       }
       if (pendingRound.finalMessage) {
         pendingRound.traceBlocks.push({ kind: 'message', event: pendingRound.finalMessage });
       }
       flushProcessToRound();
       pendingRound.finalMessage = event;
+      pendingRound.isStreaming = event.is_streaming === true;
       continue;
     }
 
@@ -218,7 +276,13 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = { roundKey, finalMessage: null, traceBlocks: [] };
+        pendingRound = {
+          roundKey,
+          finalMessage: null,
+          traceBlocks: [],
+          startedAtMs: roundStartTimes.get(roundKey) ?? null,
+          isStreaming: false,
+        };
       }
       pendingProcess.push(event);
       continue;
@@ -236,7 +300,13 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = { roundKey, finalMessage: null, traceBlocks: [] };
+        pendingRound = {
+          roundKey,
+          finalMessage: null,
+          traceBlocks: [],
+          startedAtMs: roundStartTimes.get(roundKey) ?? null,
+          isStreaming: false,
+        };
       }
       flushProcessToRound();
       if (pendingRound) {
@@ -249,6 +319,10 @@ function buildRenderBlocks(events: ChatEvent[]): RenderBlock[] {
 
   flushRound();
   return blocks;
+}
+
+function hasLiveAssistantRound(events: ChatEvent[]) {
+  return events.some((event) => event.kind === 'message' && event.role === 'assistant' && event.is_streaming);
 }
 
 function getAssistantRoundKey(event: ChatMessageEvent) {
@@ -280,17 +354,25 @@ function formatTraceSummary(traceBlocks: TraceBlock[], durationLabel: string | n
   return parts.join(' / ');
 }
 
-function formatRoundDuration(traceBlocks: TraceBlock[], finalMessage: ChatMessageEvent) {
+function formatRoundDuration(
+  traceBlocks: TraceBlock[],
+  finalMessage: ChatMessageEvent,
+  startedAtMs: number | null,
+  activeNowMs: number | null,
+) {
   const times = collectTraceTimes(traceBlocks);
   if (finalMessage.timestamp_ms) {
     times.push(finalMessage.timestamp_ms);
   }
-  if (times.length < 2) {
+  if (startedAtMs) {
+    times.push(startedAtMs);
+  }
+  if (times.length < 2 && !activeNowMs) {
     return null;
   }
 
-  const start = Math.min(...times);
-  const end = Math.max(...times);
+  const start = startedAtMs ?? Math.min(...times);
+  const end = activeNowMs ?? Math.max(...times);
   const totalSeconds = Math.max(0, Math.round((end - start) / 1000));
   return formatDuration(totalSeconds);
 }

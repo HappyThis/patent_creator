@@ -30,7 +30,6 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
     llm = ScriptedLLMClient([first_round, second_round])
     settings = make_settings(tmp_path)
     settings.context_max_tokens = 1000
-    settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.4
     settings.context_compression_timeout = 123
     services = AppServices(settings, llm_client=llm)
@@ -91,7 +90,6 @@ async def test_context_manager_rolls_previous_summary_into_next_summary(tmp_path
     llm = ScriptedLLMClient([first_round, second_round, third_round])
     settings = make_settings(tmp_path)
     settings.context_max_tokens = 1000
-    settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.35
     services = AppServices(settings, llm_client=llm)
     project_id = await create_project(services)
@@ -143,7 +141,6 @@ async def test_context_manager_compresses_before_emergency_trim_hides_over_limit
     llm = ScriptedLLMClient([first_round, second_round])
     settings = make_settings(tmp_path)
     settings.context_max_tokens = 10000
-    settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.5
     services = AppServices(settings, llm_client=llm)
     project_id = await create_project(services)
@@ -190,7 +187,6 @@ async def test_context_manager_rechecks_context_before_each_tool_followup(tmp_pa
     llm = ScriptedLLMClient([first_round, second_round_read, second_round_after_tool])
     settings = make_settings(tmp_path)
     settings.context_max_tokens = 520
-    settings.context_reserved_output_tokens = 0
     settings.context_compress_threshold_ratio = 0.5
     services = AppServices(settings, llm_client=llm)
     project_id = await create_project(services)

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any, Awaitable, Callable, Protocol
 
-from ...agents.runtime.model_profiles import prepare_messages_for_model_request
+from ...agents.runtime.message_preparation import prepare_messages_for_model_request
 from ...core import Settings
 from ...storage.workspace_store import WorkspaceStore
 from .barrier import COMPRESSED_CONTEXT_MESSAGE
@@ -63,7 +62,7 @@ class ContextManager:
             current_message_id=current_message_id,
         )
         messages = apply_tool_result_turn_budget(self.store, project_id, messages)
-        return prepare_messages_for_model_request(self._emergency_trim_messages(messages), self.settings)
+        return prepare_messages_for_model_request(self._emergency_trim_messages(messages))
 
     def _build_main_agent_messages_raw(
         self,
@@ -102,7 +101,7 @@ class ContextManager:
             current_message_id=current_message_id,
         )
         raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
-        request_messages = prepare_messages_for_model_request(raw_messages, self.settings)
+        request_messages = prepare_messages_for_model_request(raw_messages)
         usage = usage_for_messages(raw_messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
             return request_messages
@@ -116,7 +115,7 @@ class ContextManager:
                 usage.threshold_tokens,
             )
             trimmed = self._emergency_trim_messages(raw_messages)
-            return prepare_messages_for_model_request(trimmed, self.settings)
+            return prepare_messages_for_model_request(trimmed)
 
         logger.info(
             "context compression triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
@@ -199,7 +198,7 @@ class ContextManager:
                     usage.used_tokens,
                     usage.threshold_tokens,
                 )
-                return prepare_messages_for_model_request(raw_messages, self.settings)
+                return prepare_messages_for_model_request(raw_messages)
 
             logger.warning(
                 "context compression completed but emergency trim is still needed scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
@@ -221,7 +220,7 @@ class ContextManager:
                         "summary": "上下文压缩后仍超限，已应用最终兜底裁剪",
                     },
                 )
-            return prepare_messages_for_model_request(trimmed, self.settings)
+            return prepare_messages_for_model_request(trimmed)
 
         logger.warning(
             "context emergency trim triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s reason=compression_unavailable used_tokens=%s threshold_tokens=%s",
@@ -243,7 +242,7 @@ class ContextManager:
                 },
             )
         trimmed = self._emergency_trim_messages(raw_messages)
-        return prepare_messages_for_model_request(trimmed, self.settings)
+        return prepare_messages_for_model_request(trimmed)
 
     def context_usage(self, project_id: str, session_id: str | None) -> ContextUsage | None:
         if not session_id or not self.store.session_exists(project_id, session_id):
@@ -348,7 +347,7 @@ class ContextManager:
         previous_markdown = str(compression_marker.get("compressed_markdown") or "").strip()
         if previous_markdown:
             compression_messages.extend(prepare_compressed_markdown_messages(previous_markdown))
-        compression_messages.extend(_strip_reasoning_content(source_messages))
+        compression_messages.extend(_strip_usage_metadata(source_messages))
         raw_markdown = await llm_client.generate_text(
             system_prompt=system_prompt,
             messages=compression_messages,
@@ -453,12 +452,10 @@ class ContextManager:
         return trimmed
 
 
-def _strip_reasoning_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    stripped = copy.deepcopy(messages)
+def _strip_usage_metadata(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    stripped = [dict(message) for message in messages]
     for message in stripped:
         message.pop("usage", None)
-        if message.get("role") == "assistant":
-            message.pop("reasoning_content", None)
     return stripped
 
 

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
 from ..agents.prompts import build_main_agent_system_prompt
-from ..agents.runtime.model_profiles import resolve_model_profile
-from ..agents.runtime.openai_compat import OpenAICompatibleClient
+from ..agents.runtime.message_preparation import prepare_messages_for_model_request
+from ..agents.runtime.openai_responses import OpenAIResponsesClient
 from ..agents.workers import MAIN_AGENT_TOOLS, MainAgentToolCall, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
 from ..domain.document_tool_results import tool_failed
@@ -41,7 +41,7 @@ class ChatService:
         executor: ExecutorEngine,
         bus: SessionEventBus,
         settings: Settings,
-        llm_client: OpenAICompatibleClient,
+        llm_client: OpenAIResponsesClient,
     ) -> None:
         self.store = store
         self.context_manager = context_manager
@@ -233,7 +233,6 @@ class ChatService:
         try:
             await self._sleep()
             step_index = 0
-            model_profile = resolve_model_profile(self.settings)
 
             while True:
                 step_index += 1
@@ -268,11 +267,26 @@ class ChatService:
                         },
                     )
 
+                async def on_audit_event(audit_event: dict[str, Any]) -> None:
+                    if audit_event.get("category") != "web_search":
+                        return
+                    await self.bus.publish(
+                        key,
+                        "web_search_progress",
+                        {
+                            **audit_event,
+                            "scope": "main",
+                            "round_id": state.round_id,
+                            "message_id": state.message_id,
+                        },
+                    )
+
                 action = await decide_main_agent_step(
                     self.llm_client,
                     system_prompt=system_prompt,
                     messages=messages,
                     on_text_delta=on_text_delta,
+                    on_audit_event=on_audit_event,
                     trace_context={
                         "scope": "main",
                         "project_id": project_id,
@@ -285,35 +299,40 @@ class ChatService:
 
                 if action.type == "respond":
                     final_reply = action.text or ""
+                    await self.events.audit_events(
+                        project_id,
+                        state,
+                        events=action.audit_events or [],
+                    )
                     await self.events.agent_message(
                         project_id,
                         state,
                         message=action.assistant_message,
                         model=self.settings.openai_model,
-                        provider=model_profile.provider,
-                        thinking=model_profile.thinking,
                     )
                     logger.info(
                         "round step=%d action=respond text_len=%d",
                         step_index,
                         len(final_reply),
                     )
-                    messages.append(model_profile.prepare_messages_for_request([action.assistant_message])[0])
+                    messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
                     await self.events.agent_output(project_id, state, final_reply)
                     break
 
-                # tool_calls 分支：DeepSeek 要求 assistant(tool_calls) 后紧跟每个 tool_call_id 的 tool 结果。
                 tool_calls = action.tool_calls or []
                 logger.info("round step=%d action=tool_calls count=%d", step_index, len(tool_calls))
+                await self.events.audit_events(
+                    project_id,
+                    state,
+                    events=action.audit_events or [],
+                )
                 await self.events.agent_message(
                     project_id,
                     state,
                     message=action.assistant_message,
                     model=self.settings.openai_model,
-                    provider=model_profile.provider,
-                    thinking=model_profile.thinking,
                 )
-                messages.append(model_profile.prepare_messages_for_request([action.assistant_message])[0])
+                messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
                 tool_preamble = assistant_message_text(action.assistant_message)
                 if tool_preamble:
                     await self.events.agent_output(project_id, state, tool_preamble)

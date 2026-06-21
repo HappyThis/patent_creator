@@ -1,3 +1,3 @@
-from .openai_compat import OpenAICompatibleClient
+from .openai_responses import OpenAIResponsesClient
 
-__all__ = ["OpenAICompatibleClient"]
+__all__ = ["OpenAIResponsesClient"]

@@ -8,6 +8,8 @@ export type ChatMessageEvent = {
   round_id?: string;
   message_id?: string;
   seq?: number;
+  is_placeholder?: boolean;
+  is_streaming?: boolean;
 };
 
 type EventStatus = 'running' | 'done' | 'failed';
@@ -68,6 +70,7 @@ export type SessionEventRecord = {
     | 'tool_result'
     | 'context_summary'
     | 'context_pruned'
+    | 'llm_audit'
     | 'session_title';
   seq: number;
   scope: string;

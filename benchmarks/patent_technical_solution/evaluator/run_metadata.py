@@ -31,18 +31,19 @@ def build_run_manifest(
 
 def capture_model_config() -> dict[str, Any]:
     load_repo_env()
-    api_key = os.getenv("OPENAI_COMPAT_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     return {
         "schema_version": 1,
         "subject": {
-            "provider": _env_str("OPENAI_COMPAT_PROVIDER", "mimo").strip().lower(),
-            "model": _env_str("OPENAI_MODEL", "mimo-v2.5-pro"),
-            "base_url": _env_str("OPENAI_COMPAT_BASE_URL", "https://api.xiaomimimo.com/v1"),
-            "thinking": _env_str("OPENAI_COMPAT_THINKING", "disabled").strip().lower(),
-            "reasoning_effort": _env_str("OPENAI_COMPAT_REASONING_EFFORT", "high").strip().lower(),
-            "max_completion_tokens": _env_int("OPENAI_COMPAT_MAX_COMPLETION_TOKENS", 8192),
+            "api": "responses",
+            "model": _env_str("OPENAI_MODEL", "gpt-5.5"),
+            "base_url": _env_str("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            "reasoning_effort": _env_str("OPENAI_REASONING_EFFORT", "high").strip().lower(),
+            "max_output_tokens": _env_int("OPENAI_MAX_OUTPUT_TOKENS", 8192),
+            "web_search_enabled": _env_bool("OPENAI_WEB_SEARCH_ENABLED", True),
+            "web_search_context_size": _env_str("OPENAI_WEB_SEARCH_CONTEXT_SIZE", "low").strip().lower(),
             "api_key_configured": bool(api_key),
-            "api_key_env_var": "OPENAI_COMPAT_API_KEY" if api_key else None,
+            "api_key_env_var": "OPENAI_API_KEY" if api_key else None,
         },
         "runtime": {
             "llm_timeout": _env_float("PATENT_CREATOR_LLM_TIMEOUT", 45.0),
@@ -51,7 +52,6 @@ def capture_model_config() -> dict[str, Any]:
         "context_compression": {
             "max_tokens": _env_int("PATENT_CREATOR_CONTEXT_MAX_TOKENS", 128000),
             "compress_threshold_ratio": _env_float("PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO", 0.8),
-            "reserved_output_tokens": _env_int("PATENT_CREATOR_CONTEXT_RESERVED_OUTPUT_TOKENS", 8000),
             "token_char_coefficient": _env_float("PATENT_CREATOR_CONTEXT_TOKEN_CHAR_COEFFICIENT", 0.5),
             "compression_timeout": _env_float("PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT", 180.0),
         },
@@ -121,3 +121,10 @@ def _env_float(name: str, default: float) -> float:
     if value is None or value.strip() == "":
         return default
     return float(value)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}

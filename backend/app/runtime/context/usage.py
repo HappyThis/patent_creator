@@ -13,7 +13,6 @@ class ContextUsage:
     used_tokens: int
     used_ratio: float
     threshold_tokens: int
-    reserved_output_tokens: int
     status: str
 
     def model_dump(self) -> dict[str, int | float | str]:
@@ -22,7 +21,6 @@ class ContextUsage:
             "used_tokens": self.used_tokens,
             "used_ratio": self.used_ratio,
             "threshold_tokens": self.threshold_tokens,
-            "reserved_output_tokens": self.reserved_output_tokens,
             "status": self.status,
         }
 
@@ -53,7 +51,6 @@ def usage_for_messages(messages: list[dict[str, Any]], settings: Settings) -> Co
         used_tokens=used_tokens,
         used_ratio=round(used_ratio, 4),
         threshold_tokens=threshold_tokens,
-        reserved_output_tokens=settings.context_reserved_output_tokens,
         status=status,
     )
 
@@ -90,7 +87,6 @@ def _usage_total_tokens(usage: Any) -> int:
 
 def _message_estimated_chars(message: dict[str, Any]) -> int:
     total = _value_chars(message.get("content"))
-    total += _value_chars(message.get("reasoning_content"))
     total += _value_chars(message.get("tool_calls"))
     total += _value_chars(message.get("tool_call_id"))
     return total

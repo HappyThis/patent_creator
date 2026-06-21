@@ -15,6 +15,7 @@ class SupportsGenerateWithTools(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any,
+        on_audit_event: Any = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -35,6 +36,7 @@ class MainAgentAction:
     text: str | None = None
     tool_calls: list[MainAgentToolCall] | None = None
     assistant_message: dict[str, Any] | None = None
+    audit_events: list[dict[str, Any]] | None = None
 
 
 def build_main_agent_tools() -> list[dict[str, Any]]:
@@ -50,6 +52,7 @@ async def decide_main_agent_step(
     system_prompt: str,
     messages: list[dict[str, Any]],
     on_text_delta: Any | None = None,
+    on_audit_event: Any | None = None,
     trace_context: dict[str, Any] | None = None,
 ) -> MainAgentAction:
     """请求主 agent 做一步决策，返回统一的 Action 结构。"""
@@ -58,6 +61,7 @@ async def decide_main_agent_step(
         messages=messages,
         tools=MAIN_AGENT_TOOLS,
         on_text_delta=on_text_delta,
+        on_audit_event=on_audit_event,
         trace_context=trace_context,
     )
     action_type = result.get("type")
@@ -70,6 +74,7 @@ async def decide_main_agent_step(
             type="respond",
             text=text,
             assistant_message=assistant_message,
+            audit_events=_audit_events(result),
         )
     if action_type == "tool_calls":
         tool_calls = _tool_calls(result)
@@ -81,6 +86,7 @@ async def decide_main_agent_step(
             type="tool_calls",
             tool_calls=tool_calls,
             assistant_message=assistant_message,
+            audit_events=_audit_events(result),
         )
     raise ApiError(502, "main_agent_invalid_action", f"主 agent 返回了未知动作类型：{action_type}")
 
@@ -88,6 +94,13 @@ async def decide_main_agent_step(
 def _assistant_message(result: dict[str, Any]) -> dict[str, Any] | None:
     value = result.get("assistant_message")
     return value if isinstance(value, dict) else None
+
+
+def _audit_events(result: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_events = result.get("audit_events")
+    if not isinstance(raw_events, list):
+        return []
+    return [item for item in raw_events if isinstance(item, dict)]
 
 
 def _tool_calls(result: dict[str, Any]) -> list[MainAgentToolCall]:

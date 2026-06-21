@@ -2,7 +2,10 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react'
 import {
   applyAssistantDelta,
   applyContextCompressionEvent,
+  applyRoundStartedEvent,
   applyRunningToolEvent,
+  applyWebSearchProgressEvent,
+  completeStreamingRoundEvents,
   finalizeRoundEvents,
   formatTimestamp,
 } from '../features/chat/chatEventTransforms';
@@ -96,6 +99,7 @@ export function useWorkspaceStream({
         const roundId = optionalString(payload.round_id);
         if (roundId && !streamingAssistantIdRef.current) {
           streamingAssistantIdRef.current = `assistant_stream_${roundId}`;
+          setEvents((current) => applyRoundStartedEvent(current, roundId));
         }
         return;
       }
@@ -128,6 +132,7 @@ export function useWorkspaceStream({
         }
         if (roundId) {
           streamingAssistantIdRef.current = `assistant_stream_${roundId}`;
+          setEvents((current) => applyRoundStartedEvent(current, roundId, messageId));
           const optimisticId = optimisticUserMessageIdRef.current;
           if (optimisticId) {
             setEvents((current) =>
@@ -145,6 +150,11 @@ export function useWorkspaceStream({
             optimisticUserMessageIdRef.current = null;
           }
         }
+        return;
+      }
+
+      if (eventName === 'web_search_progress') {
+        setEvents((current) => applyWebSearchProgressEvent(current, payload));
         return;
       }
 
@@ -266,18 +276,24 @@ export function useWorkspaceStream({
       if (eventName === 'round_failed') {
         setIsCancelling(false);
         closeStream();
-        setEvents((current) => [
-          ...current,
-          {
-            id: `assistant_error_${Date.now()}`,
-            kind: 'message',
-            role: 'assistant',
-            text: String(payload.reply ?? '本轮处理失败。'),
-            timestamp: formatTimestamp(),
-            round_id: optionalString(payload.round_id),
-            message_id: optionalString(payload.message_id),
-          },
-        ]);
+        setEvents((current) => {
+          const roundId = optionalString(payload.round_id);
+          const messageId = optionalString(payload.message_id);
+          return [
+            ...completeStreamingRoundEvents(current, roundId, messageId),
+            {
+              id: `assistant_error_${Date.now()}`,
+              kind: 'message',
+              role: 'assistant',
+              text: String(payload.reply ?? '本轮处理失败。'),
+              timestamp: formatTimestamp(),
+              timestamp_ms: Date.now(),
+              round_id: roundId,
+              message_id: messageId,
+              is_streaming: false,
+            },
+          ];
+        });
         await refreshProject(project_id);
         return;
       }

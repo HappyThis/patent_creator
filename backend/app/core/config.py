@@ -10,12 +10,12 @@ class Settings:
     data_dir: Path
     git_user_name: str
     git_user_email: str
-    openai_compat_base_url: str = "https://api.yairouter.com"
-    openai_compat_api_key: str | None = None
-    openai_compat_provider: str = "openai"
-    openai_compat_thinking: str = "disabled"
-    openai_compat_reasoning_effort: str = "high"
-    openai_compat_max_completion_tokens: int = 8192
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = None
+    openai_reasoning_effort: str = "high"
+    openai_max_output_tokens: int = 8192
+    openai_web_search_enabled: bool = True
+    openai_web_search_context_size: str = "low"
     openai_model: str = "gpt-5.5"
     llm_timeout: float = 45.0
     context_compression_timeout: float = 180.0
@@ -25,7 +25,6 @@ class Settings:
     round_finish_delay: float = 0.1
     context_max_tokens: int = 128000
     context_compress_threshold_ratio: float = 0.8
-    context_reserved_output_tokens: int = 8000
     context_token_char_coefficient: float = 0.5
     log_dir: Path = Path("logs")
     log_level: str = "INFO"
@@ -42,12 +41,12 @@ class Settings:
             data_dir=data_dir,
             git_user_name=os.getenv("PATENT_CREATOR_GIT_USER_NAME", "Patent Creator"),
             git_user_email=os.getenv("PATENT_CREATOR_GIT_USER_EMAIL", "patent-creator@local"),
-            openai_compat_base_url=os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.yairouter.com"),
-            openai_compat_api_key=os.getenv("OPENAI_COMPAT_API_KEY"),
-            openai_compat_provider=os.getenv("OPENAI_COMPAT_PROVIDER", "openai").strip().lower(),
-            openai_compat_thinking=os.getenv("OPENAI_COMPAT_THINKING", "disabled").strip().lower(),
-            openai_compat_reasoning_effort=os.getenv("OPENAI_COMPAT_REASONING_EFFORT", "high").strip().lower(),
-            openai_compat_max_completion_tokens=int(os.getenv("OPENAI_COMPAT_MAX_COMPLETION_TOKENS", "8192")),
+            openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "high").strip().lower(),
+            openai_max_output_tokens=int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "8192")),
+            openai_web_search_enabled=_parse_bool_env(os.getenv("OPENAI_WEB_SEARCH_ENABLED"), True),
+            openai_web_search_context_size=os.getenv("OPENAI_WEB_SEARCH_CONTEXT_SIZE", "low").strip().lower(),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-5.5"),
             llm_timeout=float(os.getenv("PATENT_CREATOR_LLM_TIMEOUT", "45")),
             context_compression_timeout=float(os.getenv("PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT", "180")),
@@ -62,7 +61,6 @@ class Settings:
             context_compress_threshold_ratio=float(
                 os.getenv("PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO", "0.8")
             ),
-            context_reserved_output_tokens=int(os.getenv("PATENT_CREATOR_CONTEXT_RESERVED_OUTPUT_TOKENS", "8000")),
             context_token_char_coefficient=float(
                 os.getenv("PATENT_CREATOR_CONTEXT_TOKEN_CHAR_COEFFICIENT", "0.5")
             ),

@@ -49,7 +49,6 @@ class ContextUsageSummary(BaseModel):
     used_tokens: int
     used_ratio: float
     threshold_tokens: int
-    reserved_output_tokens: int
     status: str
 
 
@@ -103,6 +102,7 @@ class SessionEvent(BaseModel):
         "context_summary",
         "context_pruned",
         "session_title",
+        "llm_audit",
     ]
     seq: int
     scope: str

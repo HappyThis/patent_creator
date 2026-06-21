@@ -31,7 +31,7 @@
 
 .message-bubble {
   line-height: 1.66;
-  font-size: 14px;
+  font-size: 14.5px;
 }
 
 .message-bubble.user {
@@ -47,9 +47,9 @@
 }
 
 .message-bubble.assistant {
-  max-width: 900px;
-  padding: 0 0 0 14px;
-  background: linear-gradient(90deg, rgba(181, 149, 95, 0.14), rgba(181, 149, 95, 0)) left top / 1px 100% no-repeat;
+  max-width: 800px;
+  padding: 0 0 0 16px;
+  background: linear-gradient(90deg, rgba(181, 149, 95, 0.09), rgba(181, 149, 95, 0)) left top / 1px 100% no-repeat;
   color: #25231f;
   border: 0;
 }
@@ -60,7 +60,7 @@
 }
 
 .markdown-body {
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.66;
   word-wrap: break-word;
 }
@@ -74,8 +74,8 @@
 }
 
 .markdown-body p {
-  margin: 0 0 9px;
-  white-space: pre-wrap;
+  margin: 0 0 8px;
+  white-space: normal;
 }
 
 .markdown-body p:last-child {
@@ -88,10 +88,10 @@
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
-  margin: 14px 0 6px;
-  font-weight: 680;
-  line-height: 1.3;
-  color: #25231f;
+  margin: 16px 0 6px;
+  font-weight: 700;
+  line-height: 1.32;
+  color: #1f211f;
 }
 
 .markdown-body h1 {
@@ -103,18 +103,18 @@
 }
 
 .markdown-body h3 {
-  font-size: 15px;
+  font-size: 15.5px;
 }
 
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
-  font-size: 14px;
+  font-size: 14.5px;
 }
 
 .markdown-body ul,
 .markdown-body ol {
-  margin: 8px 0 12px;
+  margin: 7px 0 11px;
   padding-left: 20px;
 }
 
@@ -124,6 +124,15 @@
 
 .markdown-body li>p {
   margin: 0;
+}
+
+.markdown-body li>p+p {
+  margin-top: 7px;
+}
+
+.markdown-body li>ul,
+.markdown-body li>ol {
+  margin: 6px 0;
 }
 
 .markdown-body blockquote {
@@ -218,6 +227,11 @@
 
 .message-bubble.user .markdown-body code {
   background: rgba(0, 0, 0, 0.06);
+}
+
+.plain-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message-row time {

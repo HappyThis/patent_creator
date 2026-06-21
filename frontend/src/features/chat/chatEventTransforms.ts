@@ -104,6 +104,21 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       continue;
     }
 
+    if (event.type === 'llm_audit') {
+      const webSearchEvent = webSearchEventFromPayload(event.payload, {
+        id: event.id,
+        timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
+      });
+      if (webSearchEvent) {
+        events.push(webSearchEvent);
+      }
+      continue;
+    }
+
     if (event.type === 'agent_message') {
       continue;
     }
@@ -161,6 +176,60 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
   }
 
   return events;
+}
+
+export function applyRoundStartedEvent(
+  current: ChatEvent[],
+  roundId?: string,
+  sourceMessageId?: string,
+): ChatEvent[] {
+  if (!roundId) {
+    return current;
+  }
+  const id = `assistant_stream_${roundId}`;
+  const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'message' && item.id === id);
+  const nextEvent: ChatEvent = {
+    id,
+    kind: 'message',
+    role: 'assistant',
+    text: '正在思考...',
+    timestamp: formatTimestamp(),
+    timestamp_ms: Date.now(),
+    round_id: roundId,
+    message_id: sourceMessageId,
+    is_placeholder: true,
+    is_streaming: true,
+  };
+  if (existingIndex === -1) {
+    return [...current, nextEvent];
+  }
+  const next = [...current];
+  next[existingIndex] = nextEvent;
+  return next;
+}
+
+export function applyWebSearchProgressEvent(
+  current: ChatEvent[],
+  payload: Record<string, unknown>,
+): ChatEvent[] {
+  const event = webSearchEventFromPayload(payload, {
+    id: webSearchEventId(payload),
+    timestamp: formatTimestamp(),
+    timestamp_ms: Date.now(),
+    round_id: typeof payload.round_id === 'string' ? payload.round_id : undefined,
+    message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+  });
+  if (!event) {
+    return current;
+  }
+
+  const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'tool_call' && item.id === event.id);
+  if (existingIndex === -1) {
+    return [...current, event];
+  }
+  const next = [...current];
+  next[existingIndex] = event;
+  return next;
 }
 
 export function applyContextCompressionEvent(
@@ -247,6 +316,7 @@ export function applyAssistantDelta(
         timestamp_ms: Date.now(),
         round_id: roundId,
         message_id: sourceMessageId,
+        is_streaming: true,
       },
     ];
   }
@@ -258,11 +328,36 @@ export function applyAssistantDelta(
   }
   next[existingIndex] = {
     ...existing,
-    text: `${existing.text}${delta}`,
+    text: existing.is_placeholder ? delta : `${existing.text}${delta}`,
     round_id: existing.round_id ?? roundId,
     message_id: existing.message_id ?? sourceMessageId,
+    is_placeholder: false,
+    is_streaming: true,
   };
   return next;
+}
+
+export function completeStreamingRoundEvents(
+  current: ChatEvent[],
+  roundId?: string,
+  sourceMessageId?: string,
+): ChatEvent[] {
+  return current.map((item) => {
+    if (
+      item.kind !== 'message' ||
+      item.role !== 'assistant' ||
+      !item.is_streaming ||
+      (roundId && item.round_id !== roundId)
+    ) {
+      return item;
+    }
+    return {
+      ...item,
+      round_id: item.round_id ?? roundId,
+      message_id: item.message_id ?? sourceMessageId,
+      is_streaming: false,
+    };
+  });
 }
 
 export function finalizeRoundEvents(
@@ -280,6 +375,7 @@ export function finalizeRoundEvents(
 
   let lastToolIndex = -1;
   let latestStreamIndexAfterTools = -1;
+  let latestStreamIndex = -1;
   for (let index = 0; index < current.length; index += 1) {
     const item = current[index];
     if (!roundMatches(item)) {
@@ -293,31 +389,36 @@ export function finalizeRoundEvents(
     if (
       item.kind === 'message' &&
       item.role === 'assistant' &&
-      item.id.startsWith('assistant_stream_') &&
-      index > lastToolIndex
+      item.id.startsWith('assistant_stream_')
     ) {
-      latestStreamIndexAfterTools = index;
+      latestStreamIndex = index;
+      if (index > lastToolIndex) {
+        latestStreamIndexAfterTools = index;
+      }
     }
   }
 
-  if (latestStreamIndexAfterTools !== -1) {
-    const next = [...current];
-    const streamMessage = next[latestStreamIndexAfterTools];
+  const streamIndex = latestStreamIndexAfterTools !== -1 ? latestStreamIndexAfterTools : latestStreamIndex;
+  if (streamIndex !== -1) {
+    const next = completeStreamingRoundEvents(current, roundId, sourceMessageId);
+    const streamMessage = next[streamIndex];
     if (streamMessage.kind === 'message') {
-      next[latestStreamIndexAfterTools] = {
+      next[streamIndex] = {
         ...streamMessage,
         text: reply,
-        timestamp: streamMessage.timestamp || timestamp,
-        timestamp_ms: streamMessage.timestamp_ms ?? Date.now(),
+        timestamp,
+        timestamp_ms: Date.now(),
         round_id: streamMessage.round_id ?? roundId,
         message_id: streamMessage.message_id ?? sourceMessageId,
+        is_placeholder: false,
+        is_streaming: false,
       };
     }
     return next;
   }
 
   return [
-    ...current,
+    ...completeStreamingRoundEvents(current, roundId, sourceMessageId),
     {
       id: `assistant_final_${Date.now()}`,
       kind: 'message',
@@ -327,6 +428,95 @@ export function finalizeRoundEvents(
       timestamp_ms: Date.now(),
       round_id: roundId,
       message_id: sourceMessageId,
+      is_streaming: false,
     },
   ];
+}
+
+type WebSearchMeta = {
+  id: string;
+  timestamp: string;
+  timestamp_ms: number;
+  round_id?: string;
+  message_id?: string;
+  seq?: number;
+};
+
+function webSearchEventId(payload: Record<string, unknown>): string {
+  const item = isPlainRecord(payload.item) ? payload.item : null;
+  const itemId = typeof item?.id === 'string' ? item.id : '';
+  const annotationKey = Array.isArray(payload.annotations) ? String(payload.annotations.length) : '';
+  const roundId = typeof payload.round_id === 'string' ? payload.round_id : 'active';
+  return `web_search_${roundId}_${itemId || annotationKey || Date.now()}`;
+}
+
+function webSearchEventFromPayload(payload: Record<string, unknown>, meta: WebSearchMeta): ToolCallEvent | null {
+  if (payload.category !== 'web_search') {
+    return null;
+  }
+  const item = isPlainRecord(payload.item) ? payload.item : null;
+  const action = isPlainRecord(item?.action) ? item.action : null;
+  const annotations = Array.isArray(payload.annotations)
+    ? payload.annotations.filter(isPlainRecord)
+    : [];
+
+  if (action) {
+    const actionType = typeof action.type === 'string' ? action.type : 'search';
+    const query = typeof action.query === 'string' ? action.query : '';
+    const url = typeof action.url === 'string' ? action.url : '';
+    const queries = Array.isArray(action.queries)
+      ? action.queries.filter((queryItem): queryItem is string => typeof queryItem === 'string')
+      : [];
+    const detailLines = [
+      query ? `query: ${query}` : '',
+      url ? `url: ${url}` : '',
+      queries.length > 0 ? `queries:\n${queries.map((item) => `- ${item}`).join('\n')}` : '',
+    ].filter(Boolean);
+    return {
+      id: meta.id,
+      kind: 'tool_call',
+      timestamp: meta.timestamp,
+      timestamp_ms: meta.timestamp_ms,
+      round_id: meta.round_id,
+      message_id: meta.message_id,
+      seq: meta.seq,
+      status: item?.status === 'failed' ? 'failed' : 'done',
+      scope: 'main',
+      tool: 'web_search',
+      title: actionType === 'open_page' ? '打开网页' : '网页搜索',
+      summary: actionType === 'open_page' ? `打开网页：${url || '未知页面'}` : `搜索：${query || queries[0] || '网页'}`,
+      detail: detailLines.join('\n\n') || formatToolDetail(payload),
+    };
+  }
+
+  if (annotations.length > 0) {
+    const urls = annotations
+      .map((annotation) => {
+        const title = typeof annotation.title === 'string' ? annotation.title : '引用网页';
+        const url = typeof annotation.url === 'string' ? annotation.url : '';
+        return url ? `- ${title}\n  ${url}` : `- ${title}`;
+      })
+      .join('\n');
+    return {
+      id: meta.id,
+      kind: 'tool_call',
+      timestamp: meta.timestamp,
+      timestamp_ms: meta.timestamp_ms,
+      round_id: meta.round_id,
+      message_id: meta.message_id,
+      seq: meta.seq,
+      status: 'done',
+      scope: 'main',
+      tool: 'web_search',
+      title: '引用网页',
+      summary: `引用了 ${annotations.length} 个网页`,
+      detail: urls,
+    };
+  }
+
+  return null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

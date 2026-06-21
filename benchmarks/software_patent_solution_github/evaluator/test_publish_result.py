@@ -51,7 +51,6 @@ def test_publish_batch_run_writes_sanitized_result_snapshot(tmp_path: Path) -> N
                 "context_compression": {
                     "max_tokens": 128000,
                     "compress_threshold_ratio": 0.8,
-                    "reserved_output_tokens": 8000,
                     "token_char_coefficient": 0.5,
                     "compression_timeout": 180.0,
                 },

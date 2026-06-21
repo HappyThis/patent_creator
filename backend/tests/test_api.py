@@ -70,6 +70,7 @@ class StubLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
+        on_audit_event: Any = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -97,7 +98,6 @@ class StubLLMClient:
                 "assistant_message": {
                     "role": "assistant",
                     "content": "",
-                    "reasoning_content": "主 agent 直接生成最终态正文并写入文档。",
                     "tool_calls": [
                         {
                             "id": call["tool_call_id"],
@@ -208,7 +208,6 @@ class StubLLMClient:
             "assistant_message": {
                 "role": "assistant",
                 "content": reply,
-                "reasoning_content": "已完成工具调用，准备回复用户。",
             },
         }
 
@@ -272,7 +271,7 @@ async def test_create_project_separates_project_name_and_disclosure_title(tmp_pa
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     app = create_app(settings, services=services)
@@ -328,7 +327,7 @@ async def test_delete_project_removes_project_from_workspace(tmp_path: Path) -> 
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     app = create_app(settings, services=services)
@@ -362,7 +361,7 @@ async def test_project_lock_cleanup_keeps_lock_with_concurrent_lease(tmp_path: P
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     project_id = "proj_lock_waiter"
@@ -397,7 +396,7 @@ async def test_project_lock_cleanup_after_missing_project_errors(tmp_path: Path)
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     missing_project_id = "proj_missing_lock"
@@ -421,7 +420,7 @@ async def test_project_chat_and_export(tmp_path: Path) -> None:
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
         round_step_delay=0.01,
         round_finish_delay=0.01,
     )
@@ -559,7 +558,7 @@ async def test_session_stream_can_attach_to_running_round(tmp_path: Path) -> Non
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     app = create_app(settings, services=services)
@@ -620,7 +619,7 @@ async def test_session_stream_replays_buffered_current_round_events(tmp_path: Pa
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     app = create_app(settings, services=services)
@@ -681,7 +680,7 @@ async def test_running_round_can_be_cancelled(tmp_path: Path) -> None:
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
         round_step_delay=1.0,
     )
     services = AppServices(settings, llm_client=StubLLMClient())
@@ -733,7 +732,7 @@ async def test_session_can_be_deleted_and_active_session_moves(tmp_path: Path) -
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     app = create_app(settings, services=services)
@@ -796,7 +795,7 @@ async def test_running_project_rejects_session_delete(tmp_path: Path) -> None:
         data_dir=tmp_path / "data",
         git_user_name="Test User",
         git_user_email="test@example.com",
-        openai_compat_api_key="test-key",
+        openai_api_key="test-key",
     )
     services = AppServices(settings, llm_client=StubLLMClient())
     app = create_app(settings, services=services)
