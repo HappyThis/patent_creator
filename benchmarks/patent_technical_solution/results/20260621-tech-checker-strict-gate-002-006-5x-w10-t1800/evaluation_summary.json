@@ -1,0 +1,76 @@
+[
+  {
+    "case_id": "002",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      82.0,
+      94.0,
+      92.0,
+      93.0,
+      96.0
+    ],
+    "average_score": 91.4,
+    "min_score": 82.0,
+    "max_score": 96.0,
+    "score_stddev": 4.882622246293481,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "completed、failed、cancelled 等终态写入虽然有“终态优先”和取消晚于终态的表述，但缺少明确的条件终态更新规则，迟到完成事件不得覆盖已取消或已清理状态的保护机制不够硬。",
+      "任务状态很多，但状态迁移保护规则不够完整，更多是顺序流程描述，而不是可防并发竞态的状态机。",
+      "任务记录中的“输入是否已应用”边界在恢复章节有体现，但在字段模型中没有作为独立必要字段突出，导致接收记录与会话污染边界的专利特征还可更凝练。",
+      "后台执行器从 accepted/queued 更新为 running 的过程描述为读取后更新，未充分强调条件领取或 compare-and-set 更新对多执行者竞争的保护，虽然 Durable Object 串行化可部分缓解。",
+      "后台执行器如何防止多个执行者并发领取同一 accepted/queued 任务没有明确写成条件领取、租约或版本号比较更新机制。"
+    ],
+    "top_missing_key_mechanisms": [
+      "任务领取的 compare-and-set 或事务更新规则：仅当任务仍为已接收/待执行且未被取消时，才能领取为执行中并绑定执行者或 requestId。",
+      "对迟到完成事件与取消/清理竞争时的条件终态更新谓词可再具体化，例如仅从 running/cancelling 的允许前态转入终态。",
+      "对长时间执行中但输入已应用任务的失败、诊断或人工介入状态边界还可更明确。",
+      "已写入 inputMessageId 但缺少 requestId 时的补偿判据：需要确认会话最后消息、任务输入消息和轮次代际一致后才允许 continueLastTurn 或等价补偿。",
+      "明确的条件终态写入规则：例如仅当 taskId、attempt、requestId 和当前非终态匹配时，完成/失败/中断结果才可落库，防止迟到结果覆盖 aborted 或 cleaned。"
+    ]
+  },
+  {
+    "case_id": "006",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      84.0,
+      89.0,
+      93.0,
+      88.0,
+      88.0
+    ],
+    "average_score": 88.4,
+    "min_score": 84.0,
+    "max_score": 93.0,
+    "score_stddev": 2.870540018881465,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "sidecar 或本机信号层的批量读取接口、键索引结构和读改写冲突处理只做了原则性描述，原子替换、乐观版本号和追加日志被列为可选异常措施，未完全展开正常更新路径。",
+      "sidecar/运行时信号读写失败的失败隔离描述偏轻，只说明缺失或损坏时回退默认排序值，未覆盖写入失败、诊断记录以及不阻断知识保存和读取的完整 fail-open 机制。",
+      "交底书表达整体可用，但个别段落带有系统设计说明口吻，必要技术特征的权利要求式边界还可以更凝练。",
+      "失败隔离写得较强的是整理流程失败不改 Markdown，但没有清楚覆盖动态信号层读取或写入失败时检索、排序和知识内容保存如何 fail-open。",
+      "失败隔离只覆盖单个文件刷新失败，对 sidecar 读取失败、状态文件损坏、数据库不可用时如何 fail-open 说明不足。"
+    ],
+    "top_missing_key_mechanisms": [
+      "sidecar 作为动态信号权威存储的明确数据模型和批量读取/写入接口。",
+      "sidecar 写入失败、读取异常、部分损坏时的诊断、重试和 fail-open 边界。",
+      "sidecar 读写失败、损坏或缺失时的诊断与 fail-open 规则。",
+      "共享文件写入器如何剥离动态字段的更具体规则。",
+      "动态 overlay schema 升级、索引指纹变化和模式版本迁移的具体兼容策略。"
+    ]
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "status": "scored",
+  "total_score": 91,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 18,
+    "technical_depth": 22,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 知识内容与高频本机运行信号混写之间的矛盾，并明确保留动态信号用于检索、排序、清理和整理。",
+    "核心方案覆盖共享知识文件层、本机运行时信号层、读取融合层和一致性清理层，方向与参考方案的字段分层、sidecar/overlay、读取融合、写入剥离基本等价。",
+    "技术手段较充分，写清了 Markdown 稳定字段、访问次数/命中/热度/排序权重等动态字段的归属，提出映射键、来源隔离、重命名迁移、orphan 信号处理、批处理落盘、并发版本校验等机制。",
+    "检索融合部分结合项目中的 context tree、symbol tree、MiniSearch/BM25、成熟度和本地来源偏置，说明了文本相关性与本机信号如何共同形成有效排序分。",
+    "清理一致性覆盖删除、移动、来源变化、版本同步、索引缓存、派生产物和归档 stub 等场景，能支撑版本控制噪声降低与排序价值保留的因果闭环。"
+  ],
+  "weaknesses": [
+    "对 sidecar 或本机信号层读写失败的 fail-open 机制写得不足，只说明信号缺失使用默认值，没有明确读写异常、损坏、权限失败时如何隔离诊断且不阻断 Markdown 主流程。",
+    "对旧版 Markdown 中已存在 accessCount、recency、importance、updateCount 等动态 frontmatter 字段的兼容读取、懒迁移或剥离策略不够明确；更多写的是文件重命名/移动后的信号迁移。",
+    "信号层接口形态仍偏概括，虽然列出 overlay、sidecar、本地数据库、键值存储等变体，但缺少更明确的记录结构或批量读取接口边界。",
+    "公式处出现占位式引用，实际公式未完整展开，表达上略影响交底书严整性。"
+  ],
+  "missing_key_mechanisms": [
+    "sidecar/本机信号层读失败、写失败、记录损坏或锁冲突时的 fail-open 与诊断隔离机制。",
+    "遗留动态 frontmatter 字段向本机信号层的懒初始化、迁移成功后的共享 Markdown 剥离或兼容保留策略。",
+    "更明确的本机信号记录 schema 与批量读取/批量更新接口，例如按映射键集合一次读取、按追加日志或版本号合并增量。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到高分档：它不是简单地说把元数据放到数据库，而是围绕共享 Markdown 与本机动态信号提出了分层存储、映射键、读取融合、写入剥离、排序计算、来源隔离、迁移匹配、orphan 清理和并发更新等组合机制，技术问题、核心构思和运行机理均较完整。与参考路径相比，它采用 overlay/sidecar/本地数据库的开放实现形式，并结合项目已有 context tree、symbol tree、MiniSearch/BM25 与共享 source 机制形成等价深度。未给更高分主要因为 fail-open 失败隔离和旧 frontmatter 动态字段迁移兼容不足，这两项是 rubric 中高质量方案的重要必要特征；但方案已有缺省值、orphan 和清理策略，未触发“没有迁移兼容或缺省策略”上限，也不存在影响成立的无依据事实声明。"
+}

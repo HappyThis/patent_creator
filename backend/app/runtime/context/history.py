@@ -7,7 +7,14 @@ from typing import Any, Iterable
 from ...schemas import SessionEvent
 from .compression import prepare_compressed_markdown_messages
 
-MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_message", "agent_output", "tool_call", "tool_result"}
+MAIN_CONTEXT_EVENT_TYPES = {
+    "user_input",
+    "agent_message",
+    "agent_output",
+    "tool_call",
+    "tool_result",
+    "technical_solution_check_feedback",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +109,7 @@ def project_main_event_segments(events: list[SessionEvent]) -> list[MessageSegme
     index = 0
     while index < len(events):
         event = events[index]
-        if event.type == "user_input":
+        if event.type in {"user_input", "technical_solution_check_feedback"}:
             segments.append(
                 MessageSegment(
                     start_seq=event.seq,

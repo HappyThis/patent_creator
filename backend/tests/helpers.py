@@ -21,9 +21,14 @@ class ScriptedLLMClient:
     def __init__(
         self,
         script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]],
+        *,
+        checker_json: list[dict[str, Any]] | None = None,
     ) -> None:
         self._script = list(script)
         self._cursor = 0
+        self._checker_json = list(checker_json or [])
+        self._checker_cursor = 0
+        self.checker_prompts: list[dict[str, Any]] = []
         self.generated_text_prompts: list[dict[str, Any]] = []
 
     async def generate_with_tools_stream(
@@ -91,6 +96,21 @@ class ScriptedLLMClient:
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if "技术方案”章节的质量检查器" in system_prompt:
+            self.checker_prompts.append(
+                {
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                    "temperature": temperature,
+                    "timeout": timeout,
+                    "trace_context": trace_context,
+                }
+            )
+            if self._checker_cursor >= len(self._checker_json):
+                return {"title": "低算力实时保护"}
+            payload = self._checker_json[self._checker_cursor]
+            self._checker_cursor += 1
+            return payload
         return {"title": "低算力实时保护"}
 
     async def generate_text(

@@ -103,6 +103,8 @@ class SessionEvent(BaseModel):
         "context_pruned",
         "session_title",
         "llm_audit",
+        "technical_solution_check_result",
+        "technical_solution_check_feedback",
     ]
     seq: int
     scope: str

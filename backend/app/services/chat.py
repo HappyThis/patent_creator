@@ -20,6 +20,13 @@ from ..storage.workspace_store import WorkspaceStore
 from .chat_events import ChatEventEmitter
 from .chat_protocol import DEFAULT_CHANGED_PAYLOAD, RoundState, assistant_message_text, build_commit_message
 from .event_bus import SessionEventBus
+from .technical_solution_checker import (
+    TechnicalSolutionCheckResult,
+    TechnicalSolutionChecker,
+    TechnicalSolutionCheckValidationError,
+    checker_feedback_user_message,
+    technical_solution_markdown,
+)
 
 logger = logging.getLogger("patent_creator.chat")
 LockedResult = TypeVar("LockedResult")
@@ -50,6 +57,7 @@ class ChatService:
         self.settings = settings
         self.llm_client = llm_client
         self.events = ChatEventEmitter(store, bus, executor)
+        self.technical_solution_checker = TechnicalSolutionChecker(llm_client, settings)
         self._project_locks: dict[str, _ProjectLockState] = {}
         self._project_locks_guard = asyncio.Lock()
         self._running_tasks: dict[tuple[str, str, str], asyncio.Task[None]] = {}
@@ -222,6 +230,8 @@ class ChatService:
         changed_payload["active_block_id"] = payload.active_block_id
         final_reply: str | None = None
         messages: list[dict[str, Any]] = []
+        technical_solution_before = self._current_technical_solution_markdown(project_id)
+        checker_attempted = False
         logger.info(
             "round started project=%s session=%s round=%s message_len=%d",
             project_id,
@@ -317,6 +327,20 @@ class ChatService:
                     )
                     messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
                     await self.events.agent_output(project_id, state, final_reply)
+                    if not checker_attempted:
+                        technical_solution_after = self._current_technical_solution_markdown(project_id)
+                        if technical_solution_after != technical_solution_before:
+                            checker_attempted = True
+                            check_result = await self._run_technical_solution_check(
+                                project_id,
+                                state,
+                                technical_solution_markdown_value=technical_solution_after,
+                            )
+                            if check_result is not None and not check_result.gate_pass:
+                                await self._append_technical_solution_check_feedback(project_id, state, check_result)
+                                technical_solution_before = technical_solution_after
+                                await self._sleep()
+                                continue
                     break
 
                 tool_calls = action.tool_calls or []
@@ -549,6 +573,138 @@ class ChatService:
             result.get("status"),
         )
         return result
+
+    def _current_technical_solution_markdown(self, project_id: str) -> str:
+        return technical_solution_markdown(self.store.get_disclosure(project_id))
+
+    async def _run_technical_solution_check(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        technical_solution_markdown_value: str,
+    ) -> TechnicalSolutionCheckResult | None:
+        key = (project_id, state.session_id)
+        await self.bus.publish(
+            key,
+            "technical_solution_check_started",
+            {
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+                "summary": "开始检查技术方案",
+            },
+        )
+        try:
+            result = await self.technical_solution_checker.check(
+                technical_solution_markdown=technical_solution_markdown_value,
+                trace_context={
+                    "project_id": project_id,
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "technical solution check skipped project=%s session=%s round=%s error=%s",
+                project_id,
+                state.session_id,
+                state.round_id,
+                exc,
+            )
+            code = (
+                "technical_solution_check_validation_failed"
+                if isinstance(exc, TechnicalSolutionCheckValidationError)
+                else "technical_solution_check_failed"
+            )
+            payload = {
+                "status": "failed",
+                "code": code,
+                "message": str(exc),
+            }
+            if isinstance(exc, TechnicalSolutionCheckValidationError):
+                payload["attempts"] = exc.attempts
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="technical_solution_check_result",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload=payload,
+            )
+            await self.bus.publish(
+                key,
+                "technical_solution_check_result",
+                {
+                    **payload,
+                    "scope": "main",
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+            return None
+
+        payload = {"status": "success", **result.as_payload()}
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_check_result",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload=payload,
+        )
+        await self.bus.publish(
+            key,
+            "technical_solution_check_result",
+            {
+                **payload,
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
+        logger.info(
+            "technical solution check completed project=%s session=%s round=%s gate_pass=%s",
+            project_id,
+            state.session_id,
+            state.round_id,
+            result.gate_pass,
+        )
+        return result
+
+    async def _append_technical_solution_check_feedback(
+        self,
+        project_id: str,
+        state: RoundState,
+        result: TechnicalSolutionCheckResult,
+    ) -> None:
+        feedback = checker_feedback_user_message(result)
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_check_feedback",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload={
+                "text": feedback,
+                "review_markdown": result.review_markdown,
+                "reason": result.reason,
+            },
+        )
+        await self.bus.publish(
+            (project_id, state.session_id),
+            "technical_solution_reflection_started",
+            {
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+                "summary": "技术方案检查反馈已纳入反思",
+            },
+        )
 
     @staticmethod
     def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:
