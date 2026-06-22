@@ -288,16 +288,6 @@ export function useWorkspace(projectId: string | null) {
       const result = await apiClient.downloadDocx(project.project_id);
       const filename = result.filename ?? `${project.project_id}.docx`;
       downloadBlob(result.blob, filename);
-      setEvents((current) => [
-        ...current,
-        {
-          id: `export_docx_${Date.now()}`,
-          kind: 'message',
-          role: 'assistant',
-          text: `DOCX 已开始下载：\`${filename}\``,
-          timestamp: formatTimestamp(),
-        },
-      ]);
     } catch (error: unknown) {
       const messageText = error instanceof Error ? error.message : '导出 DOCX 失败。';
       setEvents((current) => [

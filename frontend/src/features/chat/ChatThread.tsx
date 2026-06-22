@@ -50,7 +50,7 @@ export function ChatThread({ events }: ChatThreadProps) {
 
           return (
             <div key={`assistant_round_${block.roundKey}_${index}`} className="assistant-round" {...hoverProps}>
-              {block.traceBlocks.length > 0 || block.durationLabel ? (
+              {block.traceBlocks.length > 0 ? (
                 <details className="assistant-round-trace">
                   <summary>
                     <span>过程记录</span>
@@ -94,6 +94,8 @@ function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], 
       >
         {role === 'user' ? (
           <div className="plain-message-text">{event.text ?? ''}</div>
+        ) : event.is_placeholder && event.is_streaming ? (
+          <ThinkingIndicator />
         ) : (
           <div className="markdown-body">
             <MarkdownContent>{event.text ?? ''}</MarkdownContent>
@@ -102,6 +104,21 @@ function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], 
       </div>
       <time>{event.timestamp}</time>
     </article>
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <div className="thinking-indicator" aria-live="polite" aria-label="Thinking">
+      <span className="thinking-pulse" aria-hidden="true" />
+      <span className="thinking-label">Thinking</span>
+      <span className="thinking-wave" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </span>
+    </div>
   );
 }
 
@@ -182,6 +199,30 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
   } | null = null;
   let pendingProcess: ToolCallEvent[] = [];
   const roundStartTimes = new Map<string, number>();
+  const roundAliases = new Map<string, string>();
+
+  const rememberRoundAlias = (roundId?: string, messageId?: string, fallbackId?: string) => {
+    const canonical = roundId ?? messageId ?? fallbackId;
+    if (!canonical) {
+      return null;
+    }
+    roundAliases.set(canonical, canonical);
+    if (roundId) {
+      roundAliases.set(roundId, canonical);
+    }
+    if (messageId) {
+      roundAliases.set(messageId, canonical);
+    }
+    return canonical;
+  };
+
+  const resolveRoundKey = (roundId?: string, messageId?: string, fallbackId?: string) => {
+    const key = roundId ?? messageId ?? fallbackId;
+    if (!key) {
+      return null;
+    }
+    return roundAliases.get(key) ?? rememberRoundAlias(roundId, messageId, fallbackId);
+  };
 
   const flushProcessToRound = () => {
     if (pendingProcess.length === 0) {
@@ -240,15 +281,15 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
     if (event.kind === 'message' && event.role === 'user') {
       flushRound();
       blocks.push({ kind: 'user_message', event });
-      const roundKey = event.round_id ?? event.message_id ?? event.id;
-      if (event.timestamp_ms) {
+      const roundKey = rememberRoundAlias(event.round_id, event.message_id, event.id);
+      if (roundKey && event.timestamp_ms) {
         roundStartTimes.set(roundKey, event.timestamp_ms);
       }
       continue;
     }
 
     if (event.kind === 'message' && event.role === 'assistant') {
-      const roundKey = getAssistantRoundKey(event);
+      const roundKey = resolveRoundKey(event.round_id, event.message_id, event.id) ?? getAssistantRoundKey(event);
       if (!pendingRound || pendingRound.roundKey !== roundKey) {
         if (pendingRound) {
           flushRound();
@@ -261,7 +302,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
           isStreaming: false,
         };
       }
-      if (pendingRound.finalMessage) {
+      if (pendingRound.finalMessage && !pendingRound.finalMessage.is_placeholder) {
         pendingRound.traceBlocks.push({ kind: 'message', event: pendingRound.finalMessage });
       }
       flushProcessToRound();
@@ -271,7 +312,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
     }
 
     if (event.kind === 'tool_call') {
-      const roundKey = event.round_id ?? event.message_id;
+      const roundKey = resolveRoundKey(event.round_id, event.message_id);
       if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
         if (pendingRound) {
           flushRound();
@@ -289,13 +330,30 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
     }
 
     if (event.kind === 'context_status') {
-      flushRound();
-      blocks.push({ kind: 'status', event });
+      const roundKey = resolveRoundKey(event.round_id, event.message_id);
+      if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
+        if (pendingRound) {
+          flushRound();
+        }
+        pendingRound = {
+          roundKey,
+          finalMessage: null,
+          traceBlocks: [],
+          startedAtMs: roundStartTimes.get(roundKey) ?? null,
+          isStreaming: false,
+        };
+      }
+      flushProcessToRound();
+      if (pendingRound) {
+        pendingRound.traceBlocks.push({ kind: 'status', event });
+      } else {
+        blocks.push({ kind: 'status', event });
+      }
       continue;
     }
 
     if (event.kind === 'round_status') {
-      const roundKey = event.round_id ?? event.message_id;
+      const roundKey = resolveRoundKey(event.round_id, event.message_id);
       if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
         if (pendingRound) {
           flushRound();
@@ -360,7 +418,8 @@ function formatRoundDuration(
   startedAtMs: number | null,
   activeNowMs: number | null,
 ) {
-  const times = collectTraceTimes(traceBlocks);
+  const traceTimes = collectTraceTimes(traceBlocks);
+  const times = [...traceTimes];
   if (finalMessage.timestamp_ms) {
     times.push(finalMessage.timestamp_ms);
   }
@@ -371,7 +430,7 @@ function formatRoundDuration(
     return null;
   }
 
-  const start = startedAtMs ?? Math.min(...times);
+  const start = traceTimes.length > 0 ? Math.min(...traceTimes) : startedAtMs ?? Math.min(...times);
   const end = activeNowMs ?? Math.max(...times);
   const totalSeconds = Math.max(0, Math.round((end - start) / 1000));
   return formatDuration(totalSeconds);

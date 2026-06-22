@@ -238,25 +238,38 @@ export function applyContextCompressionEvent(
   status: 'running' | 'done' | 'failed',
 ): ChatEvent[] {
   const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
-  const id = `context_compression_${roundId ?? 'active'}`;
+  const eventTimeMs = Date.now();
+  const id = `context_compression_${roundId ?? 'active'}_${eventTimeMs}`;
   const fallbackSummary =
     status === 'running' ? '上下文正在压缩' : status === 'done' ? '上下文压缩已完成' : '上下文压缩失败';
   const nextEvent: ChatEvent = {
     id,
     kind: 'context_status',
     timestamp: formatTimestamp(),
-    timestamp_ms: Date.now(),
+    timestamp_ms: eventTimeMs,
     round_id: roundId,
     message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
     status,
     summary: typeof payload.summary === 'string' ? payload.summary : fallbackSummary,
   };
-  const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'context_status' && item.id === id);
+
+  if (status === 'running') {
+    return [...current, nextEvent];
+  }
+
+  const existingIndex = findEventIndexFromEnd(
+    current,
+    (item) => item.kind === 'context_status' && item.round_id === roundId && item.status === 'running',
+  );
   if (existingIndex === -1) {
     return [...current, nextEvent];
   }
+
   const next = [...current];
-  next[existingIndex] = nextEvent;
+  next[existingIndex] = {
+    ...nextEvent,
+    id: current[existingIndex].id,
+  };
   return next;
 }
 
