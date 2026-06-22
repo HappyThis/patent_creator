@@ -25,6 +25,8 @@ FORMULA_REF_PATTERN = re.compile(r"\[([^\]]+)\]\(formula:([A-Za-z0-9_-]+)\)")
 BODY_FONT_PT = 12
 BODY_LINE_SPACING = 1.9
 BODY_PARAGRAPH_AFTER_PT = 9
+LATIN_FONT = "Times New Roman"
+EAST_ASIA_FONT = "宋体"
 HEADING_1_PT = 18
 HEADING_2_PT = 14.25
 HEADING_BEFORE_PT = 25.5
@@ -36,6 +38,10 @@ FORMULA_AFTER_PT = 16.5
 TABLE_BEFORE_PT = 15
 TABLE_AFTER_PT = 21
 SPACER_BASE_LINE_PT = 12
+FORMULA_LEFT_COL_IN = 0.25
+FORMULA_BODY_COL_IN = 6.05
+FORMULA_NUMBER_COL_IN = 0.5
+FORMULA_MAX_WIDTH_IN = 5.9
 
 
 @dataclass(frozen=True)
@@ -96,17 +102,15 @@ def configure_document(document: Document) -> None:
 
     styles = document.styles
     normal = styles["Normal"]
-    normal.font.name = "Calibri"
-    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    set_style_font(normal)
     normal.font.size = Pt(BODY_FONT_PT)
     normal.font.color.rgb = RGBColor(0x2E, 0x39, 0x42)
     normal.paragraph_format.line_spacing = BODY_LINE_SPACING
     normal.paragraph_format.space_after = Pt(BODY_PARAGRAPH_AFTER_PT)
 
-    for name in ("Heading 1", "Heading 2", "Heading 3"):
+    for name in ("Heading 1", "Heading 2", "Heading 3", "List Bullet", "List Number"):
         style = styles[name]
-        style.font.name = "Calibri"
-        style._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+        set_style_font(style)
         style.font.bold = True
         style.font.color.rgb = RGBColor(0x0D, 0x16, 0x24)
         style.paragraph_format.space_before = Pt(HEADING_BEFORE_PT)
@@ -115,6 +119,35 @@ def configure_document(document: Document) -> None:
     styles["Heading 1"].font.size = Pt(HEADING_1_PT)
     styles["Heading 2"].font.size = Pt(HEADING_2_PT)
     styles["Heading 3"].font.size = Pt(HEADING_2_PT)
+    for name in ("List Bullet", "List Number"):
+        styles[name].font.bold = False
+        styles[name].font.size = Pt(BODY_FONT_PT)
+        styles[name].paragraph_format.space_before = Pt(0)
+        styles[name].paragraph_format.space_after = Pt(6)
+        styles[name].paragraph_format.line_spacing = BODY_LINE_SPACING
+
+
+def set_style_font(style: Any) -> None:
+    style.font.name = LATIN_FONT
+    r_pr = style._element.get_or_add_rPr()
+    set_r_fonts(r_pr)
+
+
+def set_run_font(run: Any) -> None:
+    run.font.name = LATIN_FONT
+    r_pr = run._element.get_or_add_rPr()
+    set_r_fonts(r_pr)
+
+
+def set_r_fonts(r_pr: Any) -> None:
+    r_fonts = r_pr.rFonts
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.append(r_fonts)
+    r_fonts.set(qn("w:ascii"), LATIN_FONT)
+    r_fonts.set(qn("w:hAnsi"), LATIN_FONT)
+    r_fonts.set(qn("w:cs"), LATIN_FONT)
+    r_fonts.set(qn("w:eastAsia"), EAST_ASIA_FONT)
 
 
 def collect_formula_numbers(nodes: Iterable[dict[str, Any]]) -> dict[str, int]:
@@ -341,6 +374,7 @@ def render_block(
         paragraph = document.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = paragraph.add_run(str(node.get("alt") or node.get("src") or "image"))
+        set_run_font(run)
         run.italic = True
         run.font.color.rgb = RGBColor(0x6F, 0x77, 0x80)
 
@@ -397,22 +431,25 @@ def render_formula(
     table.autofit = False
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     remove_table_borders(table)
-    table.columns[0].width = Inches(0.55)
-    table.columns[1].width = Inches(5.0)
-    table.columns[2].width = Inches(0.55)
+    table.columns[0].width = Inches(FORMULA_LEFT_COL_IN)
+    table.columns[1].width = Inches(FORMULA_BODY_COL_IN)
+    table.columns[2].width = Inches(FORMULA_NUMBER_COL_IN)
     left_cell, formula_cell, number_cell = table.rows[0].cells
     left_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     formula_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     number_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-    set_cell_width(left_cell, 0.55)
-    set_cell_width(formula_cell, 5.0)
-    set_cell_width(number_cell, 0.55)
+    set_cell_width(left_cell, FORMULA_LEFT_COL_IN)
+    set_cell_width(formula_cell, FORMULA_BODY_COL_IN)
+    set_cell_width(number_cell, FORMULA_NUMBER_COL_IN)
+    set_cell_margins(left_cell, top=0, start=0, bottom=0, end=0)
+    set_cell_margins(formula_cell, top=0, start=0, bottom=0, end=0)
+    set_cell_margins(number_cell, top=0, start=0, bottom=0, end=0)
 
     paragraph = formula_cell.paragraphs[0]
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.line_spacing = 1.0
     if asset:
-        add_picture(paragraph, asset, max_width=Inches(5.35))
+        add_picture(paragraph, asset, max_width=Inches(FORMULA_MAX_WIDTH_IN))
     else:
         append_plain_text(paragraph, str(node.get("latex") or ""))
 
@@ -421,6 +458,7 @@ def render_formula(
     number_paragraph.paragraph_format.line_spacing = 1.0
     if number:
         run = number_paragraph.add_run(f"({number})")
+        set_run_font(run)
         run.font.size = Pt(10.5)
         run.font.color.rgb = RGBColor(0x6F, 0x77, 0x80)
     add_vertical_space(document, FORMULA_AFTER_PT)
@@ -443,6 +481,7 @@ def render_figure(
         add_picture(paragraph, asset, max_width=Inches(5.7))
     else:
         run = paragraph.add_run(figure_id)
+        set_run_font(run)
         run.italic = True
         run.font.color.rgb = RGBColor(0x6F, 0x77, 0x80)
 
@@ -453,6 +492,7 @@ def render_figure(
         caption.paragraph_format.space_after = Pt(FIGURE_CAPTION_AFTER_PT)
         caption.paragraph_format.line_spacing = 1.55
         run = caption.add_run(figure_caption(figure))
+        set_run_font(run)
         run.font.size = Pt(9.5)
         run.font.color.rgb = RGBColor(0x5F, 0x66, 0x70)
 
@@ -477,10 +517,12 @@ def append_inline_content(
         elif token.type == "figure":
             figure = figures_by_id.get(token.target_id)
             run = paragraph.add_run(str(figure.get("label") if figure else token.label))
+            set_run_font(run)
             style_reference_run(run)
         elif token.type == "formula":
             number = formula_numbers.get(token.target_id)
             run = paragraph.add_run(f"式({number})" if number else token.label)
+            set_run_font(run)
             style_reference_run(run)
         cursor = token.end
     if cursor < len(text):
@@ -489,7 +531,8 @@ def append_inline_content(
 
 def append_plain_text(paragraph: Any, text: str) -> None:
     if text:
-        paragraph.add_run(text)
+        run = paragraph.add_run(text)
+        set_run_font(run)
 
 
 def parse_inline_tokens(text: str) -> list[InlineToken]:
@@ -565,11 +608,10 @@ def configure_heading_paragraph(paragraph: Any, *, level: int, is_first: bool = 
 
 
 def style_heading_run(run: Any, *, level: int, is_prefix: bool) -> None:
-    run.font.name = "Calibri"
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    set_run_font(run)
     run.font.bold = True
     run.font.size = Pt(HEADING_1_PT if level == 1 else HEADING_2_PT)
-    run.font.color.rgb = RGBColor(0x8A, 0x64, 0x26) if is_prefix else RGBColor(0x0D, 0x16, 0x24)
+    run.font.color.rgb = RGBColor(0x0D, 0x16, 0x24)
 
 
 def configure_body_paragraph(paragraph: Any, *, after_pt: float = BODY_PARAGRAPH_AFTER_PT) -> None:

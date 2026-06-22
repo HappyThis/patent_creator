@@ -60,7 +60,7 @@ async function renderHtmlAsset(page, item, outputDir) {
   const displayMode = item.kind === 'block_formula';
   const katexResult = renderKatex(item.latex || '', displayMode);
   const fontSize = item.kind === 'inline_formula' ? '16px' : '17px';
-  const padding = item.kind === 'inline_formula' ? '0 1px' : '8px 12px';
+  const padding = item.kind === 'inline_formula' ? '1px 3px 2px 3px' : '10px 26px 12px 26px';
   const html = `<!doctype html>
 <html>
 <head>
@@ -84,6 +84,7 @@ body {
   line-height: 1;
   background: transparent;
   vertical-align: baseline;
+  overflow: visible;
 }
 #asset .katex-display {
   margin: 0;
