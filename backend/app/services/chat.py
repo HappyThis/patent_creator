@@ -336,7 +336,7 @@ class ChatService:
                                 state,
                                 technical_solution_markdown_value=technical_solution_after,
                             )
-                            if check_result is not None and not check_result.gate_pass:
+                            if check_result is not None:
                                 await self._append_technical_solution_check_feedback(project_id, state, check_result)
                                 technical_solution_before = technical_solution_after
                                 await self._sleep()
@@ -592,7 +592,7 @@ class ChatService:
                 "scope": "main",
                 "round_id": state.round_id,
                 "message_id": state.message_id,
-                "summary": "开始检查技术方案",
+                "summary": "开始评审技术方案",
             },
         )
         try:
@@ -667,11 +667,10 @@ class ChatService:
             },
         )
         logger.info(
-            "technical solution check completed project=%s session=%s round=%s gate_pass=%s",
+            "technical solution review completed project=%s session=%s round=%s",
             project_id,
             state.session_id,
             state.round_id,
-            result.gate_pass,
         )
         return result
 
@@ -692,7 +691,6 @@ class ChatService:
             payload={
                 "text": feedback,
                 "review_markdown": result.review_markdown,
-                "reason": result.reason,
             },
         )
         await self.bus.publish(

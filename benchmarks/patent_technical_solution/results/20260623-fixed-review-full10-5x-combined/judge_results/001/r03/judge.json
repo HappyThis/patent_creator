@@ -1,0 +1,29 @@
+{
+  "status": "scored",
+  "total_score": 97,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住新增 runtime 的本质风险：状态目录和格式未知、继续会话能力未确认、不能误导性展示操作入口、不能影响既有 runtime 流程。",
+    "核心构思完整：以适配注册项、证据化探测、能力位状态机、统一会话摘要模型和前端能力门控组合解决异构 runtime 接入问题。",
+    "技术手段粒度高，覆盖候选路径优先级、格式指纹、字段级可信度、只读扫描、复合键去重、transcript 读取、resume 门控、错误隔离和版本变化回退。",
+    "要素协同清楚：探测输出 capabilityMap，扫描和读取按能力消费，UI 只依据能力位展示入口，操作前再校验执行条件。",
+    "交底书表达偏向技术机制和可保护特征，而不是单纯产品功能或排期任务。"
+  ],
+  "weaknesses": [
+    "方案非常充分，但部分字段集合、证据项和错误码清单略偏工程规格，技术效果部分可以更集中地说明各机制如何分别避免误解析、误继续和跨 runtime 失效传播。",
+    "可变形实施方式主要体现在候选 source、JSONL/JSON/SQLite 和后续版本适配，若再抽象说明不同证据阈值、不同权限模型或不同本地状态载体的替代实施，会更接近满分。"
+  ],
+  "missing_key_mechanisms": [
+    "没有明显缺失的关键机制。较小缺口是未明确说明对未知字段或原始载荷的保留策略，但其字段可信度、错误证据和降级规则已基本覆盖同类需求。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到 90 分以上强答案标准。它不仅复现参考方案的独立适配、统一会话视图、可信度分级、能力声明和异常隔离，还进一步提出证据绑定能力位、过期回退、字段级可信度、只读扫描约束、resume 独立门控和前端操作映射，技术深度高于参考路径的最低高分要求。快照中可见既有 Claude/Codex/Hermes/gateway/OpenClaw 会话与 transcript/continue/prefs 相关基础，因此 evaluated_artifact 对既有 runtime 类型的概括没有构成破坏性无依据事实声明；其余具体字段、阈值和能力位多作为新增技术方案提出，而非冒充目标 runtime 的已确认事实。未触发“没有能力边界”“没有归一化机制”或“默认声称新 runtime 能力已确定”的上限扣分。"
+}

@@ -1,0 +1,32 @@
+{
+  "status": "scored",
+  "total_score": 94,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 19,
+    "technical_depth": 23,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 与高频本机运行信号混写之间的矛盾，同时保留动态信号对检索、排序、清理的价值。",
+    "提出了较完整的分层方案：共享 Markdown 保存稳定知识与人工确认状态，本机动态信号层保存访问、命中、近期性、排序增益、临时成熟度等高频数据。",
+    "给出了稳定知识标识、动态记录字段、事务批量写入、乐观并发控制、失败降级、读取融合评分、写入隔离和孤儿记录延迟清理等具体技术手段。",
+    "对来源只读/可写边界、共享生命周期状态与本机临时成熟度的优先级关系、动态信号不反写共享文件等关键协同规则说明清楚。",
+    "技术效果能从机制推出：减少版本控制噪声和合并冲突，同时保留本机排序、检索和清理建议能力。"
+  ],
+  "weaknesses": [
+    "对旧 Markdown frontmatter 中已经存在的 accessCount、importance、recency、maturity 等遗留动态字段如何兼容读取、懒迁移到 sidecar、以及新写入时如何剥离，说明不如参考方案明确。",
+    "融合评分和事件衰减部分引用了公式解释，但正文中公式本体缺失，表达上有少量断裂。",
+    "方案机制非常完整，但部分来源类型、fixedId、SQLite 字段集合等属于新增设计，和项目快照现有 local/shared readOnly 结构之间的兼容落点可再收敛。"
+  ],
+  "missing_key_mechanisms": [
+    "遗留 frontmatter 动态字段的兼容读取、迁移初始化和写回剥离流程。",
+    "sidecar 批量读取接口或索引级预取策略的更明确边界，例如按候选 id 集合一次性加载并处理缺失记录。",
+    "动态信号 schema/version 升级策略，仅有 rowVersion 并发语义，缺少 sidecar 结构演进说明。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到 90 分以上档位：技术问题准确，核心构思覆盖字段分层、sidecar/本机动态层、稳定标识映射、读取融合、写入剥离、并发原子更新、失败隔离和清理一致性，且各要素的运行链路较完整。它并非机械复述参考方案，而是用 SQLite/JSON sidecar、稳定知识标识、事件队列、融合排序、孤儿记录 TTL 等机制形成了等价甚至更细的实现路径。未触发“没有读取融合”“没有迁移兼容”“sidecar 故障阻断主流程”等上限；扣分主要来自遗留 frontmatter 动态字段迁移剥离不够明确，以及少量公式表达缺失。"
+}

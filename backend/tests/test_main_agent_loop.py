@@ -140,7 +140,7 @@ async def test_main_agent_loop_allows_document_write_without_innovation_kernel(t
 
 
 @pytest.mark.anyio
-async def test_technical_solution_checker_passes_round_without_followup(tmp_path: Path) -> None:
+async def test_technical_solution_review_always_runs_one_followup(tmp_path: Path) -> None:
     def step_write(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
@@ -162,14 +162,40 @@ async def test_technical_solution_checker_passes_round_without_followup(tmp_path
         assert any(message.get("tool_call_id") == "call_write_solution" for message in messages)
         return {"type": "respond", "text": "已更新技术方案。"}
 
+    def step_followup(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        feedback_message = messages[-1]
+        assert feedback_message["role"] == "user"
+        assert "系统完成了一次“技术方案”评审" in feedback_message["content"]
+        assert "补充状态迁移和冲突处理" in feedback_message["content"]
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000006",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {
+                            "type": "paragraph",
+                            "text": "状态识别模块输出任务状态和异常标记，规则调度模块据此选择处理路径并记录处理结果。",
+                        },
+                    },
+                    "call_followup_solution",
+                )
+            ],
+        }
+
+    def step_final_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert any(message.get("tool_call_id") == "call_followup_solution" for message in messages)
+        return {"type": "respond", "text": "已参考评审意见完成处理。"}
+
     llm = ScriptedLLMClient(
-        [step_write, step_respond],
+        [step_write, step_respond, step_followup, step_final_respond],
         checker_json=[
             {
-                "gate_pass": True,
-                "review_markdown": "## 技术方案检查意见\n\n技术方案可以通过。",
-                "reason": "当前内容足以支撑代理人理解基本方案。",
-            }
+                "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充状态迁移和冲突处理。",
+            },
         ],
     )
     services = AppServices(make_settings(tmp_path), llm_client=llm)
@@ -182,17 +208,23 @@ async def test_technical_solution_checker_passes_round_without_followup(tmp_path
     events = services.store.read_session_events(project_id, response.session_id)
     event_types = [event.type for event in events]
     assert event_types.count("technical_solution_check_result") == 1
-    assert "technical_solution_check_feedback" not in event_types
+    assert event_types.count("technical_solution_check_feedback") == 1
     check_result = next(event for event in events if event.type == "technical_solution_check_result")
-    assert check_result.payload["gate_pass"] is True
+    assert "gate_pass" not in check_result.payload
+
+    disclosure = services.store.get_disclosure(project_id)
+    technical_solution = section_by_title(disclosure, "技术方案")
+    assert len(technical_solution["blocks"]) == 2
 
     bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    names = [name for name, _ in bus_events]
+    assert "technical_solution_reflection_started" in names
     assert bus_events[-1][0] == "round_finished"
-    assert bus_events[-1][1]["reply"] == "已更新技术方案。"
+    assert bus_events[-1][1]["reply"] == "已参考评审意见完成处理。"
 
 
 @pytest.mark.anyio
-async def test_technical_solution_checker_failed_gate_runs_one_followup_without_second_check(tmp_path: Path) -> None:
+async def test_technical_solution_review_runs_one_followup_without_second_review(tmp_path: Path) -> None:
     def step_write(_: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "type": "tool_calls",
@@ -217,7 +249,7 @@ async def test_technical_solution_checker_failed_gate_runs_one_followup_without_
     def step_followup(messages: list[dict[str, Any]]) -> dict[str, Any]:
         feedback_message = messages[-1]
         assert feedback_message["role"] == "user"
-        assert "系统完成了一次“技术方案”质量检查" in feedback_message["content"]
+        assert "系统完成了一次“技术方案”评审" in feedback_message["content"]
         assert "关键机制不足" in feedback_message["content"]
         return {
             "type": "tool_calls",
@@ -246,10 +278,8 @@ async def test_technical_solution_checker_failed_gate_runs_one_followup_without_
         [step_write, step_initial_respond, step_followup, step_final_respond],
         checker_json=[
             {
-                "gate_pass": False,
-                "review_markdown": "## 技术方案检查意见\n\n- 关键机制不足。",
-                "reason": "当前技术方案缺少输入输出、状态变化和协同关系说明。",
-            }
+                "review_markdown": "## 技术方案评审意见\n\n### 关键机制闭合性修订点\n1. 关键机制不足。",
+            },
         ],
     )
     services = AppServices(make_settings(tmp_path), llm_client=llm)
@@ -264,7 +294,7 @@ async def test_technical_solution_checker_failed_gate_runs_one_followup_without_
     assert event_types.count("technical_solution_check_result") == 1
     assert event_types.count("technical_solution_check_feedback") == 1
     check_result = next(event for event in events if event.type == "technical_solution_check_result")
-    assert check_result.payload["gate_pass"] is False
+    assert "gate_pass" not in check_result.payload
 
     disclosure = services.store.get_disclosure(project_id)
     technical_solution = section_by_title(disclosure, "技术方案")
@@ -304,8 +334,8 @@ async def test_technical_solution_checker_validation_failure_retries_then_report
     llm = ScriptedLLMClient(
         [step_write, step_respond],
         checker_json=[
-            {"gate_pass": "false", "review_markdown": "意见", "reason": "原因"},
-            {"gate_pass": False, "review_markdown": "意见", "reason": "原因", "score": 80},
+            {"gate_pass": False, "review_markdown": "意见"},
+            {"review_markdown": "意见", "score": 80},
         ],
     )
     services = AppServices(make_settings(tmp_path), llm_client=llm)

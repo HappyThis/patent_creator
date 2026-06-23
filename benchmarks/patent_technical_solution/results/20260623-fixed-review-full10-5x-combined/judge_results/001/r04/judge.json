@@ -1,0 +1,33 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住新 runtime 接入的核心风险：状态目录和格式不确定、能力不能预设、不能破坏既有 runtime 流程。",
+    "核心构思完整，采用独立 adapter、profile 化探测、统一会话模型、能力清单和降级门控，达到参考方案要求的等价甚至更细粒度深度。",
+    "技术手段覆盖充分，包括候选路径探测、版本和签名验证、JSONL/SQLite 解析、字段 evidence、dedupeKey、transcript 读取、resume 前复验、接口层二次门控、缓存、并发锁和故障隔离。",
+    "要素协同清楚，发现、能力计算、扫描、解析、合并、展示和操作执行之间有明确前置条件和数据流。",
+    "对未知能力采取 enabled/degraded/unknown/disabled 分级，能够直接避免误导性入口和错误承诺。"
+  ],
+  "weaknesses": [
+    "文本偏工程接口和实现规格，部分内容如接口返回结构、字段全集、缓存键和并发细节较多，交底书保护性概括略弱。",
+    "技术效果段虽有因果链，但相对前文机制主要是归纳式总结，仍可进一步提炼为更明确的技术效果层级。",
+    "部分实施方式非常具体，可能需要在正式交底中压缩为必要技术特征和可选实施例，避免把保护范围写窄。"
+  ],
+  "missing_key_mechanisms": [
+    "没有明显缺失关键机制；若进一步完善，可增加对未知格式下原始载荷保留或解析可信度标签与展示策略之间的更明确对应。",
+    "可进一步概括 adapter profile 的可替换实施方式，避免过度限定为 JSONL 或 SQLite。"
+  ],
+  "unsupported_claims": [
+    "“既有智能工作台能够同时展示 gateway 会话和 Claude、Codex、Hermes 等本地 runtime 会话”中的具体 runtime 名称若未由项目快照确认，属于可能无依据的既有事实声明；但该声明不影响方案主体成立。"
+  ],
+  "score_rationale": "该方案与参考路径高度等价，并且机制密度更高。它不仅提出独立适配、统一会话对象、能力声明和降级控制，还具体说明探测证据、版本 profile、会话级能力裁剪、解析失败隔离、操作前复验和合并去重规则，能够从技术手段自然推出“识别可确认会话、限制未确认能力、隔离新增 runtime 故障”的效果。不适用能力边界缺失、无归一化机制或默认完整能力的上限扣分。少量扣分主要来自表达偏工程接口清单、效果概括略可再提炼，以及一个可能未经材料确认的既有 runtime 名称声明。"
+}

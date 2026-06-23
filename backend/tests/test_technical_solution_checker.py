@@ -42,24 +42,20 @@ class FakeCheckerLLMClient:
 def test_technical_solution_check_result_strict_schema_accepts_valid_payload() -> None:
     result = parse_technical_solution_check_result(
         {
-            "gate_pass": False,
             "review_markdown": "  ## 检查意见\n\n- 技术手段不足。  ",
-            "reason": "  缺少输入输出和边界条件说明。  ",
         }
     )
 
-    assert result.gate_pass is False
     assert result.review_markdown == "## 检查意见\n\n- 技术手段不足。"
-    assert result.reason == "缺少输入输出和边界条件说明。"
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"gate_pass": "false", "review_markdown": "意见", "reason": "原因"},
-        {"gate_pass": False, "review_markdown": "意见", "reason": "原因", "score": 80},
-        {"gate_pass": False, "review_markdown": " ", "reason": "原因"},
-        {"gate_pass": False, "review_markdown": "意见", "reason": ""},
+        {"gate_pass": False, "review_markdown": "意见"},
+        {"review_markdown": "意见", "reason": "原因"},
+        {"review_markdown": "意见", "score": 80},
+        {"review_markdown": " "},
     ],
 )
 def test_technical_solution_check_result_strict_schema_rejects_invalid_payload(payload: dict[str, object]) -> None:
@@ -74,23 +70,34 @@ def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities
     assert '"additionalProperties": false' in prompt
     for term in [
         "技术问题",
-        "技术手段",
-        "组成要素",
         "输入输出",
-        "数据流",
+        "数据流转",
         "状态变化",
-        "触发条件",
         "处理规则",
-        "模块协同关系",
-        "异常分支",
         "边界条件",
-        "可选实施方式",
-        "技术效果闭合",
+        "泛泛谈论",
+        "技术实现原理",
+        "细致解决方法",
+        "机制闭合度",
+        "关键过程",
+        "状态变化",
+        "多步骤协同",
+        "外部输入",
+        "异常场景",
+        "结果竞争",
+        "前置条件",
+        "冲突处理",
+        "优先级",
+        "判定依据",
+        "边界处置",
         "术语一致性",
-        "可实施闭合链条",
-        "关键机制缺失",
-        "抽象描述",
-        "可保护性",
+        "不要判断是否通过",
+        "不要把有价值的改进点写成“可选优化”",
+        "## 技术方案评审意见",
+        "### 总体评价",
+        "### 技术深度修订点",
+        "### 关键机制闭合性修订点",
+        "### 给 main-agent 的修订指令",
     ]:
         assert term in prompt
 
@@ -99,11 +106,9 @@ def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities
 async def test_technical_solution_checker_retries_once_after_schema_validation_failure(tmp_path: Path) -> None:
     client = FakeCheckerLLMClient(
         [
-            {"gate_pass": "false", "review_markdown": "意见", "reason": "原因"},
+            {"gate_pass": False, "review_markdown": "意见"},
             {
-                "gate_pass": False,
                 "review_markdown": "## 检查意见\n\n- 技术手段不足。",
-                "reason": "第一次输出 gate_pass 类型错误，重试后合法。",
             },
         ]
     )
@@ -120,9 +125,35 @@ async def test_technical_solution_checker_retries_once_after_schema_validation_f
 
     result = await checker.check(technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。")
 
-    assert result.gate_pass is False
     assert len(client.prompts) == 2
     assert client.prompts[0]["trace_context"]["attempt"] == 1
     assert client.prompts[1]["trace_context"]["attempt"] == 2
     assert "上一次输出未通过后端 Pydantic schema 校验" in client.prompts[1]["user_prompt"]
-    assert '"gate_pass": "false"' in client.prompts[1]["user_prompt"]
+    assert '"gate_pass": false' in client.prompts[1]["user_prompt"]
+
+
+@pytest.mark.anyio
+async def test_technical_solution_checker_runs_single_review_by_default(tmp_path: Path) -> None:
+    client = FakeCheckerLLMClient(
+        [
+            {
+                "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充状态迁移。",
+            },
+        ]
+    )
+    checker = TechnicalSolutionChecker(
+        client,
+        Settings(
+            data_dir=tmp_path / "data",
+            log_dir=tmp_path / "logs",
+            git_user_name="Test User",
+            git_user_email="test@example.com",
+            openai_api_key="test-key",
+        ),
+    )
+
+    result = await checker.check(technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。")
+
+    assert len(client.prompts) == 1
+    assert {prompt["temperature"] for prompt in client.prompts} == {0.7}
+    assert "补充状态迁移" in result.review_markdown
