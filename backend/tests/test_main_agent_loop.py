@@ -166,7 +166,9 @@ async def test_technical_solution_review_always_runs_one_followup(tmp_path: Path
         feedback_message = messages[-1]
         assert feedback_message["role"] == "user"
         assert "系统完成了一次“技术方案”评审" in feedback_message["content"]
-        assert "补充状态迁移和冲突处理" in feedback_message["content"]
+        assert "专利交底书表达方式" in feedback_message["content"]
+        assert "不要把评审意见中的工程变量、字段清单、状态枚举、公式、接口名或伪代码直接堆入正文" in feedback_message["content"]
+        assert "补充处理阶段迁移规则和冲突边界" in feedback_message["content"]
         return {
             "type": "tool_calls",
             "tool_calls": [
@@ -194,7 +196,7 @@ async def test_technical_solution_review_always_runs_one_followup(tmp_path: Path
         [step_write, step_respond, step_followup, step_final_respond],
         checker_json=[
             {
-                "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充状态迁移和冲突处理。",
+                "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充处理阶段迁移规则和冲突边界。",
             },
         ],
     )

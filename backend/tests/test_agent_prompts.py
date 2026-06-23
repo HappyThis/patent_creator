@@ -167,8 +167,22 @@ def test_main_agent_prompt_prioritizes_technical_solution_clarity_for_patent_age
     assert "必须清楚阐明技术原理和工作方式" in prompt
     assert "使专利代理人员能够理解方案如何成立、如何实施、如何区别于常规做法" in prompt
     assert "技术原理是什么" in prompt
-    assert "输入、输出、触发条件、处理逻辑、与其他要素的连接关系以及必要边界" in prompt
+    assert "输入、输出、触发依据、处理逻辑、与其他要素的连接关系以及必要边界" in prompt
     assert "尽量避免让专利代理人员产生二次猜测" in prompt
+
+
+def test_main_agent_prompt_uses_patent_style_abstraction_for_technical_solution() -> None:
+    prompt = build_main_agent_system_prompt()
+
+    assert "专利交底书表达方式" in prompt
+    assert "技术对象、技术信息类别、处理阶段、判断依据、协同机制和边界规则" in prompt
+    assert "避免以工程变量、字段表、状态枚举、接口名、函数名、实现类名、前端或后端框架名、schema、伪代码或公式作为正文主线" in prompt
+    assert "确需出现具体工程名词时，应作为“一种实现中”的例示内容" in prompt
+    assert "而不是作为核心技术特征本身" in prompt
+    assert "区分核心技术特征、优选实施方式和可选增强" in prompt
+    assert "具体工程名词" in prompt
+    assert "真实 case" not in prompt
+    assert "benchmark case" not in prompt
 
 
 def test_main_agent_prompt_uses_figures_tables_and_formulas_only_when_helpful() -> None:

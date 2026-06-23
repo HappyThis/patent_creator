@@ -8,6 +8,7 @@ import pytest
 from app.core.config import Settings
 from app.services.technical_solution_checker import (
     TechnicalSolutionChecker,
+    _checker_system_prompt,
     _checker_user_prompt,
     parse_technical_solution_check_result,
 )
@@ -64,7 +65,7 @@ def test_technical_solution_check_result_strict_schema_rejects_invalid_payload(p
 
 
 def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities() -> None:
-    prompt = _checker_user_prompt("## 技术方案\n\n系统根据策略处理任务。")
+    prompt = _checker_system_prompt() + "\n\n" + _checker_user_prompt("## 技术方案\n\n系统根据策略处理任务。")
 
     assert "JSON Schema" in prompt
     assert '"additionalProperties": false' in prompt
@@ -93,10 +94,24 @@ def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities
         "术语一致性",
         "不要判断是否通过",
         "不要把有价值的改进点写成“可选优化”",
+        "专利式抽象表达",
+        "不得用变量名、字段名、接口名、状态枚举、公式或伪代码清单诱导 main-agent 生成工程 RFC",
+        "技术对象",
+        "信息类别",
+        "处理阶段",
+        "判断依据",
+        "协同机制",
+        "坏反馈",
+        "好反馈",
+        "不对应任何具体 benchmark case",
+        "补充技术对象的稳定身份保持机制",
+        "重复请求、执行中断或迟到结果",
+        "不同实现载体通过统一适配机制接入",
         "## 技术方案评审意见",
         "### 总体评价",
         "### 技术深度修订点",
         "### 关键机制闭合性修订点",
+        "### 专利式抽象表达修订点",
         "### 给 main-agent 的修订指令",
     ]:
         assert term in prompt
@@ -137,7 +152,7 @@ async def test_technical_solution_checker_runs_single_review_by_default(tmp_path
     client = FakeCheckerLLMClient(
         [
             {
-                "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充状态迁移。",
+                "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充处理阶段迁移规则。",
             },
         ]
     )
@@ -156,4 +171,4 @@ async def test_technical_solution_checker_runs_single_review_by_default(tmp_path
 
     assert len(client.prompts) == 1
     assert {prompt["temperature"] for prompt in client.prompts} == {0.7}
-    assert "补充状态迁移" in result.review_markdown
+    assert "补充处理阶段迁移规则" in result.review_markdown
