@@ -60,3 +60,14 @@ def test_settings_from_env_falls_back_to_openai_responses_route(
     assert settings.openai_model == "gpt-5.5"
     assert settings.openai_web_search_enabled is True
     assert settings.openai_web_search_context_size == "low"
+
+
+def test_settings_from_env_expands_user_paths(monkeypatch) -> None:
+    monkeypatch.setattr(config, "_load_repo_env", lambda: None)
+    monkeypatch.setenv("PATENT_CREATOR_DATA_DIR", "~/.patent_creator")
+    monkeypatch.setenv("PATENT_CREATOR_LOG_DIR", "~/patent_creator_logs")
+
+    settings = Settings.from_env()
+
+    assert settings.data_dir == Path.home() / ".patent_creator"
+    assert settings.log_dir == Path.home() / "patent_creator_logs"

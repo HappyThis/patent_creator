@@ -260,8 +260,7 @@
 }
 
 .round-status,
-.context-divider,
-.quality-enhancement-status {
+.process-status-divider {
   align-self: stretch;
   max-width: 900px;
   color: #5c5f5d;
@@ -280,113 +279,131 @@
 }
 
 .round-status small,
-.context-divider small,
-.quality-enhancement-status small {
+.process-status-divider small {
   display: block;
   margin-top: 4px;
   color: #8a8176;
+  text-align: center;
 }
 
-.context-divider {
+.process-status-divider {
+  position: relative;
+  overflow: hidden;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.process-status-divider.failed {
+  background: transparent;
+}
+
+.process-status-row {
+  position: relative;
+  z-index: 1;
   display: flex;
   justify-content: center;
-  color: #8a8176;
-}
-
-.context-divider > span {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.34);
-}
-
-.quality-enhancement-status {
-  width: min(100%, 620px);
-  padding: 10px 12px;
-  border: 1px solid rgba(92, 113, 118, 0.14);
-  border-radius: 8px;
-  background: rgba(245, 249, 247, 0.78);
-  box-shadow: 0 8px 22px rgba(48, 62, 58, 0.055);
-}
-
-.quality-enhancement-status.failed {
-  border-color: rgba(159, 95, 87, 0.22);
-  background: rgba(255, 246, 244, 0.78);
-}
-
-.quality-enhancement-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-height: 18px;
 }
 
-.quality-enhancement-row span:nth-child(2) {
+.process-status-row::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 0;
+  top: 50%;
+  display: block;
+  height: 1px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0) 42%, rgba(255, 255, 255, 0) 58%, transparent 100%),
+    rgba(106, 126, 132, 0.16);
+  background-size: 220% 100%, 100% 100%;
+  background-position: 120% 0, 0 0;
+}
+
+.process-status-divider.failed .process-status-row::before {
+  background: rgba(167, 95, 88, 0.2);
+}
+
+.process-status-divider.running .process-status-row::before {
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0.92) 50%, rgba(255, 255, 255, 0) 62%, transparent 100%),
+    rgba(106, 126, 132, 0.18);
+  background-size: 220% 100%, 100% 100%;
+  animation: quality-bar-light 1.45s linear infinite;
+}
+
+.process-status-label {
   min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.quality-enhancement-row b {
-  color: #51646a;
+  overflow: hidden;
+  padding: 0 6px;
+  color: #7c8984;
   font-size: 11px;
-  font-weight: 700;
+  text-shadow:
+    0 1px 0 var(--chat-panel),
+    0 -1px 0 var(--chat-panel),
+    1px 0 0 var(--chat-panel),
+    -1px 0 0 var(--chat-panel);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.quality-enhancement-dot {
-  width: 7px;
-  height: 7px;
+.process-status-label::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
   border-radius: 999px;
   background: #6f8f84;
+  vertical-align: 1px;
 }
 
-.quality-enhancement-status.running .quality-enhancement-dot {
-  animation: quality-pulse 1.15s ease-in-out infinite;
+.process-status-divider.failed .process-status-label::before {
+  background: #a75f58;
 }
 
-.quality-enhancement-track {
-  position: relative;
-  height: 4px;
-  margin-top: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(106, 126, 132, 0.16);
+.process-status-divider.running .process-status-label::before {
+  animation: quality-dot-breathe 1.15s ease-in-out infinite;
 }
 
-.quality-enhancement-track span {
-  display: block;
-  height: 100%;
-  min-width: 8px;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #6f8f84, #6f8398);
-  transition: width 260ms ease;
+.process-status-row b {
+  padding-right: 6px;
+  color: #6f7c78;
+  font-size: 11px;
+  font-weight: 600;
+  text-shadow:
+    0 1px 0 var(--chat-panel),
+    0 -1px 0 var(--chat-panel),
+    1px 0 0 var(--chat-panel),
+    -1px 0 0 var(--chat-panel);
 }
 
-.quality-enhancement-status.running .quality-enhancement-track span::after {
-  content: "";
-  display: block;
-  width: 42px;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.68), transparent);
-  animation: quality-sweep 1.2s linear infinite;
+@keyframes quality-bar-light {
+  from {
+    background-position: 140% 0, 0 0;
+  }
+  to {
+    background-position: -40% 0, 0 0;
+  }
 }
 
-@keyframes quality-pulse {
+@keyframes quality-dot-breathe {
   0%,
   100% {
     opacity: 0.45;
-    transform: scale(0.88);
+    transform: scale(0.9);
   }
   50% {
     opacity: 1;
     transform: scale(1.18);
-  }
-}
-
-@keyframes quality-sweep {
-  from {
-    transform: translateX(-42px);
-  }
-  to {
-    transform: translateX(620px);
   }
 }
 

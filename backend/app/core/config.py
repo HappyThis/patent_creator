@@ -35,8 +35,8 @@ class Settings:
     def from_env(cls) -> "Settings":
         _load_repo_env()
         repo_dir = Path(__file__).resolve().parents[3]
-        data_dir = Path(_env_or("PATENT_CREATOR_DATA_DIR", str(Path.home() / ".patent_creator")))
-        log_dir = Path(_env_or("PATENT_CREATOR_LOG_DIR", str(repo_dir / "logs")))
+        data_dir = Path(_env_or("PATENT_CREATOR_DATA_DIR", str(Path.home() / ".patent_creator"))).expanduser()
+        log_dir = Path(_env_or("PATENT_CREATOR_LOG_DIR", str(repo_dir / "logs"))).expanduser()
         return cls(
             data_dir=data_dir,
             git_user_name=os.getenv("PATENT_CREATOR_GIT_USER_NAME", "Patent Creator"),

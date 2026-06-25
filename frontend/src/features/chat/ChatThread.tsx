@@ -153,36 +153,68 @@ function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
 
 function renderStatus(event: StatusEvent, key = event.id) {
   if (event.kind === 'quality_enhancement_status') {
-    return (
-      <article key={key} className={`quality-enhancement-status ${event.status} ${event.phase}`}>
-        <div className="quality-enhancement-row">
-          <span className="quality-enhancement-dot" aria-hidden="true" />
-          <span>{event.summary}</span>
-          <b>{event.progress}%</b>
-        </div>
-        <div className="quality-enhancement-track" aria-hidden="true">
-          <span style={{ width: `${event.progress}%` }} />
-        </div>
-        {event.detail ? <small>{event.detail}</small> : null}
-      </article>
-    );
+    const label =
+      event.status === 'failed' ? '未增强' : event.status === 'done' ? '已增强' : '增强中';
+    return renderProcessStatusDivider({
+      key,
+      className: `quality-enhancement-status ${event.phase}`,
+      status: event.status,
+      label,
+      progress: `${event.progress}%`,
+      detail: event.detail,
+      ariaLabel: `${event.summary}，${event.progress}%`,
+    });
   }
 
   if (event.kind === 'context_status') {
-    return (
-      <article key={key} className={`context-divider ${event.status}`}>
-        <span>
-          {event.summary}
-          {event.detail ? <small>{event.detail}</small> : null}
-        </span>
-      </article>
-    );
+    const label =
+      event.status === 'failed' ? '压缩失败' : event.status === 'done' ? event.summary : '压缩中';
+    return renderProcessStatusDivider({
+      key,
+      className: 'context-divider',
+      status: event.status,
+      label,
+      detail: event.detail,
+      ariaLabel: event.summary,
+    });
   }
 
   return (
     <article key={key} className={`round-status ${event.status}`}>
       <span>{event.summary}</span>
       {event.detail ? <small>{event.detail}</small> : null}
+    </article>
+  );
+}
+
+function renderProcessStatusDivider({
+  key,
+  className,
+  status,
+  label,
+  progress,
+  detail,
+  ariaLabel,
+}: {
+  key: string;
+  className: string;
+  status: 'running' | 'done' | 'failed';
+  label: string;
+  progress?: string;
+  detail?: string;
+  ariaLabel: string;
+}) {
+  return (
+    <article
+      key={key}
+      className={`process-status-divider ${className} ${status}`}
+      aria-label={ariaLabel}
+    >
+      <div className="process-status-row">
+        <span className="process-status-label">{label}</span>
+        {progress ? <b>{progress}</b> : null}
+      </div>
+      {detail ? <small>{detail}</small> : null}
     </article>
   );
 }
