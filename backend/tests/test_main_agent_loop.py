@@ -206,7 +206,8 @@ async def test_technical_solution_enhanced_mode_runs_one_followup(tmp_path: Path
         feedback_message = messages[-1]
         assert feedback_message["role"] == "user"
         assert "系统正在增强模式下继续完善“技术方案”章节" in feedback_message["content"]
-        assert "专利交底书表达方式" in feedback_message["content"]
+        assert "技术人员式技术抽象" in feedback_message["content"]
+        assert "不要把它们包装成权利要求式或正式专利说明书式语言" in feedback_message["content"]
         assert "不要把建议中的工程变量、字段清单、状态枚举、公式、接口名或伪代码直接堆入正文" in feedback_message["content"]
         assert "补充处理阶段迁移规则和冲突边界" in feedback_message["content"]
         return {
