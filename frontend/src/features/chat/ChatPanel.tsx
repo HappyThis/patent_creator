@@ -1,5 +1,5 @@
 import { UIEvent, useCallback, useLayoutEffect, useRef } from 'react';
-import type { ChatEvent, ContextUsageSummary } from '../../types';
+import type { ChatEvent, ContextUsageSummary, QualityMode } from '../../types';
 import { ChatComposer } from './ChatComposer';
 import { ChatThread } from './ChatThread';
 
@@ -10,7 +10,9 @@ type ChatPanelProps = {
   composer: string;
   isBusy: boolean;
   contextUsage?: ContextUsageSummary | null;
+  qualityMode: QualityMode;
   onComposerChange: (value: string) => void;
+  onQualityModeChange: (mode: QualityMode) => void;
   onSubmit: () => void;
   onCancel: () => void;
   canCancel?: boolean;
@@ -22,7 +24,9 @@ export function ChatPanel({
   composer,
   isBusy,
   contextUsage,
+  qualityMode,
   onComposerChange,
+  onQualityModeChange,
   onSubmit,
   onCancel,
   canCancel = false,
@@ -66,9 +70,11 @@ export function ChatPanel({
         composer={composer}
         isBusy={isBusy}
         contextUsage={contextUsage}
+        qualityMode={qualityMode}
         canCancel={canCancel}
         isCancelling={isCancelling}
         onComposerChange={onComposerChange}
+        onQualityModeChange={onQualityModeChange}
         onSubmit={onSubmit}
         onCancel={onCancel}
       />

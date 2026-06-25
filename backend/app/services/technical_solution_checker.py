@@ -12,6 +12,8 @@ TECHNICAL_SOLUTION_TITLE = "技术方案"
 TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS = 180.0
 TECHNICAL_SOLUTION_CHECK_MAX_ATTEMPTS = 2
 TECHNICAL_SOLUTION_CHECK_TEMPERATURE = 0.7
+TECHNICAL_SOLUTION_ASSESS_TEMPERATURE = 0.2
+TECHNICAL_SOLUTION_SUMMARY_TEMPERATURE = 0.2
 
 
 class SupportsTechnicalSolutionCheck(Protocol):
@@ -44,10 +46,83 @@ class TechnicalSolutionCheckResult(BaseModel):
         return self.model_dump()
 
 
+class TechnicalSolutionChangeAssessmentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    should_review: bool = Field(description="本轮技术方案变更是否需要进入增强建议。")
+    reason: str = Field(min_length=1, description="内部原因，说明为什么需要或不需要增强建议。")
+
+    @field_validator("reason")
+    @classmethod
+    def _strip_reason(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
+
+    def as_payload(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
+class TechnicalSolutionEnhancementSummaryResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applied_summary: str = Field(min_length=1, description="根据增强建议实际完成的技术方案改动摘要。")
+
+    @field_validator("applied_summary")
+    @classmethod
+    def _strip_applied_summary(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
+
+    def as_payload(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class TechnicalSolutionCheckValidationError(ValueError):
     def __init__(self, message: str, *, attempts: int = 1) -> None:
         super().__init__(message)
         self.attempts = attempts
+
+
+class TechnicalSolutionChangeAssessor:
+    def __init__(
+        self,
+        llm_client: SupportsTechnicalSolutionCheck,
+        settings: Settings,
+        *,
+        temperature: float = TECHNICAL_SOLUTION_ASSESS_TEMPERATURE,
+    ) -> None:
+        self.llm_client = llm_client
+        self.settings = settings
+        self.temperature = temperature
+
+    async def assess(
+        self,
+        *,
+        user_request: str,
+        technical_solution_markdown: str,
+        technical_solution_diff: str,
+        trace_context: dict[str, Any] | None = None,
+    ) -> TechnicalSolutionChangeAssessmentResult:
+        timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
+        payload = await self.llm_client.generate_json(
+            system_prompt=_change_assessor_system_prompt(),
+            user_prompt=_change_assessor_user_prompt(
+                user_request=user_request,
+                technical_solution_markdown=technical_solution_markdown,
+                technical_solution_diff=technical_solution_diff,
+            ),
+            temperature=self.temperature,
+            timeout=timeout,
+            trace_context={
+                **(trace_context or {}),
+                "scope": "technical_solution_change_assessor",
+            },
+        )
+        return parse_technical_solution_change_assessment_result(payload)
 
 
 class TechnicalSolutionChecker:
@@ -66,10 +141,16 @@ class TechnicalSolutionChecker:
         self,
         *,
         technical_solution_markdown: str,
+        user_request: str | None = None,
+        technical_solution_diff: str | None = None,
+        recent_history: list[dict[str, Any]] | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> TechnicalSolutionCheckResult:
         return await self._check_single(
             technical_solution_markdown=technical_solution_markdown,
+            user_request=user_request,
+            technical_solution_diff=technical_solution_diff,
+            recent_history=recent_history,
             trace_context=trace_context,
         )
 
@@ -77,10 +158,18 @@ class TechnicalSolutionChecker:
         self,
         *,
         technical_solution_markdown: str,
+        user_request: str | None = None,
+        technical_solution_diff: str | None = None,
+        recent_history: list[dict[str, Any]] | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> TechnicalSolutionCheckResult:
-        base_user_prompt = _checker_user_prompt(technical_solution_markdown)
-        timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
+        base_user_prompt = _checker_user_prompt(
+            technical_solution_markdown,
+            user_request=user_request,
+            technical_solution_diff=technical_solution_diff,
+            recent_history=recent_history,
+        )
+        timeout = TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS
         last_payload: dict[str, Any] | None = None
         last_error: TechnicalSolutionCheckValidationError | None = None
         for attempt in range(1, TECHNICAL_SOLUTION_CHECK_MAX_ATTEMPTS + 1):
@@ -100,7 +189,7 @@ class TechnicalSolutionChecker:
                 timeout=timeout,
                 trace_context={
                     **(trace_context or {}),
-                    "scope": "technical_solution_checker",
+                    "scope": "technical_solution_improvement_advisor",
                     "attempt": attempt,
                 },
             )
@@ -115,12 +204,76 @@ class TechnicalSolutionChecker:
         raise TechnicalSolutionCheckValidationError("technical solution check validation retry exhausted", attempts=0)
 
 
+class TechnicalSolutionImprovementAdvisor(TechnicalSolutionChecker):
+    """在增强模式中生成技术方案改进建议；保留 checker 的校验与重试机制。"""
+
+
+class TechnicalSolutionEnhancementSummarizer:
+    def __init__(
+        self,
+        llm_client: SupportsTechnicalSolutionCheck,
+        settings: Settings,
+        *,
+        temperature: float = TECHNICAL_SOLUTION_SUMMARY_TEMPERATURE,
+    ) -> None:
+        self.llm_client = llm_client
+        self.settings = settings
+        self.temperature = temperature
+
+    async def summarize(
+        self,
+        *,
+        review_markdown: str,
+        enhanced_technical_solution_markdown: str,
+        enhancement_diff: str,
+        trace_context: dict[str, Any] | None = None,
+    ) -> TechnicalSolutionEnhancementSummaryResult:
+        timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
+        payload = await self.llm_client.generate_json(
+            system_prompt=_enhancement_summarizer_system_prompt(),
+            user_prompt=_enhancement_summarizer_user_prompt(
+                review_markdown=review_markdown,
+                enhanced_technical_solution_markdown=enhanced_technical_solution_markdown,
+                enhancement_diff=enhancement_diff,
+            ),
+            temperature=self.temperature,
+            timeout=timeout,
+            trace_context={
+                **(trace_context or {}),
+                "scope": "technical_solution_enhancement_summarizer",
+            },
+        )
+        return parse_technical_solution_enhancement_summary_result(payload)
+
+
 def parse_technical_solution_check_result(payload: dict[str, Any]) -> TechnicalSolutionCheckResult:
     try:
         return TechnicalSolutionCheckResult.model_validate(payload)
     except ValidationError as exc:
         raise TechnicalSolutionCheckValidationError(
             f"technical solution check result does not match schema: {exc}",
+            attempts=1,
+        ) from exc
+
+
+def parse_technical_solution_change_assessment_result(payload: dict[str, Any]) -> TechnicalSolutionChangeAssessmentResult:
+    try:
+        return TechnicalSolutionChangeAssessmentResult.model_validate(payload)
+    except ValidationError as exc:
+        raise TechnicalSolutionCheckValidationError(
+            f"technical solution change assessment result does not match schema: {exc}",
+            attempts=1,
+        ) from exc
+
+
+def parse_technical_solution_enhancement_summary_result(
+    payload: dict[str, Any],
+) -> TechnicalSolutionEnhancementSummaryResult:
+    try:
+        return TechnicalSolutionEnhancementSummaryResult.model_validate(payload)
+    except ValidationError as exc:
+        raise TechnicalSolutionCheckValidationError(
+            f"technical solution enhancement summary result does not match schema: {exc}",
             attempts=1,
         ) from exc
 
@@ -132,18 +285,55 @@ def technical_solution_markdown(disclosure: dict[str, Any]) -> str:
     return ""
 
 
-def checker_feedback_user_message(result: TechnicalSolutionCheckResult) -> str:
+def enhancement_feedback_user_message(result: TechnicalSolutionCheckResult) -> str:
     return (
-        "系统完成了一次“技术方案”评审。\n\n"
-        "你必须参考以下评审意见，继续修改“技术方案”章节。\n"
-        "重点补强具体技术机制、处理规则、信息流转、异常恢复、冲突处理和边界条件。\n"
-        "修改时必须使用专利交底书表达方式：优先用自然语言说明技术对象、处理阶段、判断依据、协同关系和技术效果。\n"
-        "不要把评审意见中的工程变量、字段清单、状态枚举、公式、接口名或伪代码直接堆入正文；"
+        "系统正在增强模式下继续完善“技术方案”章节。\n\n"
+        "请参考以下内部技术方案改进建议，继续修改“技术方案”章节。\n"
+        "必须尊重用户本轮原始意图，不要恢复用户明确删除的内容，不要扩写与本轮任务无关的章节。\n"
+        "修改时必须使用专利交底书表达方式：优先用自然语言说明技术对象、处理阶段、判断依据、协同关系和边界规则。\n"
+        "不要把建议中的工程变量、字段清单、状态枚举、公式、接口名或伪代码直接堆入正文；"
         "应将其抽象为稳定的技术特征、信息类别、阶段迁移规则或可替换实施方式。\n"
-        "不要把评审过程、评审报告或“系统评审”写入交底书正文。\n"
-        "如果你认为某条建议不完全适用，也要通过修改正文使技术方案更清楚、更具体，而不是仅解释原因。\n\n"
-        "评审意见如下：\n\n"
+        "不要在面向用户的回复或交底书正文中提及内部评审、gate、checker、review 或质量检查流程。\n\n"
+        "内部改进建议如下：\n\n"
         f"{result.review_markdown}"
+    )
+
+
+def _change_assessor_system_prompt() -> str:
+    return """你是专利交底书“技术方案”增强模式中的变更影响评估器，不是对话 agent，也不能调用工具。
+你只判断本轮技术方案变更是否值得进入后续技术方案改进建议流程。
+
+你必须遵守：
+- 只输出 JSON 对象。
+- 不提出具体改写建议。
+- 不评价通过/不通过。
+- 尊重用户本轮明确意图，尤其是删除、局部替换、术语调整、格式调整、轻微润色。
+- 增强模式不等于每次都需要继续改写；小改动、用户明确删除、格式或术语类修改通常不需要。
+- 如果本轮新增、重写或实质改变技术方案核心机制、处理流程、异常恢复、冲突处理、边界条件、结构表达，通常需要进入后续技术方案改进建议流程。
+"""
+
+
+def _change_assessor_user_prompt(
+    *,
+    user_request: str,
+    technical_solution_markdown: str,
+    technical_solution_diff: str,
+) -> str:
+    schema = TechnicalSolutionChangeAssessmentResult.model_json_schema()
+    return (
+        "请根据用户请求、本轮修改后的技术方案和本轮技术方案 diff，判断是否需要进入后续技术方案改进建议流程。\n\n"
+        "输出必须满足下面的 JSON Schema；禁止返回 schema 未声明的额外字段：\n\n"
+        f"{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+        "判断口径：\n"
+        "- should_review=true：本轮改动可能影响技术深度、机制闭合性、边界条件或结构表达，值得进一步增强。\n"
+        "- should_review=false：本轮只是小改、删除、格式、术语、局部润色，继续增强可能导致不必要扩写或违背用户意图。\n"
+        "- reason 是内部原因，简洁说明判断依据。\n\n"
+        "用户请求：\n"
+        f"{user_request or '（空）'}\n\n"
+        "本轮修改后的技术方案：\n"
+        f"{technical_solution_markdown or '（技术方案章节为空）'}\n\n"
+        "本轮技术方案 diff：\n"
+        f"{technical_solution_diff or '（无 diff）'}"
     )
 
 
@@ -211,7 +401,24 @@ def _checker_system_prompt() -> str:
 - review_markdown 不得包含“结论：通过”“结论：不通过”“可选优化”等流程判定或弱化措辞。"""
 
 
-def _checker_user_prompt(technical_solution_markdown: str) -> str:
+def _checker_user_prompt(
+    technical_solution_markdown: str,
+    *,
+    user_request: str | None = None,
+    technical_solution_diff: str | None = None,
+    recent_history: list[dict[str, Any]] | None = None,
+) -> str:
+    context_parts = []
+    if user_request is not None:
+        context_parts.append(f"当前用户请求：\n{user_request or '（空）'}")
+    if technical_solution_diff:
+        context_parts.append(f"本轮技术方案 diff：\n{technical_solution_diff}")
+    if recent_history:
+        context_parts.append(
+            "最近 3 轮技术方案增强历史（完整记录，仅供避免重复建议）：\n"
+            f"{json.dumps(recent_history[-3:], ensure_ascii=False, indent=2)}"
+        )
+    context_text = "\n\n".join(context_parts)
     return (
         "请评审下面的“技术方案”章节，并严格返回 JSON：\n\n"
         f"{_checker_output_schema_text()}\n\n"
@@ -226,9 +433,12 @@ def _checker_user_prompt(technical_solution_markdown: str) -> str:
         "- 不要判断是否通过；不要输出通过/不通过结论。\n"
         "- 不要把有价值的改进点写成“可选优化”；统一写成“建议修订点”或“需要补强”。\n"
         "- 即使当前技术方案整体较好，也要提取能提升稳定性、技术深度和表达清晰度的具体修订意见。\n"
+        "- 如果提供了本轮 diff 和历史增强记录，应结合这些上下文给出综合意见，避免重复提出已经处理过的建议。\n"
+        "- 建议应服务于当前技术方案和本轮变更，不要无条件扩大成整章重写。\n"
         "- 提建议时必须使用专利式抽象表达，不得用变量名、字段名、接口名、状态枚举、公式或伪代码清单诱导 main-agent 生成工程 RFC。\n"
         "- 如果需要指出技术细节缺口，应转换为技术对象、信息类别、处理阶段、判断依据、协同机制或边界规则层面的修订建议。\n"
         "- review_markdown 必须是一份完整 Markdown 技术方案评审意见，并严格使用下方模板。\n\n"
+        f"{context_text + chr(10) + chr(10) if context_text else ''}"
         f"{_checker_review_template_text()}\n\n"
         "待检查内容：\n\n"
         f"{technical_solution_markdown or '（技术方案章节为空）'}"
@@ -258,6 +468,39 @@ def _checker_output_schema_text() -> str:
     return (
         "输出必须满足下面的 JSON Schema；禁止返回 schema 未声明的额外字段：\n\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _enhancement_summarizer_system_prompt() -> str:
+    return """你是专利交底书“技术方案”增强总结器，不是对话 agent，也不能调用工具。
+你只根据内部改进建议、二次增强后的技术方案和二次增强 diff，总结本轮实际完成了哪些修改。
+
+你必须遵守：
+- 只输出 JSON 对象。
+- 不提出新建议。
+- 不评价质量好坏。
+- 不暴露 gate、checker、review 等内部机制词。
+- applied_summary 应简短、具体，说明实际改动，不超过 300 字。
+"""
+
+
+def _enhancement_summarizer_user_prompt(
+    *,
+    review_markdown: str,
+    enhanced_technical_solution_markdown: str,
+    enhancement_diff: str,
+) -> str:
+    schema = TechnicalSolutionEnhancementSummaryResult.model_json_schema()
+    return (
+        "请总结本轮根据内部改进建议实际完成的技术方案修改，并严格返回 JSON。\n\n"
+        "输出必须满足下面的 JSON Schema；禁止返回 schema 未声明的额外字段：\n\n"
+        f"{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+        "内部改进建议：\n"
+        f"{review_markdown or '（无）'}\n\n"
+        "二次增强后的技术方案：\n"
+        f"{enhanced_technical_solution_markdown or '（技术方案章节为空）'}\n\n"
+        "二次增强 diff：\n"
+        f"{enhancement_diff or '（无 diff）'}"
     )
 
 

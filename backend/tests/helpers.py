@@ -22,13 +22,21 @@ class ScriptedLLMClient:
         self,
         script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]],
         *,
+        assessment_json: list[dict[str, Any]] | None = None,
         checker_json: list[dict[str, Any]] | None = None,
+        summary_json: list[dict[str, Any]] | None = None,
     ) -> None:
         self._script = list(script)
         self._cursor = 0
+        self._assessment_json = list(assessment_json or [])
+        self._assessment_cursor = 0
         self._checker_json = list(checker_json or [])
         self._checker_cursor = 0
+        self._summary_json = list(summary_json or [])
+        self._summary_cursor = 0
+        self.assessment_prompts: list[dict[str, Any]] = []
         self.checker_prompts: list[dict[str, Any]] = []
+        self.summary_prompts: list[dict[str, Any]] = []
         self.generated_text_prompts: list[dict[str, Any]] = []
 
     async def generate_with_tools_stream(
@@ -96,20 +104,33 @@ class ScriptedLLMClient:
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        prompt_record = {
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "temperature": temperature,
+            "timeout": timeout,
+            "trace_context": trace_context,
+        }
+        if "变更影响评估器" in system_prompt:
+            self.assessment_prompts.append(prompt_record)
+            if self._assessment_cursor >= len(self._assessment_json):
+                return {"should_review": False, "reason": "默认不进入增强。"}
+            payload = self._assessment_json[self._assessment_cursor]
+            self._assessment_cursor += 1
+            return payload
         if "技术方案”章节的质量检查器" in system_prompt:
-            self.checker_prompts.append(
-                {
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
-                    "temperature": temperature,
-                    "timeout": timeout,
-                    "trace_context": trace_context,
-                }
-            )
+            self.checker_prompts.append(prompt_record)
             if self._checker_cursor >= len(self._checker_json):
                 return {"title": "低算力实时保护"}
             payload = self._checker_json[self._checker_cursor]
             self._checker_cursor += 1
+            return payload
+        if "增强总结器" in system_prompt:
+            self.summary_prompts.append(prompt_record)
+            if self._summary_cursor >= len(self._summary_json):
+                return {"applied_summary": "已完成技术方案增强。"}
+            payload = self._summary_json[self._summary_cursor]
+            self._summary_cursor += 1
             return payload
         return {"title": "低算力实时保护"}
 

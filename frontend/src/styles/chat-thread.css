@@ -259,6 +259,137 @@
   left: 14px;
 }
 
+.round-status,
+.context-divider,
+.quality-enhancement-status {
+  align-self: stretch;
+  max-width: 900px;
+  color: #5c5f5d;
+  font-size: 12px;
+}
+
+.round-status {
+  padding: 8px 12px;
+  border-left: 2px solid rgba(127, 153, 184, 0.42);
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.round-status.failed {
+  border-left-color: rgba(159, 95, 87, 0.58);
+  color: #7d4d47;
+}
+
+.round-status small,
+.context-divider small,
+.quality-enhancement-status small {
+  display: block;
+  margin-top: 4px;
+  color: #8a8176;
+}
+
+.context-divider {
+  display: flex;
+  justify-content: center;
+  color: #8a8176;
+}
+
+.context-divider > span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.quality-enhancement-status {
+  width: min(100%, 620px);
+  padding: 10px 12px;
+  border: 1px solid rgba(92, 113, 118, 0.14);
+  border-radius: 8px;
+  background: rgba(245, 249, 247, 0.78);
+  box-shadow: 0 8px 22px rgba(48, 62, 58, 0.055);
+}
+
+.quality-enhancement-status.failed {
+  border-color: rgba(159, 95, 87, 0.22);
+  background: rgba(255, 246, 244, 0.78);
+}
+
+.quality-enhancement-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.quality-enhancement-row span:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.quality-enhancement-row b {
+  color: #51646a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.quality-enhancement-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #6f8f84;
+}
+
+.quality-enhancement-status.running .quality-enhancement-dot {
+  animation: quality-pulse 1.15s ease-in-out infinite;
+}
+
+.quality-enhancement-track {
+  position: relative;
+  height: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(106, 126, 132, 0.16);
+}
+
+.quality-enhancement-track span {
+  display: block;
+  height: 100%;
+  min-width: 8px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6f8f84, #6f8398);
+  transition: width 260ms ease;
+}
+
+.quality-enhancement-status.running .quality-enhancement-track span::after {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.68), transparent);
+  animation: quality-sweep 1.2s linear infinite;
+}
+
+@keyframes quality-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes quality-sweep {
+  from {
+    transform: translateX(-42px);
+  }
+  to {
+    transform: translateX(620px);
+  }
+}
+
 .assistant-round {
   max-width: 900px;
   display: flex;

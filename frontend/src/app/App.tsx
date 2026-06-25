@@ -52,12 +52,14 @@ function App() {
     isCancelling,
     canCancelRound,
     contextUsage,
+    qualityMode,
     sessionTabs,
     previewFocusTarget,
     recentSectionIds,
     recentBlockIds,
     setComposer,
     setActiveSectionId,
+    setQualityMode,
     submitMessage,
     cancelCurrentRound,
     exportDocx,
@@ -304,7 +306,9 @@ function App() {
             composer={composer}
             isBusy={isBusy || isLoading || !selectedProjectId}
             contextUsage={contextUsage}
+            qualityMode={qualityMode}
             onComposerChange={setComposer}
+            onQualityModeChange={setQualityMode}
             onSubmit={submitMessage}
             onCancel={cancelCurrentRound}
             canCancel={canCancelRound}

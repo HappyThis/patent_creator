@@ -14,6 +14,7 @@ MAIN_CONTEXT_EVENT_TYPES = {
     "tool_call",
     "tool_result",
     "technical_solution_check_feedback",
+    "technical_solution_enhancement_feedback",
 }
 
 
@@ -109,7 +110,7 @@ def project_main_event_segments(events: list[SessionEvent]) -> list[MessageSegme
     index = 0
     while index < len(events):
         event = events[index]
-        if event.type in {"user_input", "technical_solution_check_feedback"}:
+        if event.type in {"user_input", "technical_solution_check_feedback", "technical_solution_enhancement_feedback"}:
             segments.append(
                 MessageSegment(
                     start_seq=event.seq,

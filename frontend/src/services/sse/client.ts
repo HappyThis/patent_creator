@@ -5,6 +5,7 @@ export type ChatStreamPayload = {
   message: string;
   active_section_id?: string | null;
   active_block_id?: string | null;
+  quality_mode?: 'normal' | 'enhanced';
 };
 
 export type ChatStreamHandle = {

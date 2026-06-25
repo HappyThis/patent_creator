@@ -7,10 +7,13 @@ import pytest
 
 from app.core.config import Settings
 from app.services.technical_solution_checker import (
+    TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS,
     TechnicalSolutionChecker,
     _checker_system_prompt,
     _checker_user_prompt,
+    parse_technical_solution_change_assessment_result,
     parse_technical_solution_check_result,
+    parse_technical_solution_enhancement_summary_result,
 )
 
 
@@ -62,6 +65,34 @@ def test_technical_solution_check_result_strict_schema_accepts_valid_payload() -
 def test_technical_solution_check_result_strict_schema_rejects_invalid_payload(payload: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         parse_technical_solution_check_result(payload)
+
+
+def test_technical_solution_change_assessment_result_strict_schema() -> None:
+    result = parse_technical_solution_change_assessment_result(
+        {
+            "should_review": True,
+            "reason": "  本轮改动影响核心机制。  ",
+        }
+    )
+
+    assert result.should_review is True
+    assert result.reason == "本轮改动影响核心机制。"
+
+    with pytest.raises(ValueError):
+        parse_technical_solution_change_assessment_result({"gate_pass": True, "reason": "原因"})
+
+
+def test_technical_solution_enhancement_summary_result_strict_schema() -> None:
+    result = parse_technical_solution_enhancement_summary_result(
+        {
+            "applied_summary": "  已补充阶段迁移规则。  ",
+        }
+    )
+
+    assert result.applied_summary == "已补充阶段迁移规则。"
+
+    with pytest.raises(ValueError):
+        parse_technical_solution_enhancement_summary_result({"applied_summary": "摘要", "reason": "原因"})
 
 
 def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities() -> None:
@@ -171,4 +202,5 @@ async def test_technical_solution_checker_runs_single_review_by_default(tmp_path
 
     assert len(client.prompts) == 1
     assert {prompt["temperature"] for prompt in client.prompts} == {0.7}
+    assert {prompt["timeout"] for prompt in client.prompts} == {TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS}
     assert "补充处理阶段迁移规则" in result.review_markdown

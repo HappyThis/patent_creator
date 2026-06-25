@@ -2,6 +2,7 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react'
 import {
   applyAssistantDelta,
   applyContextCompressionEvent,
+  applyQualityEnhancementStatusEvent,
   applyRoundStartedEvent,
   applyRunningToolEvent,
   applyWebSearchProgressEvent,
@@ -206,6 +207,11 @@ export function useWorkspaceStream({
               ? 'done'
               : 'failed';
         setEvents((current) => applyContextCompressionEvent(current, payload, status));
+        return;
+      }
+
+      if (eventName === 'quality_enhancement_status') {
+        setEvents((current) => applyQualityEnhancementStatusEvent(current, payload));
         return;
       }
 

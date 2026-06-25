@@ -1,4 +1,4 @@
-import type { ChatEvent, SessionEventRecord, ToolCallEvent } from '../../types';
+import type { ChatEvent, QualityEnhancementStatusEvent, SessionEventRecord, ToolCallEvent } from '../../types';
 
 const MAX_TOOL_DETAIL_CHARS = 12_000;
 
@@ -42,6 +42,31 @@ function formatToolDetail(payload: unknown): string {
 
 function eventScope(value: unknown): ToolCallEvent['scope'] | undefined {
   return value === 'main' ? 'main' : undefined;
+}
+
+function eventStatus(value: unknown): 'running' | 'done' | 'failed' {
+  return value === 'done' || value === 'failed' ? value : 'running';
+}
+
+function qualityEnhancementPhase(value: unknown): QualityEnhancementStatusEvent['phase'] {
+  if (
+    value === 'assessing' ||
+    value === 'enhancing' ||
+    value === 'summarizing' ||
+    value === 'completed' ||
+    value === 'failed'
+  ) {
+    return value;
+  }
+  return 'enhancing';
+}
+
+function boundedProgress(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.round(numeric)));
 }
 
 function mergeToolCallEvent(existing: ChatEvent, updated: ToolCallEvent): ToolCallEvent {
@@ -101,6 +126,45 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         status: 'done',
         summary: event.type === 'context_summary' ? '上下文压缩已完成' : '上下文已裁剪',
       });
+      continue;
+    }
+
+    if (event.type === 'technical_solution_enhancement_status') {
+      const nextEvent: QualityEnhancementStatusEvent = {
+        id: `quality_enhancement_${event.round_id || event.id}`,
+        kind: 'quality_enhancement_status',
+        timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
+        status: eventStatus(event.payload.status),
+        phase: qualityEnhancementPhase(event.payload.phase),
+        progress: boundedProgress(event.payload.progress),
+        summary: typeof event.payload.summary === 'string' ? event.payload.summary : '增强模式：正在处理...',
+        detail: typeof event.payload.detail === 'string' ? event.payload.detail : undefined,
+      };
+      const existingIndex = findEventIndexFromEnd(
+        events,
+        (existingEvent) =>
+          existingEvent.kind === 'quality_enhancement_status' && existingEvent.id === nextEvent.id,
+      );
+      if (existingIndex === -1) {
+        events.push(nextEvent);
+      } else {
+        events[existingIndex] = nextEvent;
+      }
+      continue;
+    }
+
+    if (
+      event.type === 'technical_solution_check_result' ||
+      event.type === 'technical_solution_check_feedback' ||
+      event.type === 'technical_solution_change_assessment' ||
+      event.type === 'technical_solution_improvement_advice' ||
+      event.type === 'technical_solution_enhancement_feedback' ||
+      event.type === 'technical_solution_enhancement_summary'
+    ) {
       continue;
     }
 
@@ -252,6 +316,48 @@ export function applyContextCompressionEvent(
     summary: typeof payload.summary === 'string' ? payload.summary : fallbackSummary,
   };
   const existingIndex = findEventIndexFromEnd(current, (item) => item.kind === 'context_status' && item.id === id);
+  if (existingIndex === -1) {
+    return [...current, nextEvent];
+  }
+  const next = [...current];
+  next[existingIndex] = nextEvent;
+  return next;
+}
+
+export function applyQualityEnhancementStatusEvent(
+  current: ChatEvent[],
+  payload: Record<string, unknown>,
+): ChatEvent[] {
+  const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
+  const phase = qualityEnhancementPhase(payload.phase);
+  const id = `quality_enhancement_${roundId ?? 'active'}`;
+  const fallbackSummary =
+    phase === 'assessing'
+      ? '增强模式：正在评估本轮修改...'
+      : phase === 'enhancing'
+        ? '增强模式：正在完善技术方案...'
+        : phase === 'summarizing'
+          ? '增强模式：正在整理增强记录...'
+          : phase === 'failed'
+            ? '增强模式：技术方案增强未完成'
+            : '增强模式：已完成';
+  const nextEvent: QualityEnhancementStatusEvent = {
+    id,
+    kind: 'quality_enhancement_status',
+    timestamp: formatTimestamp(),
+    timestamp_ms: Date.now(),
+    round_id: roundId,
+    message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+    status: eventStatus(payload.status),
+    phase,
+    progress: boundedProgress(payload.progress),
+    summary: typeof payload.summary === 'string' ? payload.summary : fallbackSummary,
+    detail: typeof payload.detail === 'string' ? payload.detail : undefined,
+  };
+  const existingIndex = findEventIndexFromEnd(
+    current,
+    (item) => item.kind === 'quality_enhancement_status' && item.id === id,
+  );
   if (existingIndex === -1) {
     return [...current, nextEvent];
   }

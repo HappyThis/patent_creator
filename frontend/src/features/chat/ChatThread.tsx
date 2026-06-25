@@ -7,7 +7,7 @@ type ChatThreadProps = {
   events: ChatEvent[];
 };
 
-type StatusEvent = Extract<ChatEvent, { kind: 'round_status' | 'context_status' }>;
+type StatusEvent = Extract<ChatEvent, { kind: 'round_status' | 'context_status' | 'quality_enhancement_status' }>;
 
 type TraceBlock =
   | { kind: 'message'; event: ChatMessageEvent }
@@ -152,6 +152,22 @@ function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
 }
 
 function renderStatus(event: StatusEvent, key = event.id) {
+  if (event.kind === 'quality_enhancement_status') {
+    return (
+      <article key={key} className={`quality-enhancement-status ${event.status} ${event.phase}`}>
+        <div className="quality-enhancement-row">
+          <span className="quality-enhancement-dot" aria-hidden="true" />
+          <span>{event.summary}</span>
+          <b>{event.progress}%</b>
+        </div>
+        <div className="quality-enhancement-track" aria-hidden="true">
+          <span style={{ width: `${event.progress}%` }} />
+        </div>
+        {event.detail ? <small>{event.detail}</small> : null}
+      </article>
+    );
+  }
+
   if (event.kind === 'context_status') {
     return (
       <article key={key} className={`context-divider ${event.status}`}>
@@ -289,6 +305,12 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
     }
 
     if (event.kind === 'context_status') {
+      flushRound();
+      blocks.push({ kind: 'status', event });
+      continue;
+    }
+
+    if (event.kind === 'quality_enhancement_status') {
       flushRound();
       blocks.push({ kind: 'status', event });
       continue;

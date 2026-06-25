@@ -80,6 +80,7 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(min_length=1)
     active_section_id: str | None = None
     active_block_id: str | None = None
+    quality_mode: Literal["normal", "enhanced"] = "normal"
 
 
 class ChatMessageResponse(BaseModel):
@@ -105,6 +106,11 @@ class SessionEvent(BaseModel):
         "llm_audit",
         "technical_solution_check_result",
         "technical_solution_check_feedback",
+        "technical_solution_enhancement_status",
+        "technical_solution_change_assessment",
+        "technical_solution_improvement_advice",
+        "technical_solution_enhancement_feedback",
+        "technical_solution_enhancement_summary",
     ]
     seq: int
     scope: str

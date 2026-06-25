@@ -1,14 +1,16 @@
 import { CompositionEvent, KeyboardEvent, useState } from 'react';
-import type { ContextUsageSummary } from '../../types';
+import type { ContextUsageSummary, QualityMode } from '../../types';
 import { ContextUsageBadge } from './ContextUsageBadge';
 
 type ChatComposerProps = {
   composer: string;
   isBusy: boolean;
   contextUsage?: ContextUsageSummary | null;
+  qualityMode: QualityMode;
   canCancel?: boolean;
   isCancelling?: boolean;
   onComposerChange: (value: string) => void;
+  onQualityModeChange: (mode: QualityMode) => void;
   onSubmit: () => void;
   onCancel: () => void;
 };
@@ -17,9 +19,11 @@ export function ChatComposer({
   composer,
   isBusy,
   contextUsage,
+  qualityMode,
   canCancel = false,
   isCancelling = false,
   onComposerChange,
+  onQualityModeChange,
   onSubmit,
   onCancel,
 }: ChatComposerProps) {
@@ -58,6 +62,22 @@ export function ChatComposer({
           disabled={isBusy}
         />
         <div className="composer-toolbar">
+          <div className="composer-toolbar-left">
+            <div className="quality-mode-toggle" role="group" aria-label="生成模式">
+              {(['normal', 'enhanced'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={qualityMode === mode ? 'active' : ''}
+                  onClick={() => onQualityModeChange(mode)}
+                  disabled={isBusy}
+                  aria-pressed={qualityMode === mode}
+                >
+                  {mode === 'normal' ? '普通模式' : '增强模式'}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="composer-toolbar-right">
             <ContextUsageBadge contextUsage={contextUsage} />
             <button
