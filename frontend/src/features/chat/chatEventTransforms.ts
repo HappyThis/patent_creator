@@ -1,4 +1,11 @@
-import type { ChatEvent, QualityEnhancementStatusEvent, SessionEventRecord, ToolCallEvent } from '../../types';
+import type {
+  ChatEvent,
+  ChatMessageEvent,
+  LLMRetryStatusEvent,
+  QualityEnhancementStatusEvent,
+  SessionEventRecord,
+  ToolCallEvent,
+} from '../../types';
 
 const MAX_TOOL_DETAIL_CHARS = 12_000;
 
@@ -69,6 +76,29 @@ function boundedProgress(value: unknown): number {
   return Math.max(0, Math.min(100, Math.round(numeric)));
 }
 
+function boundedPositiveInteger(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.max(1, Math.round(numeric));
+}
+
+function retryStatus(value: unknown): LLMRetryStatusEvent['status'] {
+  if (value === 'retrying' || value === 'done' || value === 'failed') {
+    return value;
+  }
+  return 'waiting';
+}
+
+function retryErrorDetail(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? `错误原因：${trimmed}` : undefined;
+}
+
 function mergeToolCallEvent(existing: ChatEvent, updated: ToolCallEvent): ToolCallEvent {
   if (existing.kind !== 'tool_call') {
     return updated;
@@ -100,6 +130,22 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
     }
 
     if (event.type === 'agent_output') {
+      const status =
+        event.payload.status === 'interrupted' || event.payload.status === 'failed'
+          ? event.payload.status
+          : undefined;
+      const detail =
+        status === 'interrupted'
+          ? typeof event.payload.detail === 'string'
+            ? event.payload.detail
+            : '输出中断，已保留当前内容。'
+          : status === 'failed'
+            ? typeof event.payload.detail === 'string'
+              ? event.payload.detail
+              : typeof event.payload.message === 'string'
+                ? event.payload.message
+                : '本轮未完成。'
+            : undefined;
       events.push({
         id: event.id,
         kind: 'message',
@@ -110,7 +156,19 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
         round_id: event.round_id,
         message_id: event.message_id,
         seq: event.seq,
+        status,
+        detail,
       });
+      if (status) {
+        completeLLMRetryStatusInPlace(
+          events,
+          event.round_id,
+          status === 'failed' || status === 'interrupted' ? 'failed' : 'done',
+          detail,
+        );
+      } else {
+        completeLLMRetryStatusInPlace(events, event.round_id, 'done');
+      }
       continue;
     }
 
@@ -179,6 +237,26 @@ export function hydrateEvents(rawEvents: SessionEventRecord[]): ChatEvent[] {
       });
       if (webSearchEvent) {
         events.push(webSearchEvent);
+      }
+      continue;
+    }
+
+    if (event.type === 'llm_retry_status') {
+      const nextEvent = llmRetryEventFromPayload(event.payload, {
+        timestamp: formatTimestamp(event.ts),
+        timestamp_ms: timestampMs(event.ts),
+        round_id: event.round_id,
+        message_id: event.message_id,
+        seq: event.seq,
+      });
+      const existingIndex = findEventIndexFromEnd(
+        events,
+        (existingEvent) => existingEvent.kind === 'llm_retry_status' && existingEvent.id === nextEvent.id,
+      );
+      if (existingIndex === -1) {
+        events.push(nextEvent);
+      } else {
+        events[existingIndex] = nextEvent;
       }
       continue;
     }
@@ -366,6 +444,112 @@ export function applyQualityEnhancementStatusEvent(
   return next;
 }
 
+export function applyLLMRetryStatusEvent(
+  current: ChatEvent[],
+  payload: Record<string, unknown>,
+): ChatEvent[] {
+  const roundId = typeof payload.round_id === 'string' ? payload.round_id : undefined;
+  const nextEvent = llmRetryEventFromPayload(payload, {
+    timestamp: formatTimestamp(),
+    timestamp_ms: Date.now(),
+    round_id: roundId,
+    message_id: typeof payload.message_id === 'string' ? payload.message_id : undefined,
+  });
+  const withoutPlaceholder = current.filter(
+    (item) =>
+      !(
+        item.kind === 'message' &&
+        item.role === 'assistant' &&
+        item.is_placeholder &&
+        (!roundId || item.round_id === roundId)
+      ),
+  );
+  const existingIndex = findEventIndexFromEnd(
+    withoutPlaceholder,
+    (item) => item.kind === 'llm_retry_status' && item.id === nextEvent.id,
+  );
+  if (existingIndex === -1) {
+    return [...withoutPlaceholder, nextEvent];
+  }
+  const next = [...withoutPlaceholder];
+  next[existingIndex] = nextEvent;
+  return next;
+}
+
+function completeLLMRetryStatusInPlace(
+  events: ChatEvent[],
+  roundId: string | undefined,
+  status: 'done' | 'failed',
+  detail?: string,
+) {
+  const existingIndex = findEventIndexFromEnd(
+    events,
+    (item) =>
+      item.kind === 'llm_retry_status' &&
+      item.round_id === roundId &&
+      (item.status === 'waiting' || item.status === 'retrying'),
+  );
+  if (existingIndex === -1) {
+    return;
+  }
+  const existing = events[existingIndex];
+  if (existing.kind !== 'llm_retry_status') {
+    return;
+  }
+  events[existingIndex] = {
+    ...existing,
+    status,
+    retry_after_seconds: 0,
+    retry_at_ms: undefined,
+    detail: detail ?? existing.detail,
+  };
+}
+
+function llmRetryEventFromPayload(
+  payload: Record<string, unknown>,
+  meta: {
+    timestamp: string;
+    timestamp_ms: number;
+    round_id?: string;
+    message_id?: string;
+    seq?: number;
+  },
+): LLMRetryStatusEvent {
+  const status = retryStatus(payload.status);
+  const attempt = boundedPositiveInteger(payload.attempt, 2);
+  const maxAttempts = boundedPositiveInteger(payload.max_attempts, 2);
+  const retryIndex = boundedPositiveInteger(payload.retry_index, Math.max(1, attempt - 1));
+  const maxRetries = boundedPositiveInteger(payload.max_retries, Math.max(1, maxAttempts - 1));
+  const retryAfterSeconds =
+    typeof payload.retry_after_seconds === 'number'
+      ? Math.max(0, payload.retry_after_seconds)
+      : Math.max(0, Number(payload.retry_after_seconds) || 0);
+  const retryAtMs =
+    typeof payload.retry_at_ms === 'number' && Number.isFinite(payload.retry_at_ms)
+      ? payload.retry_at_ms
+      : status === 'waiting'
+        ? meta.timestamp_ms + retryAfterSeconds * 1000
+        : undefined;
+  return {
+    id: `llm_retry_${meta.round_id ?? 'active'}`,
+    kind: 'llm_retry_status',
+    timestamp: meta.timestamp,
+    timestamp_ms: meta.timestamp_ms,
+    round_id: meta.round_id,
+    message_id: meta.message_id,
+    seq: meta.seq,
+    status,
+    reason: typeof payload.reason === 'string' ? payload.reason : '模型连接失败',
+    attempt,
+    max_attempts: maxAttempts,
+    retry_index: retryIndex,
+    max_retries: maxRetries,
+    retry_after_seconds: retryAfterSeconds,
+    retry_at_ms: retryAtMs,
+    detail: retryErrorDetail(payload.error_message),
+  };
+}
+
 export function applyRunningToolEvent(
   current: ChatEvent[],
   payload: Record<string, unknown>,
@@ -472,6 +656,8 @@ export function finalizeRoundEvents(
   timestamp: string,
   roundId?: string,
   sourceMessageId?: string,
+  replyStatus?: ChatMessageEvent['status'],
+  replyDetail?: string,
 ): ChatEvent[] {
   if (!reply) {
     return current;
@@ -518,6 +704,8 @@ export function finalizeRoundEvents(
         message_id: streamMessage.message_id ?? sourceMessageId,
         is_placeholder: false,
         is_streaming: false,
+        status: replyStatus,
+        detail: replyDetail,
       };
     }
     return next;
@@ -535,6 +723,8 @@ export function finalizeRoundEvents(
       round_id: roundId,
       message_id: sourceMessageId,
       is_streaming: false,
+      status: replyStatus,
+      detail: replyDetail,
     },
   ];
 }

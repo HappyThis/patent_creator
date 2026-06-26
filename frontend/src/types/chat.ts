@@ -10,6 +10,8 @@ export type ChatMessageEvent = {
   seq?: number;
   is_placeholder?: boolean;
   is_streaming?: boolean;
+  status?: 'interrupted' | 'failed';
+  detail?: string;
 };
 
 type EventStatus = 'running' | 'done' | 'failed';
@@ -72,6 +74,25 @@ export type QualityEnhancementStatusEvent = {
   detail?: string;
 };
 
+export type LLMRetryStatusEvent = {
+  id: string;
+  kind: 'llm_retry_status';
+  timestamp?: string;
+  timestamp_ms?: number;
+  round_id?: string;
+  message_id?: string;
+  seq?: number;
+  status: 'waiting' | 'retrying' | 'done' | 'failed';
+  reason: string;
+  attempt: number;
+  max_attempts: number;
+  retry_index: number;
+  max_retries: number;
+  retry_after_seconds: number;
+  retry_at_ms?: number;
+  detail?: string;
+};
+
 export type QualityMode = 'normal' | 'enhanced';
 
 export type ChatEvent =
@@ -79,7 +100,8 @@ export type ChatEvent =
   | ToolCallEvent
   | RoundStatusEvent
   | ContextStatusEvent
-  | QualityEnhancementStatusEvent;
+  | QualityEnhancementStatusEvent
+  | LLMRetryStatusEvent;
 
 export type SessionEventRecord = {
   id: string;
@@ -93,6 +115,7 @@ export type SessionEventRecord = {
     | 'context_summary'
     | 'context_pruned'
     | 'llm_audit'
+    | 'llm_retry_status'
     | 'technical_solution_check_result'
     | 'technical_solution_check_feedback'
     | 'technical_solution_enhancement_status'

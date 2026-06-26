@@ -19,7 +19,9 @@ class Settings:
     openai_model: str = "gpt-5.5"
     llm_timeout: float = 45.0
     context_compression_timeout: float = 180.0
-    llm_max_retries: int = 2
+    llm_max_retries: int = 5
+    llm_retry_delay_seconds: float = 5.0
+    openai_sdk_max_retries: int = 0
     cors_allow_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
     round_step_delay: float = 0.15
     round_finish_delay: float = 0.1
@@ -50,7 +52,9 @@ class Settings:
             openai_model=os.getenv("OPENAI_MODEL", "gpt-5.5"),
             llm_timeout=float(os.getenv("PATENT_CREATOR_LLM_TIMEOUT", "45")),
             context_compression_timeout=float(os.getenv("PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT", "180")),
-            llm_max_retries=int(os.getenv("PATENT_CREATOR_LLM_MAX_RETRIES", "2")),
+            llm_max_retries=int(os.getenv("PATENT_CREATOR_LLM_MAX_RETRIES", "5")),
+            llm_retry_delay_seconds=float(os.getenv("PATENT_CREATOR_LLM_RETRY_DELAY_SECONDS", "5")),
+            openai_sdk_max_retries=int(os.getenv("OPENAI_SDK_MAX_RETRIES", "0")),
             cors_allow_origins=_parse_csv_env(
                 os.getenv("PATENT_CREATOR_CORS_ALLOW_ORIGINS"),
                 ("http://127.0.0.1:5173", "http://localhost:5173"),

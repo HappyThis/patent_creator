@@ -29,6 +29,10 @@
   align-items: stretch;
 }
 
+.message-row.note-only {
+  gap: 2px;
+}
+
 .message-bubble {
   line-height: 1.66;
   font-size: 14.5px;
@@ -52,6 +56,26 @@
   background: linear-gradient(90deg, rgba(181, 149, 95, 0.09), rgba(181, 149, 95, 0)) left top / 1px 100% no-repeat;
   color: #25231f;
   border: 0;
+}
+
+.message-note {
+  max-width: 800px;
+  margin-left: 16px;
+  color: #8a8176;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.message-note.interrupted {
+  color: #8f625c;
+}
+
+.message-note.failed {
+  color: #9b514a;
+}
+
+.message-row.note-only .message-note {
+  margin-left: 14px;
 }
 
 .message-bubble p {
@@ -386,6 +410,10 @@
     -1px 0 0 var(--chat-panel);
 }
 
+.process-status-divider.llm-retry-status .process-status-label {
+  max-width: min(680px, calc(100vw - 180px));
+}
+
 @keyframes quality-bar-light {
   from {
     background-position: 140% 0, 0 0;
@@ -419,43 +447,45 @@
   color: var(--chat-muted);
 }
 
-.assistant-round-trace[open] {
+.assistant-round-trace.open {
   padding-bottom: 14px;
   border-bottom: 1px solid rgba(62, 55, 45, 0.08);
 }
 
-.assistant-round-trace > summary {
+.assistant-round-trace-summary {
   width: fit-content;
-  list-style: none;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
   cursor: pointer;
   color: #a59d91;
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 400;
   line-height: 1.2;
   user-select: none;
 }
 
-.assistant-round-trace > summary::-webkit-details-marker {
-  display: none;
-}
-
-.assistant-round-trace > summary::before {
+.assistant-round-trace-summary::before {
   content: "";
   width: 5px;
   height: 5px;
+  flex: 0 0 auto;
   border-radius: 999px;
   background: rgba(127, 153, 184, 0.48);
   transition: transform 140ms ease, background 140ms ease;
 }
 
-.assistant-round-trace[open] > summary::before {
+.assistant-round-trace.open .assistant-round-trace-summary::before {
   background: rgba(111, 141, 130, 0.72);
   transform: scale(1.08);
 }
 
-.assistant-round-trace > summary small {
+.assistant-round-trace-summary small {
   color: #b7afa3;
   font-size: 12px;
 }

@@ -233,6 +233,37 @@ def test_restore_main_chat_messages_ignores_llm_audit_events() -> None:
     assert [item.type for item in candidates] == ["user_input", "agent_message"]
 
 
+def test_restore_main_chat_messages_ignores_failed_agent_output() -> None:
+    events = [
+        event(event_id="evt_1", seq=1, event_type="user_input", payload={"text": "write"}),
+        event(
+            event_id="evt_2",
+            seq=2,
+            event_type="agent_output",
+            payload={
+                "text": "本轮未完成，请重试或补充信息。",
+                "status": "failed",
+                "message": "模型调用失败。",
+            },
+        ),
+        event(
+            event_id="evt_3",
+            seq=3,
+            event_type="user_input",
+            round_id="round_2",
+            message_id="msg_2",
+            payload={"text": "重试"},
+        ),
+    ]
+
+    messages = restore_main_chat_messages(events)
+
+    assert messages == [
+        {"role": "user", "content": "write"},
+        {"role": "user", "content": "重试"},
+    ]
+
+
 def test_main_context_events_after_latest_summary_resets_candidates() -> None:
     events = [
         event(event_id="evt_1", seq=1, event_type="user_input", payload={"text": "old"}),

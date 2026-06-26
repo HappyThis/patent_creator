@@ -5,7 +5,7 @@ import difflib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar
 
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.message_preparation import prepare_messages_for_model_request
@@ -220,6 +220,9 @@ class ChatService:
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
         system_prompt = build_main_agent_system_prompt()
+        llm_retry_seen = False
+        llm_retry_finalized = False
+        last_llm_retry_payload: dict[str, Any] | None = None
 
         async def on_context_event(event_name: str, event_payload: dict[str, Any]) -> None:
             await self.bus.publish(
@@ -232,10 +235,55 @@ class ChatService:
                 },
             )
 
+        async def publish_llm_retry_status(event_payload: dict[str, Any]) -> None:
+            stored_payload = {**event_payload, "scope": "main"}
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="llm_retry_status",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload=stored_payload,
+            )
+            await self.bus.publish(
+                key,
+                "llm_retry_status",
+                {
+                    **stored_payload,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+
+        async def on_llm_retry_event(event_payload: dict[str, Any]) -> None:
+            nonlocal llm_retry_seen, last_llm_retry_payload
+            llm_retry_seen = True
+            last_llm_retry_payload = dict(event_payload)
+            await publish_llm_retry_status(event_payload)
+
+        async def finalize_llm_retry_status(status: str, error_message: str | None = None) -> None:
+            nonlocal llm_retry_finalized, last_llm_retry_payload
+            if not llm_retry_seen or llm_retry_finalized or last_llm_retry_payload is None:
+                return
+            llm_retry_finalized = True
+            final_payload = {
+                **last_llm_retry_payload,
+                "status": status,
+                "retry_after_seconds": 0,
+                "retry_at_ms": None,
+            }
+            if error_message:
+                final_payload["error_message"] = error_message
+            last_llm_retry_payload = final_payload
+            await publish_llm_retry_status(final_payload)
+
         changed_payload: dict[str, Any] = dict(DEFAULT_CHANGED_PAYLOAD)
         changed_payload["active_section_id"] = payload.active_section_id
         changed_payload["active_block_id"] = payload.active_block_id
         final_reply: str | None = None
+        final_reply_status: str | None = None
+        final_reply_detail: str | None = None
         messages: list[dict[str, Any]] = []
         technical_solution_before = self._current_technical_solution_markdown(project_id)
         enhancement_attempted = False
@@ -269,6 +317,7 @@ class ChatService:
                     system_prompt=system_prompt,
                     llm_client=self.llm_client,
                     on_context_event=on_context_event,
+                    on_retry_event=on_llm_retry_event,
                 )
 
                 async def on_text_delta(delta: str) -> None:
@@ -305,6 +354,7 @@ class ChatService:
                     messages=messages,
                     on_text_delta=on_text_delta,
                     on_audit_event=on_audit_event,
+                    on_retry_event=on_llm_retry_event,
                     trace_context={
                         "scope": "main",
                         "project_id": project_id,
@@ -317,6 +367,9 @@ class ChatService:
 
                 if action.type == "respond":
                     final_reply = action.text or ""
+                    if action.interrupted:
+                        final_reply_status = "interrupted"
+                        final_reply_detail = "输出中断，已保留当前内容。"
                     await self.events.audit_events(
                         project_id,
                         state,
@@ -334,7 +387,16 @@ class ChatService:
                         len(final_reply),
                     )
                     messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
-                    await self.events.agent_output(project_id, state, final_reply)
+                    await self.events.agent_output(
+                        project_id,
+                        state,
+                        final_reply,
+                        status=final_reply_status,
+                        detail=final_reply_detail,
+                    )
+
+                    if action.interrupted:
+                        break
 
                     if pending_enhancement is not None:
                         enhanced_after = self._current_technical_solution_markdown(project_id)
@@ -348,6 +410,7 @@ class ChatService:
                             review_markdown=str(pending_enhancement.get("review_markdown") or ""),
                             enhanced_technical_solution_markdown=enhanced_after,
                             enhancement_diff=enhancement_diff,
+                            on_retry_event=on_llm_retry_event,
                         )
                         await self._append_technical_solution_enhancement_record(
                             project_id,
@@ -382,6 +445,7 @@ class ChatService:
                                 user_request=payload.message,
                                 technical_solution_markdown_value=technical_solution_after,
                                 technical_solution_diff=initial_diff,
+                                on_retry_event=on_llm_retry_event,
                             )
                             if assessment is None or not assessment.should_review:
                                 await self._publish_technical_solution_enhancement_status(
@@ -400,6 +464,7 @@ class ChatService:
                                 user_request=payload.message,
                                 technical_solution_markdown_value=technical_solution_after,
                                 technical_solution_diff=initial_diff,
+                                on_retry_event=on_llm_retry_event,
                             )
                             if advice is None:
                                 await self._publish_technical_solution_enhancement_status(
@@ -503,6 +568,10 @@ class ChatService:
 
             await self._sleep(self.settings.round_finish_delay)
             committed, commit_error = await self._commit(project_id, changed_payload)
+            await finalize_llm_retry_status(
+                "failed" if final_reply_status == "interrupted" else "done",
+                final_reply_detail if final_reply_status == "interrupted" else None,
+            )
             await self._set_project_idle(project_id)
             logger.info(
                 "round finished project=%s session=%s changed=%s committed=%s",
@@ -516,6 +585,8 @@ class ChatService:
                 "round_finished",
                 {
                     "reply": final_reply or "",
+                    "reply_status": final_reply_status,
+                    "reply_detail": final_reply_detail,
                     **changed_payload,
                     "committed": committed,
                     "commit_error": commit_error,
@@ -540,6 +611,13 @@ class ChatService:
             )
             failure_code = exc.code if isinstance(exc, ApiError) else "round_runtime_error"
             failure_message = exc.message if isinstance(exc, ApiError) else str(exc)
+            await finalize_llm_retry_status("failed", failure_message)
+            partial_changed = changed_payload.get("changed") is True
+            failed_reply = (
+                "已完成部分修改，但模型连接失败，未生成最终回复。请重试继续处理。"
+                if partial_changed
+                else "本轮未完成，请重试或补充信息。"
+            )
             self.store.append_session_event(
                 project_id,
                 state.session_id,
@@ -548,12 +626,17 @@ class ChatService:
                 round_id=state.round_id,
                 message_id=state.message_id,
                 payload={
-                    "text": "本轮未完成，请重试或补充信息。",
+                    "text": failed_reply,
                     "status": "failed",
                     "code": failure_code,
                     "message": failure_message,
+                    **changed_payload,
                 },
             )
+            committed = False
+            commit_error: dict[str, str] | None = None
+            if partial_changed:
+                committed, commit_error = await self._commit(project_id, changed_payload)
             await self._set_project_idle(project_id)
             await self.bus.publish(
                 key,
@@ -561,7 +644,10 @@ class ChatService:
                 {
                     "code": failure_code,
                     "message": failure_message,
-                    "reply": "本轮未完成，请重试或补充信息。",
+                    "reply": failed_reply,
+                    **changed_payload,
+                    "committed": committed,
+                    "commit_error": commit_error,
                     "round_id": state.round_id,
                     "message_id": state.message_id,
                 },
@@ -718,6 +804,7 @@ class ChatService:
         user_request: str,
         technical_solution_markdown_value: str,
         technical_solution_diff: str,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionChangeAssessmentResult | None:
         key = (project_id, state.session_id)
         await self._publish_technical_solution_enhancement_status(
@@ -739,6 +826,7 @@ class ChatService:
                     "round_id": state.round_id,
                     "message_id": state.message_id,
                 },
+                on_retry_event=on_retry_event,
             )
         except Exception as exc:
             logger.warning(
@@ -810,6 +898,7 @@ class ChatService:
         user_request: str,
         technical_solution_markdown_value: str,
         technical_solution_diff: str,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionCheckResult | None:
         key = (project_id, state.session_id)
         await self._publish_technical_solution_enhancement_status(
@@ -833,6 +922,7 @@ class ChatService:
                     "round_id": state.round_id,
                     "message_id": state.message_id,
                 },
+                on_retry_event=on_retry_event,
             )
         except Exception as exc:
             logger.warning(
@@ -925,6 +1015,7 @@ class ChatService:
         review_markdown: str,
         enhanced_technical_solution_markdown: str,
         enhancement_diff: str,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionEnhancementSummaryResult | None:
         await self._publish_technical_solution_enhancement_status(
             project_id,
@@ -945,6 +1036,7 @@ class ChatService:
                     "round_id": state.round_id,
                     "message_id": state.message_id,
                 },
+                on_retry_event=on_retry_event,
             )
         except Exception as exc:
             logger.warning(

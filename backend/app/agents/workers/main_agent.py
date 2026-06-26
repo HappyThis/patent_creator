@@ -16,6 +16,7 @@ class SupportsGenerateWithTools(Protocol):
         tools: list[dict[str, Any]],
         on_text_delta: Any,
         on_audit_event: Any = None,
+        on_retry_event: Any = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -37,6 +38,8 @@ class MainAgentAction:
     tool_calls: list[MainAgentToolCall] | None = None
     assistant_message: dict[str, Any] | None = None
     audit_events: list[dict[str, Any]] | None = None
+    interrupted: bool = False
+    interrupted_message: str | None = None
 
 
 def build_main_agent_tools() -> list[dict[str, Any]]:
@@ -53,6 +56,7 @@ async def decide_main_agent_step(
     messages: list[dict[str, Any]],
     on_text_delta: Any | None = None,
     on_audit_event: Any | None = None,
+    on_retry_event: Any | None = None,
     trace_context: dict[str, Any] | None = None,
 ) -> MainAgentAction:
     """请求主 agent 做一步决策，返回统一的 Action 结构。"""
@@ -62,11 +66,12 @@ async def decide_main_agent_step(
         tools=MAIN_AGENT_TOOLS,
         on_text_delta=on_text_delta,
         on_audit_event=on_audit_event,
+        on_retry_event=on_retry_event,
         trace_context=trace_context,
     )
     action_type = result.get("type")
     if action_type == "respond":
-        text = str(result.get("text") or "").strip()
+        text = str(result.get("text") or "")
         assistant_message = _assistant_message(result)
         if assistant_message is None:
             raise ApiError(502, "main_agent_invalid_action", "主 agent respond 缺少 assistant_message。")
@@ -75,6 +80,8 @@ async def decide_main_agent_step(
             text=text,
             assistant_message=assistant_message,
             audit_events=_audit_events(result),
+            interrupted=result.get("interrupted") is True,
+            interrupted_message=str(result.get("interrupted_message") or "") or None,
         )
     if action_type == "tool_calls":
         tool_calls = _tool_calls(result)

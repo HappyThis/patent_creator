@@ -2,6 +2,7 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react'
 import {
   applyAssistantDelta,
   applyContextCompressionEvent,
+  applyLLMRetryStatusEvent,
   applyQualityEnhancementStatusEvent,
   applyRoundStartedEvent,
   applyRunningToolEvent,
@@ -215,6 +216,11 @@ export function useWorkspaceStream({
         return;
       }
 
+      if (eventName === 'llm_retry_status') {
+        setEvents((current) => applyLLMRetryStatusEvent(current, payload));
+        return;
+      }
+
       if (eventName === 'tool_call_started') {
         streamingAssistantIdRef.current = null;
         setEvents((current) => applyRunningToolEvent(current, payload, 'running'));
@@ -250,6 +256,8 @@ export function useWorkspaceStream({
               timestamp,
               optionalString(payload.round_id),
               optionalString(payload.message_id),
+              payload.reply_status === 'interrupted' ? 'interrupted' : undefined,
+              typeof payload.reply_detail === 'string' ? payload.reply_detail : undefined,
             ),
           );
         }
@@ -297,10 +305,38 @@ export function useWorkspaceStream({
               round_id: roundId,
               message_id: messageId,
               is_streaming: false,
+              status: 'failed',
+              detail: typeof payload.message === 'string' ? payload.message : undefined,
             },
           ];
         });
-        await refreshProject(project_id);
+        const changed = payload.changed === true;
+        if (changed) {
+          const documentPayload = documentChangePayload(payload);
+          focusDocumentChange(documentPayload);
+          await refreshRenderAst(project_id, {
+            focus_section_id: documentPayload.active_section_id,
+            focus_block_id: documentPayload.active_block_id,
+          });
+        }
+        const commitError = isRecord(payload.commit_error) ? payload.commit_error : null;
+        if (commitError) {
+          setEvents((current) => [
+            ...current,
+            {
+              id: `round_status_${Date.now()}_${current.length}`,
+              kind: 'round_status',
+              round_id: optionalString(payload.round_id),
+              message_id: optionalString(payload.message_id),
+              status: 'failed',
+              summary: '已完成部分修改，但版本提交失败。',
+              detail: String(commitError.message ?? ''),
+              timestamp: formatTimestamp(),
+            },
+          ]);
+        }
+        const nextProject = await refreshProject(project_id);
+        await refreshSessions(project_id, nextProject.active_session_id);
         return;
       }
 

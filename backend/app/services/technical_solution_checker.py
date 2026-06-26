@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -25,6 +25,7 @@ class SupportsTechnicalSolutionCheck(Protocol):
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -106,6 +107,7 @@ class TechnicalSolutionChangeAssessor:
         technical_solution_markdown: str,
         technical_solution_diff: str,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionChangeAssessmentResult:
         timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
         payload = await self.llm_client.generate_json(
@@ -121,6 +123,7 @@ class TechnicalSolutionChangeAssessor:
                 **(trace_context or {}),
                 "scope": "technical_solution_change_assessor",
             },
+            on_retry_event=on_retry_event,
         )
         return parse_technical_solution_change_assessment_result(payload)
 
@@ -145,6 +148,7 @@ class TechnicalSolutionChecker:
         technical_solution_diff: str | None = None,
         recent_history: list[dict[str, Any]] | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionCheckResult:
         return await self._check_single(
             technical_solution_markdown=technical_solution_markdown,
@@ -152,6 +156,7 @@ class TechnicalSolutionChecker:
             technical_solution_diff=technical_solution_diff,
             recent_history=recent_history,
             trace_context=trace_context,
+            on_retry_event=on_retry_event,
         )
 
     async def _check_single(
@@ -162,6 +167,7 @@ class TechnicalSolutionChecker:
         technical_solution_diff: str | None = None,
         recent_history: list[dict[str, Any]] | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionCheckResult:
         base_user_prompt = _checker_user_prompt(
             technical_solution_markdown,
@@ -192,6 +198,7 @@ class TechnicalSolutionChecker:
                     "scope": "technical_solution_improvement_advisor",
                     "attempt": attempt,
                 },
+                on_retry_event=on_retry_event,
             )
             try:
                 return parse_technical_solution_check_result(payload)
@@ -227,6 +234,7 @@ class TechnicalSolutionEnhancementSummarizer:
         enhanced_technical_solution_markdown: str,
         enhancement_diff: str,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionEnhancementSummaryResult:
         timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
         payload = await self.llm_client.generate_json(
@@ -242,6 +250,7 @@ class TechnicalSolutionEnhancementSummarizer:
                 **(trace_context or {}),
                 "scope": "technical_solution_enhancement_summarizer",
             },
+            on_retry_event=on_retry_event,
         )
         return parse_technical_solution_enhancement_summary_result(payload)
 

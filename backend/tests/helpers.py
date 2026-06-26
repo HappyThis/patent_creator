@@ -47,6 +47,7 @@ class ScriptedLLMClient:
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
         on_audit_event: Any = None,
+        on_retry_event: Any = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -103,6 +104,7 @@ class ScriptedLLMClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Any = None,
     ) -> dict[str, Any]:
         prompt_record = {
             "system_prompt": system_prompt,
@@ -143,6 +145,7 @@ class ScriptedLLMClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Any = None,
     ) -> str:
         if "上下文滚动压缩" in user_prompt:
             prompt_messages = list(messages or [])

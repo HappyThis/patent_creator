@@ -7,7 +7,9 @@ from typing import Any
 
 import pytest
 
+from app.core import ApiError
 from app.schemas import ChatMessageRequest
+from app.runtime.context.history import INTERRUPTED_OUTPUT_CONTEXT_NOTE
 from app.services import AppServices
 
 from helpers import ScriptedLLMClient, create_project, make_settings, tool_call, wait_until_idle
@@ -90,10 +92,169 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     round_finished_payload = bus_events[-1][1]
     assert round_finished_payload["reply"] == "已更新关键创新点及权利要求建议。"
     assert round_finished_payload["changed"] is True
-
     disclosure = services.store.get_disclosure(project_id)
     innovation_claims = section_by_title(disclosure, "关键创新点及权利要求建议")
     assert len(innovation_claims["blocks"]) >= 1
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_marks_interrupted_partial_output(tmp_path: Path) -> None:
+    def step_interrupted(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "respond",
+            "text": "这是一段已经输出给用户的半截内容",
+            "interrupted": True,
+            "interrupted_message": "stream broke",
+        }
+
+    llm = ScriptedLLMClient([step_interrupted])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(message="请生成技术方案。"),
+    )
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    agent_output = next(event for event in events if event.type == "agent_output")
+    assert agent_output.payload["text"] == "这是一段已经输出给用户的半截内容"
+    assert agent_output.payload["status"] == "interrupted"
+    assert agent_output.payload["detail"] == "输出中断，已保留当前内容。"
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    assert bus_events[-1][0] == "round_finished"
+    assert bus_events[-1][1]["reply_status"] == "interrupted"
+    assert bus_events[-1][1]["reply_detail"] == "输出中断，已保留当前内容。"
+    assert "round_failed" not in [name for name, _ in bus_events]
+
+    restored = services.context_manager.build_main_agent_messages(
+        project_id,
+        response.session_id,
+        user_message="继续。",
+    )
+    assistant_messages = [message for message in restored if message.get("role") == "assistant"]
+    assert assistant_messages
+    assert INTERRUPTED_OUTPUT_CONTEXT_NOTE in str(assistant_messages[-1]["content"])
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_finalizes_llm_retry_status_on_success(tmp_path: Path) -> None:
+    class RetryThenRespondLLM(ScriptedLLMClient):
+        async def generate_with_tools_stream(
+            self,
+            *,
+            system_prompt: str,
+            messages: list[dict[str, Any]],
+            tools: list[dict[str, Any]],
+            on_text_delta: Any = None,
+            on_audit_event: Any = None,
+            on_retry_event: Any = None,
+            response_format_json: bool = False,
+            trace_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            if on_retry_event is not None:
+                await on_retry_event(
+                    {
+                        "status": "waiting",
+                        "reason": "模型连接失败",
+                        "attempt": 2,
+                        "max_attempts": 6,
+                        "retry_index": 1,
+                        "max_retries": 5,
+                        "retry_after_seconds": 5,
+                        "retry_at_ms": 123456,
+                        "error_type": "APIStatusError",
+                        "error_message": "server overloaded",
+                        "kind": "generate_with_tools_stream",
+                    }
+                )
+                await on_retry_event(
+                    {
+                        "status": "retrying",
+                        "reason": "模型连接失败",
+                        "attempt": 2,
+                        "max_attempts": 6,
+                        "retry_index": 1,
+                        "max_retries": 5,
+                        "retry_after_seconds": 0,
+                        "retry_at_ms": None,
+                        "error_type": "APIStatusError",
+                        "error_message": "server overloaded",
+                        "kind": "generate_with_tools_stream",
+                    }
+                )
+            if on_text_delta is not None:
+                await on_text_delta("已恢复。")
+            return {
+                "type": "respond",
+                "text": "已恢复。",
+                "assistant_message": {"role": "assistant", "content": "已恢复。"},
+            }
+
+    llm = RetryThenRespondLLM([])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="请继续。"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    retry_payloads = [event.payload for event in events if event.type == "llm_retry_status"]
+    assert [payload["status"] for payload in retry_payloads] == ["waiting", "retrying", "done"]
+    assert retry_payloads[-1]["retry_after_seconds"] == 0
+    assert retry_payloads[-1]["retry_at_ms"] is None
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_finalizes_llm_retry_status_on_failure(tmp_path: Path) -> None:
+    class RetryThenFailLLM(ScriptedLLMClient):
+        async def generate_with_tools_stream(
+            self,
+            *,
+            system_prompt: str,
+            messages: list[dict[str, Any]],
+            tools: list[dict[str, Any]],
+            on_text_delta: Any = None,
+            on_audit_event: Any = None,
+            on_retry_event: Any = None,
+            response_format_json: bool = False,
+            trace_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            if on_retry_event is not None:
+                await on_retry_event(
+                    {
+                        "status": "retrying",
+                        "reason": "模型连接失败",
+                        "attempt": 6,
+                        "max_attempts": 6,
+                        "retry_index": 5,
+                        "max_retries": 5,
+                        "retry_after_seconds": 0,
+                        "retry_at_ms": None,
+                        "error_type": "APIStatusError",
+                        "error_message": "server overloaded",
+                        "kind": "generate_with_tools_stream",
+                    }
+                )
+            raise ApiError(502, "llm_http_error", "模型调用失败：server overloaded")
+
+    llm = RetryThenFailLLM([])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="请继续。"))
+    await wait_until_idle(services, project_id)
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    retry_payloads = [event.payload for event in events if event.type == "llm_retry_status"]
+    assert [payload["status"] for payload in retry_payloads] == ["retrying", "failed"]
+    assert retry_payloads[-1]["error_message"] == "模型调用失败：server overloaded"
+
+    failed_output = next(event for event in events if event.type == "agent_output")
+    assert failed_output.payload["status"] == "failed"
+    assert failed_output.payload["message"] == "模型调用失败：server overloaded"
 
 
 @pytest.mark.anyio
@@ -739,3 +900,49 @@ async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path)
     assert "tool_call_finished" in names
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "没有找到对应章节，我需要换一个有效章节。"
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_marks_partial_write_when_model_fails_after_tool(tmp_path: Path) -> None:
+    def step_write(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000006",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "已经写入的技术方案内容。"},
+                    },
+                    "call_write_solution",
+                )
+            ],
+        }
+
+    def step_fail_after_tool(_: list[dict[str, Any]]) -> dict[str, Any]:
+        raise ApiError(502, "llm_http_error", "模型调用失败：server overloaded")
+
+    llm = ScriptedLLMClient([step_write, step_fail_after_tool])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="请修改技术方案。"))
+    await wait_until_idle(services, project_id)
+
+    disclosure = services.store.get_disclosure(project_id)
+    technical_solution = section_by_title(disclosure, "技术方案")
+    assert any(block.get("text") == "已经写入的技术方案内容。" for block in technical_solution["blocks"])
+
+    events = services.store.read_session_events(project_id, response.session_id)
+    failed_output = [event for event in events if event.type == "agent_output"][-1]
+    assert failed_output.payload["text"] == "已完成部分修改，但模型连接失败，未生成最终回复。请重试继续处理。"
+    assert failed_output.payload["status"] == "failed"
+    assert failed_output.payload["changed"] is True
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    assert bus_events[-1][0] == "round_failed"
+    assert bus_events[-1][1]["reply"] == "已完成部分修改，但模型连接失败，未生成最终回复。请重试继续处理。"
+    assert bus_events[-1][1]["changed"] is True
+    assert bus_events[-1][1]["committed"] is True

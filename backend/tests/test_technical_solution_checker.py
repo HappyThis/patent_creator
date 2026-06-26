@@ -30,6 +30,7 @@ class FakeCheckerLLMClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Any = None,
     ) -> dict[str, Any]:
         self.prompts.append(
             {

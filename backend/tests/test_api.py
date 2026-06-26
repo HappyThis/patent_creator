@@ -31,6 +31,7 @@ class StubLLMClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Any = None,
     ) -> dict[str, Any]:
         return {"title": "低算力实时保护"}
 
@@ -43,6 +44,7 @@ class StubLLMClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Any = None,
     ) -> str:
         message_count = len(messages or [])
         return (
@@ -71,6 +73,7 @@ class StubLLMClient:
         tools: list[dict[str, Any]],
         on_text_delta: Any = None,
         on_audit_event: Any = None,
+        on_retry_event: Any = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:

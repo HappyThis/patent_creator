@@ -104,6 +104,7 @@ class SessionEvent(BaseModel):
         "context_pruned",
         "session_title",
         "llm_audit",
+        "llm_retry_status",
         "technical_solution_check_result",
         "technical_solution_check_feedback",
         "technical_solution_enhancement_status",

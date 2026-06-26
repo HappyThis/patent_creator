@@ -36,6 +36,7 @@ class SupportsContextCompression(Protocol):
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> str:
         ...
 
@@ -91,6 +92,7 @@ class ContextManager:
         system_prompt: str,
         llm_client: SupportsContextCompression,
         on_context_event: ContextEventSink | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> list[dict[str, Any]]:
         """恢复主 agent messages；每次模型调用前必要时滚动压缩当前窗口。"""
 
@@ -145,6 +147,7 @@ class ContextManager:
                 system_prompt=system_prompt,
                 llm_client=llm_client,
                 usage_before=usage,
+                on_retry_event=on_retry_event,
             )
         except Exception:
             logger.exception(
@@ -278,6 +281,7 @@ class ContextManager:
         system_prompt: str,
         llm_client: SupportsContextCompression,
         usage_before: ContextUsage,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any] | None:
         compression_marker, candidate_events = main_context_events_after_latest_summary(
             self.store.iter_session_events(project_id, session_id)
@@ -364,6 +368,7 @@ class ContextManager:
                 "covered_seq_start": covered_seq_start,
                 "covered_seq_end": covered_seq_end,
             },
+            on_retry_event=on_retry_event,
         )
         compressed_markdown = extract_compressed_summary(raw_markdown)
         compressed_memory_messages = prepare_compressed_markdown_messages(compressed_markdown)
