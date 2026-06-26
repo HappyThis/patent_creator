@@ -293,6 +293,7 @@ export function useWorkspace(projectId: string | null) {
   const canCancelRound = Boolean(project?.is_busy && project.running_session_id && project.running_round_id);
 
   return {
+    project,
     renderAst,
     renderUpdatedAt,
     events,

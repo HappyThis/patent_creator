@@ -28,6 +28,7 @@ type RenderBlock =
       traceBlocks: TraceBlock[];
       statusBlocks: StatusTraceBlock[];
       durationLabel: string | null;
+      activityLabel: string | null;
     }
   | { kind: 'process'; items: ToolCallEvent[] }
   | { kind: 'status'; event: StatusEvent };
@@ -64,6 +65,7 @@ export function ChatThread({ events }: ChatThreadProps) {
             onBlur: () => setHoveredAssistantRound((current) => (current === block.roundKey ? null : current)),
           };
           const isTraceOpen = openTraceRounds.has(traceKey);
+          const isRoundActive = Boolean(block.activityLabel);
           const toggleTrace = () => {
             setOpenTraceRounds((current) => {
               const next = new Set(current);
@@ -79,15 +81,32 @@ export function ChatThread({ events }: ChatThreadProps) {
           return (
             <div key={`assistant_round_${block.roundKey}_${index}`} className="assistant-round" {...hoverProps}>
               {block.traceBlocks.length > 0 || block.durationLabel ? (
-                <div className={`assistant-round-trace ${isTraceOpen ? 'open' : ''}`}>
+                <div
+                  className={[
+                    'assistant-round-trace',
+                    isTraceOpen ? 'open' : '',
+                    isRoundActive ? 'running' : '',
+                  ].filter(Boolean).join(' ')}
+                >
                   <button
                     type="button"
                     className="assistant-round-trace-summary"
                     aria-expanded={isTraceOpen}
                     onClick={toggleTrace}
                   >
-                    <span>过程记录</span>
-                    <small>{formatTraceSummary(block.traceBlocks, block.durationLabel)}</small>
+                    {block.activityLabel ? (
+                      <span className="assistant-round-trace-meta">
+                        <span className="assistant-round-trace-spinner" aria-hidden="true" />
+                        <span className="assistant-round-trace-status">{block.activityLabel}</span>
+                        <span className="assistant-round-trace-separator" aria-hidden="true">·</span>
+                        <small>{formatTraceSummary(block.traceBlocks, block.durationLabel)}</small>
+                      </span>
+                    ) : (
+                      <>
+                        <span>过程记录</span>
+                        <small>{formatTraceSummary(block.traceBlocks, block.durationLabel)}</small>
+                      </>
+                    )}
                   </button>
                   {isTraceOpen && block.traceBlocks.length > 0 ? (
                     <div className="assistant-round-trace-body">
@@ -158,11 +177,10 @@ function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], 
 
 function ThinkingIndicator() {
   return (
-    <div className="thinking-indicator" aria-live="polite" aria-label="Thinking">
+    <div className="thinking-indicator" aria-live="polite" aria-label="正在思考">
       <span className="thinking-pulse" aria-hidden="true" />
-      <span className="thinking-label">Thinking</span>
+      <span className="thinking-label">正在思考</span>
       <span className="thinking-wave" aria-hidden="true">
-        <span />
         <span />
         <span />
         <span />
@@ -211,14 +229,10 @@ function renderTraceBlock(block: TraceBlock, index: number, liveNowMs: number | 
   }
 
   if (block.kind === 'process') {
-    return <TimelineList key={`trace_process_${index}`} items={block.items} label="工具调用" defaultOpen />;
+    return <TimelineList key={`trace_process_${index}`} items={block.items} label="工具调用" />;
   }
 
   return renderStatus(block.event, `trace_status_${block.event.id}_${index}`, liveNowMs);
-}
-
-function isExternalRoundStatus(block: TraceBlock): block is StatusTraceBlock {
-  return block.kind === 'status' && block.event.kind === 'context_status';
 }
 
 function renderStatus(event: StatusEvent, key = event.id, liveNowMs: number | null = null) {
@@ -373,6 +387,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
             traceBlocks: [],
             statusBlocks: [],
             durationLabel: null,
+            activityLabel: null,
           });
         }
       }
@@ -380,6 +395,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
       return;
     }
 
+    const activityLabel = getRoundActivityLabel(pendingRound.traceBlocks, pendingRound.finalMessage);
     const { traceBlocks, statusBlocks } = partitionRoundTraceBlocks(pendingRound.traceBlocks);
     blocks.push({
       kind: 'assistant_round',
@@ -391,8 +407,9 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
         pendingRound.traceBlocks,
         pendingRound.finalMessage,
         pendingRound.startedAtMs,
-        pendingRound.isStreaming ? liveNowMs : null,
+        pendingRound.isStreaming || activityLabel ? liveNowMs : null,
       ),
+      activityLabel,
     });
     pendingRound = null;
   };
@@ -455,8 +472,19 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
     }
 
     if (event.kind === 'quality_enhancement_status') {
-      flushRound();
-      blocks.push({ kind: 'status', event });
+      const roundKey = resolveRoundKey(event.round_id, event.message_id);
+      if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
+        if (pendingRound) {
+          flushRound();
+        }
+        pendingRound = createPendingRound(roundKey);
+      }
+      flushProcessToRound();
+      if (pendingRound) {
+        pendingRound.traceBlocks.push({ kind: 'status', event });
+      } else {
+        blocks.push({ kind: 'status', event });
+      }
       continue;
     }
 
@@ -488,24 +516,72 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
 }
 
 function partitionRoundTraceBlocks(traceBlocks: TraceBlock[]) {
-  const visibleTraceBlocks: TraceBlock[] = [];
-  const statusBlocks: StatusTraceBlock[] = [];
-  for (const traceBlock of traceBlocks) {
-    if (isExternalRoundStatus(traceBlock)) {
-      statusBlocks.push(traceBlock);
-    } else {
-      visibleTraceBlocks.push(traceBlock);
-    }
-  }
-  return { traceBlocks: visibleTraceBlocks, statusBlocks };
+  return { traceBlocks, statusBlocks: [] as StatusTraceBlock[] };
 }
 
 function hasLiveThreadActivity(events: ChatEvent[]) {
   return events.some(
     (event) =>
       (event.kind === 'message' && event.role === 'assistant' && event.is_streaming) ||
+      (event.kind === 'tool_call' && event.status === 'running') ||
+      (event.kind === 'context_status' && event.status === 'running') ||
+      (event.kind === 'quality_enhancement_status' && event.status === 'running') ||
       (event.kind === 'llm_retry_status' && (event.status === 'waiting' || event.status === 'retrying')),
   );
+}
+
+function getRoundActivityLabel(traceBlocks: TraceBlock[], finalMessage: ChatMessageEvent) {
+  for (let index = traceBlocks.length - 1; index >= 0; index -= 1) {
+    const block = traceBlocks[index];
+    if (block.kind === 'status') {
+      if (block.event.kind === 'context_status' && block.event.status === 'running') {
+        return '上下文压缩中';
+      }
+      if (block.event.kind === 'quality_enhancement_status' && block.event.status === 'running') {
+        return '增强中';
+      }
+      continue;
+    }
+
+    if (block.kind === 'process') {
+      if (block.items.some((item) => item.status === 'running')) {
+        return formatToolCallActivity(traceBlocks);
+      }
+      if (finalMessage.is_streaming && traceBlockTimestamp(block) > (finalMessage.timestamp_ms ?? 0)) {
+        return formatToolCallActivity(traceBlocks);
+      }
+    }
+  }
+
+  if (finalMessage.is_streaming && !finalMessage.is_placeholder && finalMessage.text.trim()) {
+    return '文本输出中';
+  }
+
+  return null;
+}
+
+function formatToolCallActivity(traceBlocks: TraceBlock[]) {
+  const toolCallCount = countToolCalls(traceBlocks);
+  return toolCallCount > 0 ? `工具调用中 · ${toolCallCount} 个` : '工具调用中';
+}
+
+function countToolCalls(traceBlocks: TraceBlock[]) {
+  return traceBlocks.reduce((total, block) => {
+    if (block.kind !== 'process') {
+      return total;
+    }
+    return total + block.items.length;
+  }, 0);
+}
+
+function traceBlockTimestamp(block: TraceBlock) {
+  if (block.kind === 'message') {
+    return block.event.timestamp_ms ?? 0;
+  }
+  if (block.kind === 'status') {
+    return block.event.timestamp_ms ?? 0;
+  }
+  return Math.max(0, ...block.items.map((item) => item.timestamp_ms ?? 0));
 }
 
 function formatLLMRetryLabel(event: Extract<ChatEvent, { kind: 'llm_retry_status' }>, liveNowMs: number | null) {

@@ -43,6 +43,7 @@ function App() {
   const [hasUnseenDisclosureUpdate, setHasUnseenDisclosureUpdate] = useState(false);
   const [disclosureWidth, setDisclosureWidth] = useState(460);
   const {
+    project,
     renderAst,
     renderUpdatedAt,
     events,
@@ -68,6 +69,15 @@ function App() {
     handleSessionDelete,
   } = useWorkspace(selectedProjectId);
   const documentStats = useMemo(() => buildDocumentStats(renderAst), [renderAst]);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+    setProjects((current) =>
+      current.map((item) => (item.project_id === project.project_id ? project : item)),
+    );
+  }, [project]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
