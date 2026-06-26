@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
+import subprocess
+import time
 
 import pytest
 
@@ -60,6 +63,40 @@ def test_append_session_event_uses_last_event_seq_with_trailing_blank_lines(tmp_
     assert second.seq == 2
 
 
+def test_append_session_event_serializes_concurrent_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = make_settings(tmp_path)
+    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
+    project_id = services.store.create_project("测试项目").project_id
+    session_id = "sess_concurrent"
+    original_next_seq = services.store._next_session_event_seq
+
+    def slow_next_seq(path: Path) -> int:
+        seq = original_next_seq(path)
+        time.sleep(0.01)
+        return seq
+
+    monkeypatch.setattr(services.store, "_next_session_event_seq", slow_next_seq)
+
+    def append_event(index: int) -> int:
+        event = services.store.append_session_event(
+            project_id,
+            session_id,
+            event_type="agent_output",
+            scope="main",
+            round_id="round_1",
+            message_id=f"msg_{index}",
+            payload={"text": f"第 {index} 条"},
+        )
+        return event.seq
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        returned_seq = list(executor.map(append_event, range(12)))
+
+    events = services.store.read_session_events(project_id, session_id)
+    assert sorted(returned_seq) == list(range(1, 13))
+    assert [event.seq for event in events] == list(range(1, 13))
+
+
 def test_read_session_events_ignores_removed_parent_call_id_field(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     services = AppServices(settings, llm_client=ScriptedLLMClient([]))
@@ -89,6 +126,111 @@ def test_read_session_events_ignores_removed_parent_call_id_field(tmp_path: Path
 
     assert event.call_id == "call_1"
     assert "parent_call_id" not in event.model_dump()
+
+
+def test_session_log_readers_skip_legacy_technical_solution_check_events(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
+    project_id = services.store.create_project("测试项目").project_id
+    session_id = "sess_legacy_check"
+    lines = [
+        {
+            "id": "evt_1",
+            "ts": "2026-06-19T00:00:00Z",
+            "type": "user_input",
+            "seq": 1,
+            "scope": "main",
+            "round_id": "round_1",
+            "message_id": "msg_1",
+            "call_id": None,
+            "payload": {"text": "写技术方案"},
+        },
+        {
+            "id": "evt_2",
+            "ts": "2026-06-19T00:00:01Z",
+            "type": "technical_solution_check_feedback",
+            "seq": 2,
+            "scope": "main",
+            "round_id": "round_1",
+            "message_id": "msg_1",
+            "call_id": None,
+            "payload": {"text": "旧质量门禁反馈"},
+        },
+        {
+            "id": "evt_3",
+            "ts": "2026-06-19T00:00:02Z",
+            "type": "agent_output",
+            "seq": 3,
+            "scope": "main",
+            "round_id": "round_1",
+            "message_id": "msg_1",
+            "call_id": None,
+            "payload": {"text": "已完成"},
+        },
+        {
+            "id": "evt_4",
+            "ts": "2026-06-19T00:00:03Z",
+            "type": "technical_solution_check_result",
+            "seq": 4,
+            "scope": "main",
+            "round_id": "round_1",
+            "message_id": "msg_1",
+            "call_id": None,
+            "payload": {"review_markdown": "旧结果"},
+        },
+    ]
+    services.store.session_file(project_id, session_id).write_text(
+        "".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+        encoding="utf-8",
+    )
+
+    events = services.store.read_session_events(project_id, session_id)
+    sessions = services.store.list_sessions(project_id)
+
+    assert [event.type for event in events] == ["user_input", "agent_output"]
+    assert services.store.first_user_text(project_id, session_id) == "写技术方案"
+    assert sessions[0].session_id == session_id
+    assert sessions[0].event_count == 2
+    assert sessions[0].last_round_id == "round_1"
+    assert sessions[0].updated_at == "2026-06-19T00:00:02Z"
+
+
+def test_list_sessions_skips_logs_with_only_legacy_technical_solution_check_events(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
+    project_id = services.store.create_project("测试项目").project_id
+    session_id = "sess_legacy_only"
+    lines = [
+        {
+            "id": "evt_1",
+            "ts": "2026-06-19T00:00:01Z",
+            "type": "technical_solution_check_feedback",
+            "seq": 1,
+            "scope": "main",
+            "round_id": "round_1",
+            "message_id": "msg_1",
+            "call_id": None,
+            "payload": {"text": "旧质量门禁反馈"},
+        },
+        {
+            "id": "evt_2",
+            "ts": "2026-06-19T00:00:02Z",
+            "type": "technical_solution_check_result",
+            "seq": 2,
+            "scope": "main",
+            "round_id": "round_1",
+            "message_id": "msg_1",
+            "call_id": None,
+            "payload": {"review_markdown": "旧结果"},
+        },
+    ]
+    services.store.session_file(project_id, session_id).write_text(
+        "".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+        encoding="utf-8",
+    )
+
+    assert services.store.read_session_events(project_id, session_id) == []
+    assert services.store.list_sessions(project_id) == []
 
 
 def test_recover_interrupted_project_marks_round_failed_and_unlocks_project(tmp_path: Path) -> None:
@@ -189,3 +331,40 @@ def test_list_sessions_skips_invalid_session_log(tmp_path: Path) -> None:
     sessions = services.store.list_sessions(project_id)
 
     assert [session.session_id for session in sessions] == [valid_session_id]
+
+
+def test_commit_workspace_stops_when_cached_diff_command_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = make_settings(tmp_path)
+    services = AppServices(settings, llm_client=ScriptedLLMClient([]))
+    project_id = services.store.create_project("测试项目").project_id
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        cwd: Path,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = (cwd, capture_output, text, check)
+        commands.append(command)
+        if command[:2] == ["git", "add"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if command == ["git", "diff", "--cached", "--quiet"]:
+            return subprocess.CompletedProcess(command, 128, stdout="", stderr="fatal: not a git repository")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    committed, error = services.store.commit_workspace(project_id, "update disclosure")
+
+    assert committed is False
+    assert error == {"code": "git_diff_failed", "message": "fatal: not a git repository"}
+    assert commands == [
+        ["git", "add", "disclosure.json", "project.json", "sessions", "assets"],
+        ["git", "diff", "--cached", "--quiet"],
+    ]

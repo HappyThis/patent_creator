@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 EVALUATOR_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "software_patent_solution_github" / "evaluator"
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
 
-import codex_judge  # noqa: E402
+
+def load_codex_judge() -> Any:
+    if str(EVALUATOR_DIR) not in sys.path:
+        sys.path.insert(0, str(EVALUATOR_DIR))
+    return importlib.import_module("codex_judge")
+
+
+codex_judge: Any = load_codex_judge()
 
 
 def test_resolve_codex_bin_prefers_windows_cmd(monkeypatch) -> None:

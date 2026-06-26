@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import pytest
 
 from app.agents.runtime.openai_responses import OpenAIResponsesClient
+from app.core import ApiError
 from app.core.config import Settings
 
 
@@ -152,6 +154,40 @@ def test_generate_json_retries_retryable_llm_error(tmp_path: Path) -> None:
     assert retry_events[0]["retry_index"] == 1
     assert retry_events[0]["max_retries"] == 1
     assert "connect failed" in retry_events[0]["error_message"]
+
+
+def test_generate_json_retries_invalid_json_response(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient([response_with_text("not json"), response_with_text('{"ok": true}')])
+    client = OpenAIResponsesClient(make_settings(tmp_path, llm_max_retries=1), client=fake)  # type: ignore[arg-type]
+    retry_events: list[dict[str, Any]] = []
+
+    async def on_retry_event(event: dict[str, Any]) -> None:
+        retry_events.append(event)
+
+    result = asyncio.run(
+        client.generate_json(
+            system_prompt="system",
+            user_prompt="user",
+            on_retry_event=on_retry_event,
+        )
+    )
+
+    assert result == {"ok": True}
+    assert len(fake.responses.calls) == 2
+    assert [event["status"] for event in retry_events] == ["waiting", "retrying"]
+    assert retry_events[0]["error_type"] == "ApiError"
+    assert retry_events[0]["error_message"] == "模型返回的内容不是合法 JSON。"
+
+
+def test_generate_json_final_invalid_json_response_fails(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient([response_with_text("not json"), response_with_text("still not json")])
+    client = OpenAIResponsesClient(make_settings(tmp_path, llm_max_retries=1), client=fake)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(client.generate_json(system_prompt="system", user_prompt="user"))
+
+    assert exc_info.value.code == "llm_invalid_json"
+    assert len(fake.responses.calls) == 2
 
 
 def test_generate_text_does_not_request_json_format(tmp_path: Path) -> None:

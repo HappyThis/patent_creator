@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ...core.command_platform import command_arguments, current_command_platform, decode_command_output
 from ...domain.document_tool_results import tool_failed, tool_success
@@ -13,8 +13,10 @@ from ..output_storage import EXEC_COMMAND_INLINE_LIMIT_CHARS, EXEC_COMMAND_PREVI
 
 
 class ExecCommandArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     command: str = Field(description="要执行的命令字符串，按当前项目工作区作为 cwd 执行。")
-    timeout: float = Field(default=30, gt=0, description="超时时间，单位秒，默认 30，必须大于 0。")
+    timeout: float | None = Field(default=30, gt=0, description="超时时间，单位秒，默认 30，必须大于 0。")
 
 
 @agent_tool(
@@ -39,19 +41,19 @@ def exec_command(
     Examples:
         - 执行诊断命令: {"command":"git status --short","timeout":30}
     """
-    command = arguments.get("command")
-    if not isinstance(command, str) or not command.strip():
+    parsed = _validate_exec_arguments(arguments)
+    if parsed["status"] == "failed":
+        return parsed
+    payload = parsed["output"]["arguments"]
+
+    command = payload["command"]
+    if not command.strip():
         return tool_failed("invalid_operation", "command 字段缺失。")
 
-    raw_timeout = arguments.get("timeout", 30)
+    raw_timeout = payload.get("timeout", 30)
     if raw_timeout is None:
         raw_timeout = 30
-    try:
-        timeout = float(raw_timeout)
-    except (TypeError, ValueError):
-        return tool_failed("invalid_operation", "timeout 必须是数字。")
-    if timeout <= 0:
-        return tool_failed("invalid_operation", "timeout 必须大于 0。")
+    timeout = float(raw_timeout)
     profile = current_command_platform()
     try:
         completed = subprocess.run(
@@ -114,6 +116,21 @@ def exec_command(
             ),
         }
     )
+
+
+def _validate_exec_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        parsed = ExecCommandArguments.model_validate(arguments)
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        location = ".".join(str(part) for part in first.get("loc", ())) or "arguments"
+        message = str(first.get("msg") or "参数不符合工具 schema。")
+        return tool_failed(
+            "invalid_tool_arguments",
+            f"工具参数不符合 schema：{location}: {message}",
+            retry_hint="请严格按照当前工具的 parameters schema 重新调用。",
+        )
+    return {"status": "success", "output": {"arguments": parsed.model_dump(exclude_none=True)}}
 
 
 def _stream_output_fields(

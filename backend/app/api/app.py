@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .. import __version__
 from ..core import ApiError, Settings, setup_logging
 from ..schemas import ErrorEnvelope
 from ..services import AppServices
@@ -42,7 +43,7 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
             )
         yield
 
-    app = FastAPI(title="Patent Creator Backend", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Patent Creator Backend", version=__version__, lifespan=lifespan)
     app.state.services = active_services
     app.add_middleware(
         CORSMiddleware,

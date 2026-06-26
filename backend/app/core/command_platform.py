@@ -90,22 +90,3 @@ def decode_command_output(data: bytes | str | None) -> str:
         except UnicodeDecodeError:
             continue
     return data.decode(encodings[0], errors="replace")
-
-
-def exec_command_tool_description() -> str:
-    profile = current_command_platform()
-    examples = "；".join(profile.examples)
-    return (
-        f"在项目工作区内执行命令字符串，cwd 为当前 project 工作区。"
-        f"当前运行平台是 {profile.platform}，命令会通过 {profile.shell} 执行。"
-        f"示例：{examples}。"
-    )
-
-
-def exec_command_prompt_examples() -> str:
-    profile = current_command_platform()
-    examples = "\n".join(f"  {example}" for example in profile.examples)
-    return (
-        f"当前 exec_command 运行平台：{profile.platform}；shell：{profile.shell}。\n"
-        f"命令示例：\n{examples}"
-    )

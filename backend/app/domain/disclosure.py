@@ -246,7 +246,9 @@ def block_to_markdown(block: dict[str, Any]) -> list[str]:
     if block["type"] in {"title", "paragraph"}:
         return [block["text"]]
     if block["type"] == "list":
-        prefix = lambda index: f"{index + 1}. " if block["ordered"] else "- "
+        def prefix(index: int) -> str:
+            return f"{index + 1}. " if block["ordered"] else "- "
+
         return [f"{prefix(index)}{item}" for index, item in enumerate(block["items"])]
     if block["type"] == "image":
         alt = block.get("alt", "image")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
@@ -44,6 +45,13 @@ RETRYABLE_LLM_ERRORS = (
 )
 
 RETRYABLE_STREAM_API_ERROR_CODES = {"llm_stream_error", "llm_empty_response"}
+RETRYABLE_NON_STREAM_API_ERROR_CODES = {"llm_invalid_json"}
+
+
+@dataclass(slots=True)
+class _StreamAttemptState:
+    text_delta_emitted: bool = False
+    text_parts: list[str] = field(default_factory=list)
 
 
 class OpenAIResponsesClient:
@@ -134,9 +142,18 @@ class OpenAIResponsesClient:
             request_options={"timeout": timeout if timeout is not None else self.settings.llm_timeout},
         )
         started = time.monotonic()
-        response = await self._create_response_with_retries(
+        async def create_and_parse_json() -> tuple[dict[str, Any], Any]:
+            response = await client.responses.create(**request_payload, timeout=timeout)
+            content = _extract_response_text(response)
+            try:
+                return json.loads(content), response
+            except json.JSONDecodeError as exc:
+                logger.warning("generate_json invalid_json content=%s", content[:500])
+                raise ApiError(502, "llm_invalid_json", "模型返回的内容不是合法 JSON。") from exc
+
+        payload, response = await self._create_response_with_retries(
             kind="generate_json",
-            create_call=lambda: client.responses.create(**request_payload, timeout=timeout),
+            create_call=create_and_parse_json,
             on_retry_event=on_retry_event,
         )
 
@@ -147,12 +164,7 @@ class OpenAIResponsesClient:
             timeout if timeout is not None else self.settings.llm_timeout,
             _describe_usage(getattr(response, "usage", None)),
         )
-        content = _extract_response_text(response)
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as exc:
-            logger.warning("generate_json invalid_json content=%s", content[:500])
-            raise ApiError(502, "llm_invalid_json", "模型返回的内容不是合法 JSON。") from exc
+        return payload
 
     async def generate_with_tools_stream(
         self,
@@ -193,15 +205,16 @@ class OpenAIResponsesClient:
 
         max_attempts = self._max_llm_attempts()
         for attempt in range(1, max_attempts + 1):
-            text_delta_emitted = False
-            text_parts: list[str] = []
+            attempt_state = _StreamAttemptState()
 
-            async def guarded_on_text_delta(delta: str) -> None:
-                nonlocal text_delta_emitted
-                text_delta_emitted = True
-                text_parts.append(delta)
+            async def guarded_on_text_delta(delta: str, *, state: _StreamAttemptState = attempt_state) -> None:
+                state.text_delta_emitted = True
+                state.text_parts.append(delta)
                 if on_text_delta is not None:
                     await on_text_delta(delta)
+
+            def attempt_text_delta_emitted(state: _StreamAttemptState = attempt_state) -> bool:
+                return state.text_delta_emitted
 
             try:
                 started = time.monotonic()
@@ -218,17 +231,17 @@ class OpenAIResponsesClient:
                     started=started,
                     on_text_delta=guarded_on_text_delta if on_text_delta is not None else None,
                     on_audit_event=on_audit_event,
-                    text_delta_emitted=lambda: text_delta_emitted,
+                    text_delta_emitted=attempt_text_delta_emitted,
                 )
             except ApiError as exc:
-                if text_delta_emitted and exc.code in RETRYABLE_STREAM_API_ERROR_CODES:
+                if attempt_state.text_delta_emitted and exc.code in RETRYABLE_STREAM_API_ERROR_CODES:
                     logger.warning(
                         "generate_with_tools_stream interrupted_after_text_delta attempt=%d/%d code=%s",
                         attempt,
                         max_attempts,
                         exc.code,
                     )
-                    return _partial_stream_result("".join(text_parts), interrupted_message=exc.message)
+                    return _partial_stream_result("".join(attempt_state.text_parts), interrupted_message=exc.message)
                 if exc.code not in RETRYABLE_STREAM_API_ERROR_CODES or attempt >= max_attempts:
                     raise
                 logger.warning(
@@ -246,14 +259,14 @@ class OpenAIResponsesClient:
                     error=exc,
                 )
             except APIStatusError as exc:
-                if text_delta_emitted:
+                if attempt_state.text_delta_emitted:
                     logger.warning(
                         "generate_with_tools_stream http_error_after_text_delta attempt=%d/%d status=%s",
                         attempt,
                         max_attempts,
                         exc.status_code,
                     )
-                    return _partial_stream_result("".join(text_parts), interrupted_message=_describe_api_error(exc))
+                    return _partial_stream_result("".join(attempt_state.text_parts), interrupted_message=_describe_api_error(exc))
                 if attempt >= max_attempts:
                     logger.warning(
                         "generate_with_tools_stream http_error final attempt=%d/%d status=%s body=%s",
@@ -278,16 +291,16 @@ class OpenAIResponsesClient:
                     error=exc,
                 )
             except TRANSIENT_STREAM_ERRORS as exc:
-                if text_delta_emitted or attempt >= max_attempts:
+                if attempt_state.text_delta_emitted or attempt >= max_attempts:
                     logger.warning(
                         "generate_with_tools_stream transient_error final attempt=%d/%d emitted_text=%s error=%s",
                         attempt,
                         max_attempts,
-                        text_delta_emitted,
+                        attempt_state.text_delta_emitted,
                         exc,
                     )
-                    if text_delta_emitted:
-                        return _partial_stream_result("".join(text_parts), interrupted_message=str(exc))
+                    if attempt_state.text_delta_emitted:
+                        return _partial_stream_result("".join(attempt_state.text_parts), interrupted_message=str(exc))
                     raise ApiError(502, "llm_stream_error", f"模型流式响应中断：{exc}") from exc
                 logger.warning(
                     "generate_with_tools_stream transient_error retrying attempt=%d/%d error=%s",
@@ -303,14 +316,14 @@ class OpenAIResponsesClient:
                     error=exc,
                 )
             except APIError as exc:
-                if text_delta_emitted:
+                if attempt_state.text_delta_emitted:
                     logger.warning(
                         "generate_with_tools_stream api_error_after_text_delta attempt=%d/%d error=%s",
                         attempt,
                         max_attempts,
                         exc,
                     )
-                    return _partial_stream_result("".join(text_parts), interrupted_message=str(exc))
+                    return _partial_stream_result("".join(attempt_state.text_parts), interrupted_message=str(exc))
                 if attempt >= max_attempts:
                     logger.warning("generate_with_tools_stream api_error final attempt=%d/%d error=%s", attempt, max_attempts, exc)
                     raise _api_error_from_llm_exception(exc) from exc
@@ -343,6 +356,17 @@ class OpenAIResponsesClient:
                     logger.warning("%s final_error attempt=%d/%d error=%s", kind, attempt, max_attempts, exc)
                     raise _api_error_from_llm_exception(exc) from exc
                 logger.warning("%s retryable_error attempt=%d/%d error=%s", kind, attempt, max_attempts, exc)
+                await self._wait_before_retry(
+                    kind=kind,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    on_retry_event=on_retry_event,
+                    error=exc,
+                )
+            except ApiError as exc:
+                if exc.code not in RETRYABLE_NON_STREAM_API_ERROR_CODES or attempt >= max_attempts:
+                    raise
+                logger.warning("%s retryable_api_error attempt=%d/%d code=%s error=%s", kind, attempt, max_attempts, exc.code, exc)
                 await self._wait_before_retry(
                     kind=kind,
                     attempt=attempt,

@@ -82,12 +82,22 @@ async def test_main_agent_loop_full_flow(tmp_path: Path) -> None:
     assert main_tool_calls.count("disclosure_read_section") == 1
     assert main_tool_calls.count("disclosure_edit") == 1
     assert all(not event.scope.startswith("subagent:") for event in events)
+    assert "context_usage_updated" not in event_types
     assert "agent_output" in event_types
     assert event_types[-1] == "agent_output"
 
     bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
     bus_event_names = [name for name, _ in bus_events]
     assert "document_changed" in bus_event_names
+    usage_payloads = [payload for name, payload in bus_events if name == "context_usage_updated"]
+    assert {payload["reason"] for payload in usage_payloads} >= {
+        "before_main_agent_call",
+        "after_main_agent_call",
+        "after_tool_results",
+    }
+    assert all(payload["session_id"] == response.session_id for payload in usage_payloads)
+    assert all(payload["status"] in {"ok", "over_limit"} for payload in usage_payloads)
+    assert all(isinstance(payload["used_tokens"], int) for payload in usage_payloads)
     assert bus_event_names[-1] == "round_finished"
     round_finished_payload = bus_events[-1][1]
     assert round_finished_payload["reply"] == "已更新关键创新点及权利要求建议。"
@@ -331,7 +341,7 @@ async def test_technical_solution_normal_mode_does_not_run_enhancement(tmp_path:
     await wait_until_idle(services, project_id)
 
     assert len(llm.assessment_prompts) == 0
-    assert len(llm.checker_prompts) == 0
+    assert len(llm.advice_prompts) == 0
     assert len(llm.summary_prompts) == 0
     events = services.store.read_session_events(project_id, response.session_id)
     event_types = [event.type for event in events]
@@ -399,7 +409,7 @@ async def test_technical_solution_enhanced_mode_runs_one_followup(tmp_path: Path
         assessment_json=[
             {"should_review": True, "reason": "本轮新增技术方案核心处理内容，需要进一步增强。"},
         ],
-        checker_json=[
+        advice_json=[
             {
                 "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充处理阶段迁移规则和冲突边界。",
             },
@@ -418,7 +428,7 @@ async def test_technical_solution_enhanced_mode_runs_one_followup(tmp_path: Path
     await wait_until_idle(services, project_id)
 
     assert len(llm.assessment_prompts) == 1
-    assert len(llm.checker_prompts) == 1
+    assert len(llm.advice_prompts) == 1
     assert len(llm.summary_prompts) == 1
     events = services.store.read_session_events(project_id, response.session_id)
     event_types = [event.type for event in events]
@@ -501,7 +511,7 @@ async def test_technical_solution_enhancement_runs_one_followup_without_second_a
         assessment_json=[
             {"should_review": True, "reason": "本轮新增核心技术方案，需要进一步增强。"},
         ],
-        checker_json=[
+        advice_json=[
             {
                 "review_markdown": "## 技术方案评审意见\n\n### 关键机制闭合性修订点\n1. 关键机制不足。",
             },
@@ -520,7 +530,7 @@ async def test_technical_solution_enhancement_runs_one_followup_without_second_a
     await wait_until_idle(services, project_id)
 
     assert len(llm.assessment_prompts) == 1
-    assert len(llm.checker_prompts) == 1
+    assert len(llm.advice_prompts) == 1
     assert len(llm.summary_prompts) == 1
     events = services.store.read_session_events(project_id, response.session_id)
     event_types = [event.type for event in events]
@@ -580,7 +590,7 @@ async def test_technical_solution_enhanced_mode_skips_advice_when_assessment_fal
     await wait_until_idle(services, project_id)
 
     assert len(llm.assessment_prompts) == 1
-    assert len(llm.checker_prompts) == 0
+    assert len(llm.advice_prompts) == 0
     assert len(llm.summary_prompts) == 0
     events = services.store.read_session_events(project_id, response.session_id)
     event_types = [event.type for event in events]
@@ -588,6 +598,61 @@ async def test_technical_solution_enhanced_mode_skips_advice_when_assessment_fal
     assert "technical_solution_improvement_advice" not in event_types
     assert "technical_solution_enhancement_feedback" not in event_types
     assert "technical_solution_enhancement_summary" not in event_types
+
+
+@pytest.mark.anyio
+async def test_technical_solution_change_assessment_validation_failure_reports_failed_status(tmp_path: Path) -> None:
+    def step_write(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [
+                tool_call(
+                    "disclosure_edit",
+                    {
+                        "section_id": "sec_000006",
+                        "operation": "insert_block",
+                        "position": {"mode": "end"},
+                        "block": {"type": "paragraph", "text": "系统根据策略处理任务。"},
+                    },
+                    "call_solution",
+                )
+            ],
+        }
+
+    def step_respond(messages: list[dict[str, Any]]) -> dict[str, Any]:
+        assert any(message.get("tool_call_id") == "call_solution" for message in messages)
+        return {"type": "respond", "text": "已更新技术方案。"}
+
+    llm = ScriptedLLMClient(
+        [step_write, step_respond],
+        assessment_json=[
+            {"gate_pass": True, "reason": "旧门禁格式不应被接受。"},
+        ],
+    )
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(
+        project_id,
+        ChatMessageRequest(message="请补充技术方案。", quality_mode="enhanced"),
+    )
+    await wait_until_idle(services, project_id)
+
+    assert len(llm.assessment_prompts) == 1
+    assert len(llm.advice_prompts) == 0
+    assert len(llm.summary_prompts) == 0
+    events = services.store.read_session_events(project_id, response.session_id)
+    assessment_result = next(event for event in events if event.type == "technical_solution_change_assessment")
+    assert assessment_result.payload["status"] == "failed"
+    assert assessment_result.payload["code"] == "technical_solution_change_assessment_validation_failed"
+    assert "technical_solution_improvement_advice" not in [event.type for event in events]
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    quality_statuses = [payload for name, payload in bus_events if name == "quality_enhancement_status"]
+    assert quality_statuses[-1]["status"] == "failed"
+    assert quality_statuses[-1]["summary"] == "增强模式：技术方案增强未完成"
+    assert bus_events[-1][0] == "round_finished"
+    assert bus_events[-1][1]["reply"] == "已更新技术方案。"
 
 
 @pytest.mark.anyio
@@ -618,7 +683,7 @@ async def test_technical_solution_improvement_advice_validation_failure_reports_
         assessment_json=[
             {"should_review": True, "reason": "本轮新增核心技术方案，需要进一步增强。"},
         ],
-        checker_json=[
+        advice_json=[
             {"gate_pass": False, "review_markdown": "意见"},
             {"review_markdown": "意见", "score": 80},
         ],
@@ -633,7 +698,7 @@ async def test_technical_solution_improvement_advice_validation_failure_reports_
     await wait_until_idle(services, project_id)
 
     assert len(llm.assessment_prompts) == 1
-    assert len(llm.checker_prompts) == 2
+    assert len(llm.advice_prompts) == 2
     assert len(llm.summary_prompts) == 0
     events = services.store.read_session_events(project_id, response.session_id)
     event_types = [event.type for event in events]
@@ -900,6 +965,48 @@ async def test_main_agent_loop_tool_failed_triggers_round_failed(tmp_path: Path)
     assert "tool_call_finished" in names
     assert names[-1] == "round_finished"
     assert bus_events[-1][1]["reply"] == "没有找到对应章节，我需要换一个有效章节。"
+
+
+@pytest.mark.anyio
+async def test_main_agent_loop_closes_tool_event_when_executor_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def step_read(_: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "tool_calls",
+            "tool_calls": [tool_call("disclosure_read_section", {"section_id": "sec_000002"}, "call_boom")],
+        }
+
+    async def broken_execute_tool(*_: Any, **__: Any) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    llm = ScriptedLLMClient([step_read])
+    services = AppServices(make_settings(tmp_path), llm_client=llm)
+    monkeypatch.setattr(services.executor, "execute_tool", broken_execute_tool)
+    project_id = await create_project(services)
+
+    response = await services.chat.start_round(project_id, ChatMessageRequest(message="读一下章节"))
+    await wait_until_idle(services, project_id)
+
+    events = [
+        event
+        for event in services.store.read_session_events(project_id, response.session_id)
+        if event.call_id == "call_boom"
+    ]
+    assert [event.type for event in events] == ["tool_call", "tool_result"]
+    assert events[1].payload == {
+        "tool": "disclosure_read_section",
+        "status": "failed",
+        "output": {"code": "tool_runtime_error", "message": "boom"},
+    }
+
+    bus_events, _ = await services.bus.subscribe((project_id, response.session_id))
+    names = [name for name, _ in bus_events]
+    assert "tool_call_started" in names
+    assert "tool_call_finished" in names
+    assert names[-1] == "round_failed"
+    assert bus_events[-1][1]["reply"] == "本轮未完成，请重试或补充信息。"
 
 
 @pytest.mark.anyio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -59,6 +60,7 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
     assert "compressible_messages" not in compression_payload
     assert "messages_to_merge" not in compression_payload
     assert len(compression_payload["messages"]) >= 3
+    assert any(message.get("content") == "继续完善" for message in compression_payload["messages"])
     assert "summary" not in summary_event.payload
     assert summary_event.payload["compression_mode"] == "rolling_markdown_memory"
     assert summary_event.payload["compressed_markdown"].startswith("## 当前任务")
@@ -79,12 +81,14 @@ async def test_context_manager_rolls_previous_summary_into_next_summary(tmp_path
     def second_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [message["content"] for message in messages]
         assert any("最新用户输入：继续完善" in content for content in contents)
+        assert messages[-1]["content"].startswith("【上下文恢复说明】")
         return {"type": "respond", "text": second_reply}
 
     def third_round(messages: list[dict[str, Any]]) -> dict[str, Any]:
         contents = [message["content"] for message in messages]
         assert any("上一轮摘要长度：" in content for content in contents)
         assert any("最新用户输入：继续第三轮" in content for content in contents)
+        assert messages[-1]["content"].startswith("【上下文恢复说明】")
         return {"type": "respond", "text": "第三轮继续。"}
 
     llm = ScriptedLLMClient([first_round, second_round, third_round])
@@ -115,6 +119,8 @@ async def test_context_manager_rolls_previous_summary_into_next_summary(tmp_path
         str(message.get("content") or "").startswith(COMPRESSED_MEMORY_PREFIX)
         for message in llm.generated_text_prompts[0]["messages"]
     )
+    assert any(message.get("content") == "继续完善" for message in llm.generated_text_prompts[0]["messages"])
+    assert any(message.get("content") == "继续第三轮" for message in llm.generated_text_prompts[1]["messages"])
     previous_summary_message = llm.generated_text_prompts[1]["messages"][0]
     assert previous_summary_message["role"] == "user"
     assert previous_summary_message["content"] == (

@@ -73,18 +73,35 @@ def _scan_main_context_events_after_latest_summary(
     *,
     current_message_id: str | None = None,
 ) -> ContextEventScan:
-    marker = {"cursor_seq": 1, "compressed_markdown": ""}
-    candidate_events: list[SessionEvent] = []
-    current_message_exists = False
-    for event in events:
-        if current_message_id and event.message_id == current_message_id and event.type == "user_input":
-            current_message_exists = True
-        if event.scope == "main" and event.type == "context_summary":
-            marker = _context_summary_marker_from_event(event)
-            candidate_events = []
-            continue
-        if event.scope == "main" and event.seq >= marker["cursor_seq"] and event.type in MAIN_CONTEXT_EVENT_TYPES:
-            candidate_events.append(event)
+    all_events = list(events)
+    marker: dict[str, Any] = {"cursor_seq": 1, "compressed_markdown": ""}
+    summary_events = [
+        event
+        for event in all_events
+        if event.scope == "main" and event.type == "context_summary"
+    ]
+    latest_summary_event: SessionEvent | None = None
+    if summary_events:
+        latest_summary_event = max(summary_events, key=lambda event: event.seq)
+        marker = _context_summary_marker_from_event(latest_summary_event)
+
+    candidate_events = [
+        event
+        for event in all_events
+        if event.scope == "main"
+        and event.seq >= marker["cursor_seq"]
+        and event.type in MAIN_CONTEXT_EVENT_TYPES
+    ]
+    current_message_exists = any(
+        current_message_id
+        and event.message_id == current_message_id
+        and event.type == "user_input"
+        for event in candidate_events
+    ) or bool(
+        current_message_id
+        and latest_summary_event is not None
+        and latest_summary_event.message_id == current_message_id
+    )
     return ContextEventScan(marker=marker, events=candidate_events, current_message_exists=current_message_exists)
 
 

@@ -80,26 +80,6 @@ def build_openai_tools(tool_names: tuple[str, ...] | list[str]) -> list[dict[str
     return [get_tool_declaration(tool_name).openai_tool() for tool_name in tool_names]
 
 
-def render_tool_manual(tool_names: tuple[str, ...] | list[str]) -> str:
-    lines = [
-        "以下工具说明由工具函数自动生成，是工具调用的唯一准确信息源。",
-        "通用要求：arguments 必须是严格 JSON 对象；字符串使用双引号；不能使用注释、尾随逗号或未转义换行。",
-    ]
-    for declaration in [get_tool_declaration(tool_name) for tool_name in tool_names]:
-        lines.extend(
-            [
-                "",
-                f"### {declaration.name}",
-                f"- 说明：{declaration.description}",
-                f"- 参数：{_render_schema_summary(declaration.parameters)}",
-            ]
-        )
-        if declaration.examples:
-            lines.append("- 调用实例：")
-            lines.extend(f"  - {label}：{_compact_json(arguments)}" for label, arguments in declaration.examples)
-    return "\n".join(lines)
-
-
 def get_tool_declaration(tool_name: str) -> ToolDeclaration:
     try:
         return _TOOL_REGISTRY[tool_name]

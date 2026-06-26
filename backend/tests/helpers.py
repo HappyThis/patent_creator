@@ -23,19 +23,19 @@ class ScriptedLLMClient:
         script: list[Callable[[list[dict[str, Any]]], dict[str, Any]]],
         *,
         assessment_json: list[dict[str, Any]] | None = None,
-        checker_json: list[dict[str, Any]] | None = None,
+        advice_json: list[dict[str, Any]] | None = None,
         summary_json: list[dict[str, Any]] | None = None,
     ) -> None:
         self._script = list(script)
         self._cursor = 0
         self._assessment_json = list(assessment_json or [])
         self._assessment_cursor = 0
-        self._checker_json = list(checker_json or [])
-        self._checker_cursor = 0
+        self._advice_json = list(advice_json or [])
+        self._advice_cursor = 0
         self._summary_json = list(summary_json or [])
         self._summary_cursor = 0
         self.assessment_prompts: list[dict[str, Any]] = []
-        self.checker_prompts: list[dict[str, Any]] = []
+        self.advice_prompts: list[dict[str, Any]] = []
         self.summary_prompts: list[dict[str, Any]] = []
         self.generated_text_prompts: list[dict[str, Any]] = []
 
@@ -120,12 +120,12 @@ class ScriptedLLMClient:
             payload = self._assessment_json[self._assessment_cursor]
             self._assessment_cursor += 1
             return payload
-        if "技术方案”章节的质量检查器" in system_prompt:
-            self.checker_prompts.append(prompt_record)
-            if self._checker_cursor >= len(self._checker_json):
+        if "技术方案”章节的改进建议器" in system_prompt:
+            self.advice_prompts.append(prompt_record)
+            if self._advice_cursor >= len(self._advice_json):
                 return {"title": "低算力实时保护"}
-            payload = self._checker_json[self._checker_cursor]
-            self._checker_cursor += 1
+            payload = self._advice_json[self._advice_cursor]
+            self._advice_cursor += 1
             return payload
         if "增强总结器" in system_prompt:
             self.summary_prompts.append(prompt_record)
@@ -182,8 +182,10 @@ class ScriptedLLMClient:
                 "<summary>\n"
                 "## 当前任务\n\n"
                 "- 继续沿用压缩前的用户要求。\n\n"
+                "## 用户最近意图\n\n"
+                f"- 最新用户输入：{last_user or '暂无'}。\n\n"
                 "## 执行进度\n\n"
-                f"- 已滚动压缩 {message_count} 条新增消息；最新用户输入：{last_user or '暂无'}。\n\n"
+                f"- 已滚动压缩 {message_count} 条新增消息。\n\n"
                 "## 已完成事项\n\n"
                 "- 当前任务继续沿用压缩前的上下文。\n\n"
                 "## 关键事实与证据\n\n"
@@ -198,6 +200,7 @@ class ScriptedLLMClient:
             "<analysis>暂无。</analysis>\n"
             "<summary>\n"
             "## 当前任务\n\n- 暂无。\n\n"
+            "## 用户最近意图\n\n- 暂无。\n\n"
             "## 执行进度\n\n- 暂无。\n\n"
             "## 已完成事项\n\n- 暂无。\n\n"
             "## 关键事实与证据\n\n- 压缩后的历史。\n\n"

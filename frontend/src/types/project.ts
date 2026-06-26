@@ -3,7 +3,6 @@ export type ContextUsageSummary = {
   used_tokens: number;
   used_ratio: number;
   threshold_tokens: number;
-  reserved_output_tokens: number;
   status: string;
 };
 

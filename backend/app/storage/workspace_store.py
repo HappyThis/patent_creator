@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import stat
+import threading
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
@@ -17,11 +18,17 @@ from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..domain.docx_export import DocxExportError, export_disclosure_docx
 from ..domain.figures import build_figure_record, figure_summary, mermaid_layout_warnings, update_figure_record, validate_mermaid_source
-from ..schemas import ProjectRecord, SessionEvent, SessionSummary
+from ..schemas import ProjectRecord, SessionEvent, SessionEventType, SessionSummary
 
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
 CURRENT_PROJECT_POINTER = "current_project_id"
 STORAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+LEGACY_IGNORED_SESSION_EVENT_TYPES = frozenset(
+    {
+        "technical_solution_check_result",
+        "technical_solution_check_feedback",
+    }
+)
 logger = logging.getLogger("patent_creator.workspace_store")
 
 
@@ -31,6 +38,7 @@ class WorkspaceStore:
         self.git_user_name = git_user_name
         self.git_user_email = git_user_email
         self.projects_dir = self.root_dir / "projects"
+        self._session_event_lock = threading.Lock()
         self.projects_dir.mkdir(parents=True, exist_ok=True)
 
     def create_project(self, project_name: str, disclosure_title: str | None = None) -> ProjectRecord:
@@ -161,23 +169,6 @@ class WorkspaceStore:
             recovered.append(project)
         return recovered
 
-    def ensure_current_project(self) -> ProjectRecord:
-        pointer_path = self.root_dir / CURRENT_PROJECT_POINTER
-        if pointer_path.exists():
-            project_id = pointer_path.read_text(encoding="utf-8").strip()
-            if project_id:
-                try:
-                    return self.get_project(project_id)
-                except ApiError as exc:
-                    logger.info("current project pointer is stale project_id=%s error=%s", project_id, exc.code)
-
-        projects = self.list_projects()
-        if not projects:
-            raise ApiError(404, "project_not_found", "暂无可用项目。")
-        current = projects[0]
-        pointer_path.write_text(current.project_id + "\n", encoding="utf-8")
-        return current
-
     def get_project(self, project_id: str) -> ProjectRecord:
         path = self.project_file(project_id)
         if not path.exists():
@@ -205,30 +196,31 @@ class WorkspaceStore:
         project_id: str,
         session_id: str,
         *,
-        event_type: str,
+        event_type: SessionEventType,
         scope: str,
         round_id: str,
         message_id: str,
         payload: dict[str, Any],
         call_id: str | None = None,
     ) -> SessionEvent:
-        path = self.session_file(project_id, session_id)
-        path.parent.mkdir(exist_ok=True)
-        seq = self._next_session_event_seq(path)
-        event = SessionEvent(
-            id=generate_id("evt"),
-            ts=now_iso(),
-            type=event_type,
-            seq=seq,
-            scope=scope,
-            round_id=round_id,
-            message_id=message_id,
-            call_id=call_id,
-            payload=payload,
-        )
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(event.model_dump_json(ensure_ascii=False) + "\n")
-        return event
+        with self._session_event_lock:
+            path = self.session_file(project_id, session_id)
+            path.parent.mkdir(exist_ok=True)
+            seq = self._next_session_event_seq(path)
+            event = SessionEvent(
+                id=generate_id("evt"),
+                ts=now_iso(),
+                type=event_type,
+                seq=seq,
+                scope=scope,
+                round_id=round_id,
+                message_id=message_id,
+                call_id=call_id,
+                payload=payload,
+            )
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(event.model_dump_json(ensure_ascii=False) + "\n")
+            return event
 
     def _next_session_event_seq(self, path: Path) -> int:
         if not path.exists():
@@ -263,7 +255,9 @@ class WorkspaceStore:
                     for line in handle:
                         if not line.strip():
                             continue
-                        event = SessionEvent.model_validate_json(line)
+                        event = _parse_session_event_line(line)
+                        if event is None:
+                            continue
                         if event.type != "technical_solution_enhancement_summary":
                             continue
                         record = event.payload.get("record")
@@ -288,7 +282,9 @@ class WorkspaceStore:
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if line.strip():
-                    yield SessionEvent.model_validate_json(line)
+                    event = _parse_session_event_line(line)
+                    if event is not None:
+                        yield event
 
     def first_user_text(self, project_id: str, session_id: str) -> str | None:
         path = self.session_file(project_id, session_id)
@@ -298,7 +294,9 @@ class WorkspaceStore:
             for line in handle:
                 if not line.strip():
                     continue
-                event = SessionEvent.model_validate_json(line)
+                event = _parse_session_event_line(line)
+                if event is None:
+                    continue
                 if event.type != "user_input":
                     continue
                 text = event.payload.get("text")
@@ -345,7 +343,9 @@ class WorkspaceStore:
             for line in handle:
                 if not line.strip():
                     continue
-                event = SessionEvent.model_validate_json(line)
+                event = _parse_session_event_line(line)
+                if event is None:
+                    continue
                 if event.round_id != round_id:
                     continue
                 last_round_message_id = event.message_id
@@ -384,16 +384,18 @@ class WorkspaceStore:
         active_session_id: str | None,
     ) -> SessionSummary:
         event_count = 0
-        last_line: str | None = None
+        last_event: SessionEvent | None = None
         first_user_text: str | None = None
         title: str | None = None
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
+                event = _parse_session_event_line(line)
+                if event is None:
+                    continue
                 event_count += 1
-                last_line = line
-                event = SessionEvent.model_validate_json(line)
+                last_event = event
                 if first_user_text is None and event.type == "user_input":
                     text = event.payload.get("text")
                     first_user_text = text if isinstance(text, str) else None
@@ -401,7 +403,8 @@ class WorkspaceStore:
                     raw_title = event.payload.get("title")
                     if isinstance(raw_title, str) and raw_title.strip():
                         title = raw_title.strip()
-        last_event = SessionEvent.model_validate_json(last_line) if last_line else None
+        if event_count == 0:
+            raise ValueError("session log contains no valid current events")
         return SessionSummary(
             session_id=session_id,
             updated_at=last_event.ts if last_event else now_iso(),
@@ -453,6 +456,11 @@ class WorkspaceStore:
         )
         if diff_result.returncode == 0:
             return True, None
+        if diff_result.returncode != 1:
+            return False, {
+                "code": "git_diff_failed",
+                "message": diff_result.stderr.strip() or diff_result.stdout.strip() or "git diff 执行失败。",
+            }
 
         commit_result = subprocess.run(
             ["git", "commit", "-m", message],
@@ -600,6 +608,24 @@ def _validated_storage_id(value: str, field_name: str) -> str:
     if not isinstance(value, str) or not STORAGE_ID_PATTERN.fullmatch(value):
         raise ApiError(422, f"invalid_{field_name}", f"{field_name} 格式无效：{value}")
     return value
+
+
+def _parse_session_event_line(line: str) -> SessionEvent | None:
+    try:
+        return SessionEvent.model_validate_json(line)
+    except ValidationError:
+        if _raw_session_event_type(line) in LEGACY_IGNORED_SESSION_EVENT_TYPES:
+            return None
+        raise
+
+
+def _raw_session_event_type(line: str) -> str | None:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    event_type = payload.get("type") if isinstance(payload, dict) else None
+    return event_type if isinstance(event_type, str) else None
 
 
 def _read_last_nonempty_line(path: Path, chunk_size: int = 4096) -> str | None:

@@ -93,13 +93,19 @@ def test_exec_command_runs_shell_commands(tmp_path: Path) -> None:
 
     invalid_timeout = run_builtin_tool(executor, project_id, "exec_command", {"command": "pwd", "timeout": "bad"})
     assert invalid_timeout["status"] == "failed"
-    assert invalid_timeout["output"]["code"] == "invalid_operation"
-    assert invalid_timeout["output"]["message"] == "timeout 必须是数字。"
+    assert invalid_timeout["output"]["code"] == "invalid_tool_arguments"
+    assert "timeout" in invalid_timeout["output"]["message"]
+    assert invalid_timeout["output"]["retry_hint"] == "请严格按照当前工具的 parameters schema 重新调用。"
 
     zero_timeout = run_builtin_tool(executor, project_id, "exec_command", {"command": "pwd", "timeout": 0})
     assert zero_timeout["status"] == "failed"
-    assert zero_timeout["output"]["code"] == "invalid_operation"
-    assert zero_timeout["output"]["message"] == "timeout 必须大于 0。"
+    assert zero_timeout["output"]["code"] == "invalid_tool_arguments"
+    assert "timeout" in zero_timeout["output"]["message"]
+
+    extra_field = run_builtin_tool(executor, project_id, "exec_command", {"command": "pwd", "unused": True})
+    assert extra_field["status"] == "failed"
+    assert extra_field["output"]["code"] == "invalid_tool_arguments"
+    assert "unused" in extra_field["output"]["message"]
 
 
 def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
@@ -213,6 +219,24 @@ def test_file_tools_reject_relative_paths_outside_project(tmp_path: Path) -> Non
     absolute_read = run_builtin_tool(executor, project_id, "file_read", {"path": str(external_file)})
     assert absolute_read["status"] == "success"
     assert "outside needle" in absolute_read["output"]["content"]
+
+
+def test_file_tools_reject_arguments_outside_schema(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    (workspace / "sample.txt").write_text("needle\n", encoding="utf-8")
+
+    zero_limit = run_builtin_tool(executor, project_id, "file_glob", {"limit": 0})
+    bad_limit = run_builtin_tool(executor, project_id, "file_read", {"path": "sample.txt", "limit": "bad"})
+    extra_field = run_builtin_tool(executor, project_id, "file_search", {"pattern": "needle", "unused": True})
+
+    for result in (zero_limit, bad_limit, extra_field):
+        assert result["status"] == "failed"
+        assert result["output"]["code"] == "invalid_tool_arguments"
+        assert result["output"]["retry_hint"] == "请严格按照当前工具的 parameters schema 重新调用。"
+    assert "limit" in zero_limit["output"]["message"]
+    assert "limit" in bad_limit["output"]["message"]
+    assert "unused" in extra_field["output"]["message"]
 
 
 def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:

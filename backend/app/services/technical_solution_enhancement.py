@@ -9,16 +9,16 @@ from ..core import Settings
 from ..domain.disclosure import section_title_text, section_to_markdown
 
 TECHNICAL_SOLUTION_TITLE = "技术方案"
-TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS = 180.0
-TECHNICAL_SOLUTION_CHECK_MAX_ATTEMPTS = 2
-TECHNICAL_SOLUTION_CHECK_TEMPERATURE = 0.7
+TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS = 180.0
+TECHNICAL_SOLUTION_ADVICE_MAX_ATTEMPTS = 2
+TECHNICAL_SOLUTION_ADVICE_TEMPERATURE = 0.7
 TECHNICAL_SOLUTION_ASSESS_TEMPERATURE = 0.2
 TECHNICAL_SOLUTION_SUMMARY_TEMPERATURE = 0.2
 
 ResultModelT = TypeVar("ResultModelT", bound=BaseModel)
 
 
-class SupportsTechnicalSolutionCheck(Protocol):
+class SupportsTechnicalSolutionGeneration(Protocol):
     async def generate_json(
         self,
         *,
@@ -32,7 +32,7 @@ class SupportsTechnicalSolutionCheck(Protocol):
         ...
 
 
-class TechnicalSolutionCheckResult(BaseModel):
+class TechnicalSolutionImprovementAdviceResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     review_markdown: str = Field(min_length=1, description="完整 Markdown 格式技术方案评审意见。")
@@ -84,7 +84,7 @@ class TechnicalSolutionEnhancementSummaryResult(BaseModel):
         return self.model_dump()
 
 
-class TechnicalSolutionCheckValidationError(ValueError):
+class TechnicalSolutionStructuredOutputValidationError(ValueError):
     def __init__(self, message: str, *, attempts: int = 1) -> None:
         super().__init__(message)
         self.attempts = attempts
@@ -93,7 +93,7 @@ class TechnicalSolutionCheckValidationError(ValueError):
 class TechnicalSolutionChangeAssessor:
     def __init__(
         self,
-        llm_client: SupportsTechnicalSolutionCheck,
+        llm_client: SupportsTechnicalSolutionGeneration,
         settings: Settings,
         *,
         temperature: float = TECHNICAL_SOLUTION_ASSESS_TEMPERATURE,
@@ -111,7 +111,6 @@ class TechnicalSolutionChangeAssessor:
         trace_context: dict[str, Any] | None = None,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionChangeAssessmentResult:
-        timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
         payload = await self.llm_client.generate_json(
             system_prompt=_change_assessor_system_prompt(),
             user_prompt=_change_assessor_user_prompt(
@@ -120,7 +119,7 @@ class TechnicalSolutionChangeAssessor:
                 technical_solution_diff=technical_solution_diff,
             ),
             temperature=self.temperature,
-            timeout=timeout,
+            timeout=TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS,
             trace_context={
                 **(trace_context or {}),
                 "scope": "technical_solution_change_assessor",
@@ -130,19 +129,19 @@ class TechnicalSolutionChangeAssessor:
         return parse_technical_solution_change_assessment_result(payload)
 
 
-class TechnicalSolutionChecker:
+class TechnicalSolutionImprovementAdvisor:
     def __init__(
         self,
-        llm_client: SupportsTechnicalSolutionCheck,
+        llm_client: SupportsTechnicalSolutionGeneration,
         settings: Settings,
         *,
-        temperature: float = TECHNICAL_SOLUTION_CHECK_TEMPERATURE,
+        temperature: float = TECHNICAL_SOLUTION_ADVICE_TEMPERATURE,
     ) -> None:
         self.llm_client = llm_client
         self.settings = settings
         self.temperature = temperature
 
-    async def check(
+    async def advise(
         self,
         *,
         technical_solution_markdown: str,
@@ -151,8 +150,8 @@ class TechnicalSolutionChecker:
         recent_history: list[dict[str, Any]] | None = None,
         trace_context: dict[str, Any] | None = None,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    ) -> TechnicalSolutionCheckResult:
-        return await self._check_single(
+    ) -> TechnicalSolutionImprovementAdviceResult:
+        return await self._advise_once(
             technical_solution_markdown=technical_solution_markdown,
             user_request=user_request,
             technical_solution_diff=technical_solution_diff,
@@ -161,7 +160,7 @@ class TechnicalSolutionChecker:
             on_retry_event=on_retry_event,
         )
 
-    async def _check_single(
+    async def _advise_once(
         self,
         *,
         technical_solution_markdown: str,
@@ -170,28 +169,28 @@ class TechnicalSolutionChecker:
         recent_history: list[dict[str, Any]] | None = None,
         trace_context: dict[str, Any] | None = None,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    ) -> TechnicalSolutionCheckResult:
-        base_user_prompt = _checker_user_prompt(
+    ) -> TechnicalSolutionImprovementAdviceResult:
+        base_user_prompt = _improvement_advisor_user_prompt(
             technical_solution_markdown,
             user_request=user_request,
             technical_solution_diff=technical_solution_diff,
             recent_history=recent_history,
         )
-        timeout = TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS
+        timeout = TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS
         last_payload: dict[str, Any] | None = None
-        last_error: TechnicalSolutionCheckValidationError | None = None
-        for attempt in range(1, TECHNICAL_SOLUTION_CHECK_MAX_ATTEMPTS + 1):
+        last_error: TechnicalSolutionStructuredOutputValidationError | None = None
+        for attempt in range(1, TECHNICAL_SOLUTION_ADVICE_MAX_ATTEMPTS + 1):
             user_prompt = (
                 base_user_prompt
                 if attempt == 1
-                else _checker_retry_user_prompt(
+                else _improvement_advisor_retry_user_prompt(
                     base_user_prompt,
                     invalid_payload=last_payload,
                     validation_error=str(last_error) if last_error is not None else "",
                 )
             )
             payload = await self.llm_client.generate_json(
-                system_prompt=_checker_system_prompt(),
+                system_prompt=_improvement_advisor_system_prompt(),
                 user_prompt=user_prompt,
                 temperature=self.temperature,
                 timeout=timeout,
@@ -203,24 +202,23 @@ class TechnicalSolutionChecker:
                 on_retry_event=on_retry_event,
             )
             try:
-                return parse_technical_solution_check_result(payload)
-            except TechnicalSolutionCheckValidationError as exc:
+                return parse_technical_solution_improvement_advice_result(payload)
+            except TechnicalSolutionStructuredOutputValidationError as exc:
                 last_payload = payload
                 last_error = exc
-                if attempt >= TECHNICAL_SOLUTION_CHECK_MAX_ATTEMPTS:
-                    raise TechnicalSolutionCheckValidationError(str(exc), attempts=attempt) from exc
+                if attempt >= TECHNICAL_SOLUTION_ADVICE_MAX_ATTEMPTS:
+                    raise TechnicalSolutionStructuredOutputValidationError(str(exc), attempts=attempt) from exc
 
-        raise TechnicalSolutionCheckValidationError("technical solution check validation retry exhausted", attempts=0)
-
-
-class TechnicalSolutionImprovementAdvisor(TechnicalSolutionChecker):
-    """在增强模式中生成技术方案改进建议；保留 checker 的校验与重试机制。"""
+        raise TechnicalSolutionStructuredOutputValidationError(
+            "technical solution improvement advice validation retry exhausted",
+            attempts=0,
+        )
 
 
 class TechnicalSolutionEnhancementSummarizer:
     def __init__(
         self,
-        llm_client: SupportsTechnicalSolutionCheck,
+        llm_client: SupportsTechnicalSolutionGeneration,
         settings: Settings,
         *,
         temperature: float = TECHNICAL_SOLUTION_SUMMARY_TEMPERATURE,
@@ -238,7 +236,6 @@ class TechnicalSolutionEnhancementSummarizer:
         trace_context: dict[str, Any] | None = None,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionEnhancementSummaryResult:
-        timeout = min(self.settings.llm_timeout, TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS)
         payload = await self.llm_client.generate_json(
             system_prompt=_enhancement_summarizer_system_prompt(),
             user_prompt=_enhancement_summarizer_user_prompt(
@@ -247,7 +244,7 @@ class TechnicalSolutionEnhancementSummarizer:
                 enhancement_diff=enhancement_diff,
             ),
             temperature=self.temperature,
-            timeout=timeout,
+            timeout=TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS,
             trace_context={
                 **(trace_context or {}),
                 "scope": "technical_solution_enhancement_summarizer",
@@ -257,11 +254,13 @@ class TechnicalSolutionEnhancementSummarizer:
         return parse_technical_solution_enhancement_summary_result(payload)
 
 
-def parse_technical_solution_check_result(payload: dict[str, Any]) -> TechnicalSolutionCheckResult:
+def parse_technical_solution_improvement_advice_result(
+    payload: dict[str, Any],
+) -> TechnicalSolutionImprovementAdviceResult:
     return _parse_result_model(
         payload,
-        TechnicalSolutionCheckResult,
-        error_context="technical solution check result",
+        TechnicalSolutionImprovementAdviceResult,
+        error_context="technical solution improvement advice result",
     )
 
 
@@ -292,7 +291,7 @@ def _parse_result_model(
     try:
         return model_type.model_validate(payload)
     except ValidationError as exc:
-        raise TechnicalSolutionCheckValidationError(
+        raise TechnicalSolutionStructuredOutputValidationError(
             f"{error_context} does not match schema: {exc}",
             attempts=1,
         ) from exc
@@ -305,7 +304,7 @@ def technical_solution_markdown(disclosure: dict[str, Any]) -> str:
     return ""
 
 
-def enhancement_feedback_user_message(result: TechnicalSolutionCheckResult) -> str:
+def enhancement_feedback_user_message(result: TechnicalSolutionImprovementAdviceResult) -> str:
     return (
         "系统正在增强模式下继续完善“技术方案”章节。\n\n"
         "请参考以下内部技术方案改进建议，继续修改“技术方案”章节。\n"
@@ -357,8 +356,8 @@ def _change_assessor_user_prompt(
     )
 
 
-def _checker_system_prompt() -> str:
-    return """你是专利交底书“技术方案”章节的质量检查器和评审器，不是对话 agent，也不能调用工具。
+def _improvement_advisor_system_prompt() -> str:
+    return """你是专利交底书“技术方案”章节的改进建议器，不是对话 agent，也不能调用工具。
 你只根据用户提供的“技术方案”章节正文做只读评价，并输出给 main-agent 参考的修订意见。
 
 一、检查对象
@@ -422,7 +421,7 @@ def _checker_system_prompt() -> str:
 - review_markdown 不得包含“结论：通过”“结论：不通过”“可选优化”等流程判定或弱化措辞。"""
 
 
-def _checker_user_prompt(
+def _improvement_advisor_user_prompt(
     technical_solution_markdown: str,
     *,
     user_request: str | None = None,
@@ -442,7 +441,7 @@ def _checker_user_prompt(
     context_text = "\n\n".join(context_parts)
     return (
         "请评审下面的“技术方案”章节，并严格返回 JSON：\n\n"
-        f"{_checker_output_schema_text()}\n\n"
+        f"{_improvement_advisor_output_schema_text()}\n\n"
         "检查要求：\n"
         "- 技术问题：检查技术方案是否围绕明确技术问题展开，而不是只描述业务目标或功能愿景。\n"
         "- 技术深度：重点检查技术方案是否写出了具体解决方法和技术实现原理，而不是泛泛谈论概念、目标、功能或效果。\n"
@@ -460,13 +459,13 @@ def _checker_user_prompt(
         "- 如果需要指出技术细节缺口，应转换为技术问题、解决思路、系统组织方式、处理阶段、判断依据、协同关系或必要约束层面的修订建议。\n"
         "- review_markdown 必须是一份完整 Markdown 技术方案评审意见，并严格使用下方模板。\n\n"
         f"{context_text + chr(10) + chr(10) if context_text else ''}"
-        f"{_checker_review_template_text()}\n\n"
+        f"{_improvement_advisor_review_template_text()}\n\n"
         "待检查内容：\n\n"
         f"{technical_solution_markdown or '（技术方案章节为空）'}"
     )
 
 
-def _checker_retry_user_prompt(
+def _improvement_advisor_retry_user_prompt(
     base_user_prompt: str,
     *,
     invalid_payload: dict[str, Any] | None,
@@ -484,8 +483,8 @@ def _checker_retry_user_prompt(
     )
 
 
-def _checker_output_schema_text() -> str:
-    schema = TechnicalSolutionCheckResult.model_json_schema()
+def _improvement_advisor_output_schema_text() -> str:
+    schema = TechnicalSolutionImprovementAdviceResult.model_json_schema()
     return (
         "输出必须满足下面的 JSON Schema；禁止返回 schema 未声明的额外字段：\n\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
@@ -525,7 +524,7 @@ def _enhancement_summarizer_user_prompt(
     )
 
 
-def _checker_review_template_text() -> str:
+def _improvement_advisor_review_template_text() -> str:
     return """review_markdown 必须使用这个 Markdown 模板：
 
 ## 技术方案评审意见

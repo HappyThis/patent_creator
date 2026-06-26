@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from importlib.metadata import version as package_version
 import json
 from pathlib import Path
 from typing import Any
@@ -240,6 +241,16 @@ async def collect_stream_events(
                 if current_event in {"round_finished", "round_failed", "round_cancelled"}:
                     break
     return events
+
+
+def test_create_app_exposes_backend_package_version(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path, git_user_name="Test User", git_user_email="test@example.com")
+    services = AppServices(settings)
+
+    app = create_app(settings, services=services)
+
+    assert app.version == package_version("patent-creator-backend")
+    assert app.version == "0.4.0"
 
 
 async def collect_session_stream_events(

@@ -65,6 +65,64 @@ def test_settings_from_env_falls_back_to_openai_responses_route(
     assert settings.openai_web_search_context_size == "low"
 
 
+def test_settings_from_env_treats_empty_values_as_default(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config, "_load_repo_env", lambda: None)
+    monkeypatch.setenv("PATENT_CREATOR_DATA_DIR", str(tmp_path))
+    for name in (
+        "OPENAI_MAX_OUTPUT_TOKENS",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+        "OPENAI_REASONING_EFFORT",
+        "OPENAI_WEB_SEARCH_ENABLED",
+        "OPENAI_WEB_SEARCH_CONTEXT_SIZE",
+        "PATENT_CREATOR_GIT_USER_NAME",
+        "PATENT_CREATOR_GIT_USER_EMAIL",
+        "PATENT_CREATOR_LLM_TIMEOUT",
+        "PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT",
+        "PATENT_CREATOR_LLM_MAX_RETRIES",
+        "PATENT_CREATOR_LLM_RETRY_DELAY_SECONDS",
+        "OPENAI_SDK_MAX_RETRIES",
+        "PATENT_CREATOR_ROUND_STEP_DELAY",
+        "PATENT_CREATOR_ROUND_FINISH_DELAY",
+        "PATENT_CREATOR_CONTEXT_MAX_TOKENS",
+        "PATENT_CREATOR_CONTEXT_COMPRESS_THRESHOLD_RATIO",
+        "PATENT_CREATOR_CONTEXT_TOKEN_CHAR_COEFFICIENT",
+        "PATENT_CREATOR_LOG_LEVEL",
+        "PATENT_CREATOR_LOG_BACKUP_DAYS",
+        "PATENT_CREATOR_LOG_LLM_PAYLOAD",
+    ):
+        monkeypatch.setenv(name, "")
+
+    settings = Settings.from_env()
+
+    assert settings.git_user_name == "Patent Creator"
+    assert settings.git_user_email == "patent-creator@local"
+    assert settings.openai_base_url == "https://api.openai.com/v1"
+    assert settings.openai_api_key is None
+    assert settings.openai_model == "gpt-5.5"
+    assert settings.openai_reasoning_effort == "high"
+    assert settings.openai_max_output_tokens == 8192
+    assert settings.openai_web_search_enabled is True
+    assert settings.openai_web_search_context_size == "low"
+    assert settings.llm_timeout == 45.0
+    assert settings.context_compression_timeout == 180.0
+    assert settings.llm_max_retries == 5
+    assert settings.llm_retry_delay_seconds == 5.0
+    assert settings.openai_sdk_max_retries == 0
+    assert settings.round_step_delay == 0.15
+    assert settings.round_finish_delay == 0.1
+    assert settings.context_max_tokens == 128000
+    assert settings.context_compress_threshold_ratio == 0.8
+    assert settings.context_token_char_coefficient == 0.5
+    assert settings.log_level == "INFO"
+    assert settings.log_backup_days == 30
+    assert settings.log_llm_payload is False
+
+
 def test_settings_from_env_expands_user_paths(monkeypatch) -> None:
     monkeypatch.setattr(config, "_load_repo_env", lambda: None)
     monkeypatch.setenv("PATENT_CREATOR_DATA_DIR", "~/.patent_creator")
@@ -74,3 +132,10 @@ def test_settings_from_env_expands_user_paths(monkeypatch) -> None:
 
     assert settings.data_dir == Path.home() / ".patent_creator"
     assert settings.log_dir == Path.home() / "patent_creator_logs"
+
+
+def test_repo_env_value_normalization_strips_matching_quotes() -> None:
+    assert config._normalize_env_value(' "https://api.openai.com/v1" ') == "https://api.openai.com/v1"
+    assert config._normalize_env_value(" '' ") == ""
+    assert config._normalize_env_value(" 'test-key' ") == "test-key"
+    assert config._normalize_env_value('"unterminated') == '"unterminated'

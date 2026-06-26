@@ -145,6 +145,20 @@ def test_figure_kit_warns_about_overwide_mermaid(tmp_path: Path) -> None:
     }
 
 
+def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+
+    extra_field = run_builtin_tool(executor, project_id, "figure_kit", {"action": "list", "unused": True})
+    invalid_action = run_builtin_tool(executor, project_id, "figure_kit", {"action": "rename"})
+
+    assert extra_field["status"] == "failed"
+    assert extra_field["output"]["code"] == "invalid_tool_arguments"
+    assert "unused" in extra_field["output"]["message"]
+    assert invalid_action["status"] == "failed"
+    assert invalid_action["output"]["code"] == "invalid_tool_arguments"
+    assert "action" in invalid_action["output"]["message"]
+
+
 def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
     figure = run_builtin_tool(

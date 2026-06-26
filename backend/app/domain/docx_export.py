@@ -6,15 +6,17 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 from uuid import uuid4
 
-from docx import Document
+from docx import Document as create_document
+from docx.document import Document as DocxDocument
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
+from docx.styles.style import ParagraphStyle
 
 from .disclosure import build_render_ast
 from .figures import figure_caption
@@ -71,7 +73,7 @@ def export_disclosure_docx(
     asset_manifest, asset_dir = render_assets(render_ast, figures_by_id, project_dir)
 
     try:
-        document = Document()
+        document = create_document()
         configure_document(document)
 
         for index, node in enumerate(render_ast.get("children", []), start=1):
@@ -86,14 +88,14 @@ def export_disclosure_docx(
                 )
 
         export_path.parent.mkdir(parents=True, exist_ok=True)
-        document.save(export_path)
+        document.save(str(export_path))
     finally:
         if asset_dir is not None:
             shutil.rmtree(asset_dir, ignore_errors=True)
     return export_path
 
 
-def configure_document(document: Document) -> None:
+def configure_document(document: DocxDocument) -> None:
     section = document.sections[0]
     section.top_margin = Inches(0.55)
     section.bottom_margin = Inches(0.62)
@@ -101,7 +103,7 @@ def configure_document(document: Document) -> None:
     section.right_margin = Inches(0.78)
 
     styles = document.styles
-    normal = styles["Normal"]
+    normal = get_paragraph_style(styles, "Normal")
     set_style_font(normal)
     normal.font.size = Pt(BODY_FONT_PT)
     normal.font.color.rgb = RGBColor(0x2E, 0x39, 0x42)
@@ -109,27 +111,35 @@ def configure_document(document: Document) -> None:
     normal.paragraph_format.space_after = Pt(BODY_PARAGRAPH_AFTER_PT)
 
     for name in ("Heading 1", "Heading 2", "Heading 3", "List Bullet", "List Number"):
-        style = styles[name]
+        style = get_paragraph_style(styles, name)
         set_style_font(style)
         style.font.bold = True
         style.font.color.rgb = RGBColor(0x0D, 0x16, 0x24)
         style.paragraph_format.space_before = Pt(HEADING_BEFORE_PT)
         style.paragraph_format.space_after = Pt(HEADING_AFTER_PT)
         style.paragraph_format.line_spacing = 1.35
-    styles["Heading 1"].font.size = Pt(HEADING_1_PT)
-    styles["Heading 2"].font.size = Pt(HEADING_2_PT)
-    styles["Heading 3"].font.size = Pt(HEADING_2_PT)
+    get_paragraph_style(styles, "Heading 1").font.size = Pt(HEADING_1_PT)
+    get_paragraph_style(styles, "Heading 2").font.size = Pt(HEADING_2_PT)
+    get_paragraph_style(styles, "Heading 3").font.size = Pt(HEADING_2_PT)
     for name in ("List Bullet", "List Number"):
-        styles[name].font.bold = False
-        styles[name].font.size = Pt(BODY_FONT_PT)
-        styles[name].paragraph_format.space_before = Pt(0)
-        styles[name].paragraph_format.space_after = Pt(6)
-        styles[name].paragraph_format.line_spacing = BODY_LINE_SPACING
+        style = get_paragraph_style(styles, name)
+        style.font.bold = False
+        style.font.size = Pt(BODY_FONT_PT)
+        style.paragraph_format.space_before = Pt(0)
+        style.paragraph_format.space_after = Pt(6)
+        style.paragraph_format.line_spacing = BODY_LINE_SPACING
 
 
-def set_style_font(style: Any) -> None:
+def get_paragraph_style(styles: Any, name: str) -> ParagraphStyle:
+    return cast(ParagraphStyle, styles[name])
+
+
+def set_style_font(style: ParagraphStyle) -> None:
     style.font.name = LATIN_FONT
-    r_pr = style._element.get_or_add_rPr()
+    style_element = style._element
+    if style_element is None:
+        return
+    r_pr = style_element.get_or_add_rPr()
     set_r_fonts(r_pr)
 
 
@@ -306,7 +316,7 @@ def _validate_asset_manifest(
 
 
 def render_section(
-    document: Document,
+    document: DocxDocument,
     node: dict[str, Any],
     *,
     index_path: list[int],
@@ -317,9 +327,9 @@ def render_section(
     heading = document.add_paragraph()
     configure_heading_paragraph(heading, level=len(index_path), is_first=len(index_path) == 1 and index_path[0] == 1)
     prefix = heading.add_run(f"{'.'.join(str(part) for part in index_path)}. ")
-    style_heading_run(prefix, level=len(index_path), is_prefix=True)
+    style_heading_run(prefix, level=len(index_path))
     title = heading.add_run(str(node.get("title") or "").strip())
-    style_heading_run(title, level=len(index_path), is_prefix=False)
+    style_heading_run(title, level=len(index_path))
 
     children = node.get("children", [])
     has_child_sections = any(child.get("type") == "section" for child in children)
@@ -344,7 +354,7 @@ def render_section(
 
 
 def render_block(
-    document: Document,
+    document: DocxDocument,
     node: dict[str, Any],
     *,
     figures_by_id: dict[str, dict[str, Any]],
@@ -380,7 +390,7 @@ def render_block(
 
 
 def render_table(
-    document: Document,
+    document: DocxDocument,
     node: dict[str, Any],
     figures_by_id: dict[str, dict[str, Any]],
     formula_numbers: dict[str, int],
@@ -419,7 +429,7 @@ def render_table(
 
 
 def render_formula(
-    document: Document,
+    document: DocxDocument,
     node: dict[str, Any],
     formula_numbers: dict[str, int],
     assets: dict[str, dict[str, Any]],
@@ -465,7 +475,7 @@ def render_formula(
 
 
 def render_figure(
-    document: Document,
+    document: DocxDocument,
     node: dict[str, Any],
     figures_by_id: dict[str, dict[str, Any]],
     assets: dict[str, dict[str, Any]],
@@ -607,7 +617,7 @@ def configure_heading_paragraph(paragraph: Any, *, level: int, is_first: bool = 
     paragraph.paragraph_format.keep_together = True
 
 
-def style_heading_run(run: Any, *, level: int, is_prefix: bool) -> None:
+def style_heading_run(run: Any, *, level: int) -> None:
     set_run_font(run)
     run.font.bold = True
     run.font.size = Pt(HEADING_1_PT if level == 1 else HEADING_2_PT)
@@ -626,7 +636,7 @@ def configure_table_paragraph(paragraph: Any) -> None:
     paragraph.paragraph_format.space_after = Pt(0)
 
 
-def add_vertical_space(document: Document, height_pt: float) -> None:
+def add_vertical_space(document: DocxDocument, height_pt: float) -> None:
     paragraph = document.add_paragraph()
     paragraph.paragraph_format.line_spacing = 1.0
     paragraph.paragraph_format.space_before = Pt(0)

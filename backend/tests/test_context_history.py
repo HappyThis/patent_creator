@@ -9,7 +9,7 @@ from app.runtime.context.history import (
     project_main_event_segments,
     restore_main_chat_messages,
 )
-from app.schemas import SessionEvent
+from app.schemas import SessionEvent, SessionEventType
 
 
 VALID_MARKDOWN = """## Current Task
@@ -30,7 +30,7 @@ def event(
     *,
     event_id: str,
     seq: int,
-    event_type: str,
+    event_type: SessionEventType,
     payload: dict,
     round_id: str = "round_1",
     message_id: str = "msg_1",
@@ -98,7 +98,8 @@ def test_restore_main_chat_messages_injects_compressed_markdown_memory() -> None
     assert messages[0] == {"role": "user", "content": f"{COMPRESSED_MEMORY_PREFIX}\n\n{VALID_MARKDOWN.strip()}"}
     assert messages[1] == {"role": "user", "content": COMPRESSED_CONTEXT_MESSAGE}
     assert not any(message.get("role") == "tool" for message in messages)
-    assert messages[-1] == {"role": "user", "content": "continue"}
+    assert {"role": "user", "content": "continue"} not in messages
+    assert messages[-1] == {"role": "user", "content": COMPRESSED_CONTEXT_MESSAGE}
 
 
 def test_restore_main_chat_messages_does_not_duplicate_current_user_after_tool_result() -> None:
@@ -233,34 +234,6 @@ def test_restore_main_chat_messages_ignores_llm_audit_events() -> None:
     assert [item.type for item in candidates] == ["user_input", "agent_message"]
 
 
-def test_restore_main_chat_messages_ignores_legacy_technical_solution_check_feedback() -> None:
-    events = [
-        event(event_id="evt_1", seq=1, event_type="user_input", payload={"text": "写技术方案"}),
-        event(
-            event_id="evt_2",
-            seq=2,
-            event_type="technical_solution_check_feedback",
-            payload={"text": "旧质量门禁反馈"},
-        ),
-        event(
-            event_id="evt_3",
-            seq=3,
-            event_type="agent_message",
-            payload={"message": {"role": "assistant", "content": "已完成"}},
-        ),
-    ]
-
-    messages = restore_main_chat_messages(events)
-    marker, candidates = main_context_events_after_latest_summary(events)
-
-    assert messages == [
-        {"role": "user", "content": "写技术方案"},
-        {"role": "assistant", "content": "已完成"},
-    ]
-    assert marker == {"cursor_seq": 1, "compressed_markdown": ""}
-    assert [item.type for item in candidates] == ["user_input", "agent_message"]
-
-
 def test_restore_main_chat_messages_ignores_failed_agent_output() -> None:
     events = [
         event(event_id="evt_1", seq=1, event_type="user_input", payload={"text": "write"}),
@@ -290,6 +263,83 @@ def test_restore_main_chat_messages_ignores_failed_agent_output() -> None:
         {"role": "user", "content": "write"},
         {"role": "user", "content": "重试"},
     ]
+
+
+def test_restore_main_chat_messages_keeps_current_user_when_summary_appended_after_it() -> None:
+    events = [
+        event(
+            event_id="evt_1",
+            seq=1,
+            event_type="user_input",
+            payload={"text": "old input"},
+            message_id="msg_old",
+        ),
+        event(
+            event_id="evt_2",
+            seq=2,
+            event_type="user_input",
+            round_id="round_2",
+            message_id="msg_current",
+            payload={"text": "current input"},
+        ),
+        event(
+            event_id="evt_3",
+            seq=3,
+            event_type="context_summary",
+            round_id="round_2",
+            message_id="msg_current",
+            payload={"cursor_seq_after": 2, "compressed_markdown": VALID_MARKDOWN},
+        ),
+    ]
+
+    messages = restore_main_chat_messages(
+        events,
+        current_user_message="current input",
+        current_message_id="msg_current",
+    )
+
+    assert messages[0]["content"] == f"{COMPRESSED_MEMORY_PREFIX}\n\n{VALID_MARKDOWN.strip()}"
+    assert messages[1] == {"role": "user", "content": COMPRESSED_CONTEXT_MESSAGE}
+    assert {"role": "user", "content": "old input"} not in messages
+    assert messages[-1] == {"role": "user", "content": "current input"}
+
+
+def test_restore_main_chat_messages_does_not_reappend_current_user_if_summary_covers_it() -> None:
+    events = [
+        event(
+            event_id="evt_1",
+            seq=1,
+            event_type="user_input",
+            payload={"text": "old input"},
+            message_id="msg_old",
+        ),
+        event(
+            event_id="evt_2",
+            seq=2,
+            event_type="user_input",
+            round_id="round_2",
+            message_id="msg_current",
+            payload={"text": "current input"},
+        ),
+        event(
+            event_id="evt_3",
+            seq=3,
+            event_type="context_summary",
+            round_id="round_2",
+            message_id="msg_current",
+            payload={"cursor_seq_after": 3, "compressed_markdown": VALID_MARKDOWN},
+        ),
+    ]
+
+    messages = restore_main_chat_messages(
+        events,
+        current_user_message="current input",
+        current_message_id="msg_current",
+    )
+
+    assert {"role": "user", "content": "old input"} not in messages
+    assert {"role": "user", "content": "current input"} not in messages
+    assert messages[-1] == {"role": "user", "content": COMPRESSED_CONTEXT_MESSAGE}
 
 
 def test_main_context_events_after_latest_summary_resets_candidates() -> None:

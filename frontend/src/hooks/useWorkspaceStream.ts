@@ -14,7 +14,7 @@ import {
 import { upsertActiveSessionSummary } from '../features/chat/sessionTabs';
 import { sseClient } from '../services/sse/client';
 import type { ChatStreamHandle, ChatStreamPayload } from '../services/sse/client';
-import type { ChatEvent, ProjectState, SessionSummary } from '../types';
+import type { ChatEvent, ContextUsageSummary, ProjectState, SessionSummary } from '../types';
 
 type DocumentChangePayload = {
   changed_section_ids?: string[];
@@ -45,6 +45,25 @@ function documentChangePayload(payload: Record<string, unknown>): DocumentChange
     changed_block_ids: stringArray(payload.changed_block_ids),
     active_section_id: nullableString(payload.active_section_id),
     active_block_id: nullableString(payload.active_block_id),
+  };
+}
+
+function contextUsagePayload(payload: Record<string, unknown>): ContextUsageSummary | null {
+  if (
+    typeof payload.max_tokens !== 'number' ||
+    typeof payload.used_tokens !== 'number' ||
+    typeof payload.used_ratio !== 'number' ||
+    typeof payload.threshold_tokens !== 'number' ||
+    typeof payload.status !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    max_tokens: payload.max_tokens,
+    used_tokens: payload.used_tokens,
+    used_ratio: payload.used_ratio,
+    threshold_tokens: payload.threshold_tokens,
+    status: payload.status,
   };
 }
 
@@ -208,6 +227,33 @@ export function useWorkspaceStream({
               ? 'done'
               : 'failed';
         setEvents((current) => applyContextCompressionEvent(current, payload, status));
+        return;
+      }
+
+      if (eventName === 'context_usage_updated') {
+        const sessionId = optionalString(payload.session_id);
+        const usage = contextUsagePayload(payload);
+        if (!sessionId || !usage) {
+          return;
+        }
+        setSessions((current) =>
+          current.map((session) =>
+            session.session_id === sessionId
+              ? {
+                  ...session,
+                  context_usage: usage,
+                }
+              : session,
+          ),
+        );
+        setProject((current) =>
+          current && (current.active_session_id === sessionId || current.running_session_id === sessionId)
+            ? {
+                ...current,
+                active_session_context: usage,
+              }
+            : current,
+        );
         return;
       }
 

@@ -4,7 +4,6 @@ from .catalog import (
     ToolDeclaration,
     build_openai_tools,
     get_tool_declaration,
-    render_tool_manual,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "ToolDeclaration",
     "build_openai_tools",
     "get_tool_declaration",
-    "render_tool_manual",
 ]

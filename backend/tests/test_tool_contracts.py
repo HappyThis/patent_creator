@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
 import pytest
 
@@ -9,7 +10,7 @@ from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
 from app.tools import DOCUMENT_WRITE_TOOL_NAMES, MAIN_AGENT_TOOL_NAMES, get_tool_declaration
 
 
-def _tool(name: str) -> dict[str, object]:
+def _tool(name: str) -> dict[str, Any]:
     return next(tool for tool in MAIN_AGENT_TOOLS if tool["function"]["name"] == name)
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from wcmatch import glob as wcmatch_glob
 
 from ...domain.document_tool_results import tool_failed, tool_success
@@ -37,7 +37,11 @@ _DEFAULT_GLOB_SCAN_SECONDS = 1.5
 _MAX_GLOB_SCAN_SECONDS = 5.0
 
 
-class FileGlobArguments(BaseModel):
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class FileGlobArguments(_StrictModel):
     path: str = Field(default=".", description="搜索起点；可使用相对当前项目工作区的路径，或用户提供的绝对源码路径。")
     pattern: str = Field(default="*", description="glob 模式，例如 **/*.py 或 src/**/*.ts。也可直接把 glob 写在 path 中。")
     limit: int = Field(default=100, ge=1, le=500, description="最多返回多少条结果，默认 100，最大 500。")
@@ -47,7 +51,7 @@ class FileGlobArguments(BaseModel):
     max_elapsed_ms: int = Field(default=int(_DEFAULT_GLOB_SCAN_SECONDS * 1000), ge=100, le=int(_MAX_GLOB_SCAN_SECONDS * 1000))
 
 
-class FileSearchArguments(BaseModel):
+class FileSearchArguments(_StrictModel):
     path: str = Field(default=".", description="搜索起点文件或目录；可使用相对当前项目工作区的路径，或用户提供的绝对源码路径。")
     pattern: str = Field(description="要搜索的文本或正则表达式。默认按普通文本搜索。")
     include_glob: str = Field(default="**/*", description="限制搜索文件的 glob，例如 **/*.py。")
@@ -64,7 +68,7 @@ class FileSearchArguments(BaseModel):
     max_elapsed_ms: int = Field(default=int(_DEFAULT_GLOB_SCAN_SECONDS * 1000), ge=100, le=int(_MAX_GLOB_SCAN_SECONDS * 1000))
 
 
-class FileReadArguments(BaseModel):
+class FileReadArguments(_StrictModel):
     path: str = Field(description="要读取的文件路径；可使用相对当前项目工作区的路径、用户提供的绝对源码路径，或工具返回的 runtime 输出路径。")
     start_line: int = Field(default=1, ge=1, description="起始行号，从 1 开始。")
     limit: int = Field(default=120, ge=1, le=500, description="最多读取多少行，默认 120，最大 500。")
@@ -88,24 +92,28 @@ def file_glob(
     Examples:
         - 查找 Python 文件：{"pattern":"**/*.py","limit":100}
     """
+    parsed = _validate_file_arguments(FileGlobArguments, arguments)
+    if parsed["status"] == "failed":
+        return parsed
+    payload = parsed["output"]["arguments"]
     base_result = _resolve_glob_base_and_pattern(
         store,
         project_id,
-        str(arguments.get("path") or "."),
-        str(arguments.get("pattern") or "*"),
+        payload["path"],
+        payload["pattern"],
     )
     if isinstance(base_result, dict):
         return base_result
     base, pattern = base_result
 
-    limit = int(arguments.get("limit") or 100)
-    offset = int(arguments.get("offset") or 0)
+    limit = payload["limit"]
+    offset = payload["offset"]
     scan_budget = min(
-        int(arguments.get("max_scanned_paths") or _DEFAULT_GLOB_SCANNED_PATHS),
+        payload["max_scanned_paths"],
         _MAX_GLOB_SCANNED_PATHS,
     )
     time_budget_seconds = min(
-        int(arguments.get("max_elapsed_ms") or int(_DEFAULT_GLOB_SCAN_SECONDS * 1000)) / 1000,
+        payload["max_elapsed_ms"] / 1000,
         _MAX_GLOB_SCAN_SECONDS,
     )
     started_at = time.monotonic()
@@ -180,29 +188,33 @@ def file_search(
     Examples:
         - 搜索调用点：{"pattern":"exec_command","mode":"lines","limit":100}
     """
-    target_result = _resolve_project_path(store, project_id, str(arguments.get("path") or "."))
+    parsed = _validate_file_arguments(FileSearchArguments, arguments)
+    if parsed["status"] == "failed":
+        return parsed
+    payload = parsed["output"]["arguments"]
+    target_result = _resolve_project_path(store, project_id, payload["path"])
     if isinstance(target_result, dict):
         return target_result
     target = target_result
 
-    pattern = str(arguments.get("pattern") or "")
+    pattern = payload["pattern"]
     if not pattern:
         return tool_failed("invalid_operation", "pattern 字段缺失。")
-    include_glob = str(arguments.get("include_glob") or "**/*")
-    mode = str(arguments.get("mode") or "lines")
+    include_glob = payload["include_glob"]
+    mode = payload["mode"]
     if mode not in {"lines", "files", "count"}:
         return tool_failed("invalid_operation", "mode 必须是 lines、files 或 count。")
-    regex = bool(arguments.get("regex", False))
-    case_sensitive = bool(arguments.get("case_sensitive", True))
-    context_lines = int(arguments.get("context_lines") or 0)
-    limit = int(arguments.get("limit") or 100)
-    offset = int(arguments.get("offset") or 0)
+    regex = payload["regex"]
+    case_sensitive = payload["case_sensitive"]
+    context_lines = payload["context_lines"]
+    limit = payload["limit"]
+    offset = payload["offset"]
     scan_budget = min(
-        int(arguments.get("max_scanned_paths") or _DEFAULT_GLOB_SCANNED_PATHS),
+        payload["max_scanned_paths"],
         _MAX_GLOB_SCANNED_PATHS,
     )
     time_budget_seconds = min(
-        int(arguments.get("max_elapsed_ms") or int(_DEFAULT_GLOB_SCAN_SECONDS * 1000)) / 1000,
+        payload["max_elapsed_ms"] / 1000,
         _MAX_GLOB_SCAN_SECONDS,
     )
 
@@ -294,15 +306,19 @@ def file_read(
     Examples:
         - 读取文件片段：{"path":"backend/app/tools/builtin/shell.py","start_line":1,"limit":120}
     """
-    target_result = _resolve_project_path(store, project_id, str(arguments.get("path") or ""))
+    parsed = _validate_file_arguments(FileReadArguments, arguments)
+    if parsed["status"] == "failed":
+        return parsed
+    payload = parsed["output"]["arguments"]
+    target_result = _resolve_project_path(store, project_id, payload["path"])
     if isinstance(target_result, dict):
         return target_result
     target = target_result
     if not target.is_file():
-        return tool_failed("invalid_operation", f"不是可读取文件：{arguments.get('path')}")
+        return tool_failed("invalid_operation", f"不是可读取文件：{payload['path']}")
 
-    start_line = int(arguments.get("start_line") or 1)
-    limit = int(arguments.get("limit") or 120)
+    start_line = payload["start_line"]
+    limit = payload["limit"]
     start_index = max(0, start_line - 1)
     selected: list[str] = []
     observed_lines = 0
@@ -335,6 +351,21 @@ def file_read(
             "truncated": has_more,
         }
     )
+
+
+def _validate_file_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        parsed = args_model.model_validate(arguments)
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        location = ".".join(str(part) for part in first.get("loc", ())) or "arguments"
+        message = str(first.get("msg") or "参数不符合工具 schema。")
+        return tool_failed(
+            "invalid_tool_arguments",
+            f"工具参数不符合 schema：{location}: {message}",
+            retry_hint="请严格按照当前工具的 parameters schema 重新调用。",
+        )
+    return {"status": "success", "output": {"arguments": parsed.model_dump(exclude_none=True)}}
 
 
 def _resolve_project_path(store: WorkspaceStore, project_id: str, raw_path: str) -> Path | dict[str, Any]:

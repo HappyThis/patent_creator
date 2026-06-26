@@ -4,6 +4,24 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+SessionEventType = Literal[
+    "user_input",
+    "agent_message",
+    "agent_output",
+    "tool_call",
+    "tool_result",
+    "context_summary",
+    "context_pruned",
+    "session_title",
+    "llm_audit",
+    "llm_retry_status",
+    "technical_solution_enhancement_status",
+    "technical_solution_change_assessment",
+    "technical_solution_improvement_advice",
+    "technical_solution_enhancement_feedback",
+    "technical_solution_enhancement_summary",
+]
+
 
 class ProjectRecord(BaseModel):
     project_id: str
@@ -94,25 +112,7 @@ class ChatMessageResponse(BaseModel):
 class SessionEvent(BaseModel):
     id: str
     ts: str
-    type: Literal[
-        "user_input",
-        "agent_message",
-        "agent_output",
-        "tool_call",
-        "tool_result",
-        "context_summary",
-        "context_pruned",
-        "session_title",
-        "llm_audit",
-        "llm_retry_status",
-        "technical_solution_check_result",
-        "technical_solution_check_feedback",
-        "technical_solution_enhancement_status",
-        "technical_solution_change_assessment",
-        "technical_solution_improvement_advice",
-        "technical_solution_enhancement_feedback",
-        "technical_solution_enhancement_summary",
-    ]
+    type: SessionEventType
     seq: int
     scope: str
     round_id: str

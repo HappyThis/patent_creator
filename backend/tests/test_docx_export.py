@@ -23,8 +23,9 @@ def test_docx_export_renders_headings_without_word_outline_markers(tmp_path: Pat
         project_dir=tmp_path,
     )
 
-    document = Document(output_path)
+    document = Document(str(output_path))
     heading = next(paragraph for paragraph in document.paragraphs if paragraph.text.startswith("1. "))
+    assert heading.style is not None
     assert heading.style.name == "Normal"
     assert heading.runs[0].bold is True
     assert heading.runs[0].font.color.rgb == docx_export.RGBColor(0x0D, 0x16, 0x24)
@@ -47,9 +48,11 @@ def test_docx_export_uses_songti_for_chinese_and_times_for_latin(tmp_path: Path)
         project_dir=tmp_path,
     )
 
-    document = Document(output_path)
+    document = Document(str(output_path))
     paragraph = next(paragraph for paragraph in document.paragraphs if "中文 ABC 123" in paragraph.text)
-    r_fonts = paragraph.runs[0]._element.rPr.rFonts
+    r_pr = paragraph.runs[0]._element.rPr
+    assert r_pr is not None
+    r_fonts = r_pr.rFonts
     assert r_fonts.get(qn("w:ascii")) == "Times New Roman"
     assert r_fonts.get(qn("w:hAnsi")) == "Times New Roman"
     assert r_fonts.get(qn("w:eastAsia")) == "宋体"
@@ -65,7 +68,7 @@ def test_docx_export_leaves_empty_sections_blank(tmp_path: Path) -> None:
         project_dir=tmp_path,
     )
 
-    document = Document(output_path)
+    document = Document(str(output_path))
     assert "内容待补充" not in [paragraph.text for paragraph in document.paragraphs]
 
 
@@ -86,12 +89,14 @@ def test_docx_export_centers_block_formulas_across_full_line(tmp_path: Path) -> 
         project_dir=tmp_path,
     )
 
-    document = Document(output_path)
+    document = Document(str(output_path))
     formula_table = document.tables[0]
     assert len(formula_table.columns) == 3
     assert formula_table.cell(0, 0).text == ""
     assert formula_table.cell(0, 2).text == "(1)"
-    formula_cell_width = int(formula_table.cell(0, 1)._tc.tcPr.tcW.w)
+    formula_cell_pr = formula_table.cell(0, 1)._tc.tcPr
+    assert formula_cell_pr is not None
+    formula_cell_width = int(formula_cell_pr.tcW.w)
     assert formula_cell_width == int(docx_export.FORMULA_BODY_COL_IN * 1440)
     assert docx_export.FORMULA_MAX_WIDTH_IN < docx_export.FORMULA_BODY_COL_IN
 
@@ -113,7 +118,7 @@ def test_docx_export_renders_all_inline_math_as_images(tmp_path: Path) -> None:
         project_dir=tmp_path,
     )
 
-    document = Document(output_path)
+    document = Document(str(output_path))
     paragraph = next(paragraph for paragraph in document.paragraphs if "condition" in paragraph.text)
     assert paragraph.text == "condition  and length "
     assert len(document.inline_shapes) == 2
@@ -131,8 +136,8 @@ def test_docx_export_cleans_asset_directory_when_renderer_fails(tmp_path: Path, 
         }
     ]
 
-    def fail_renderer(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="renderer failed")
+    def fail_renderer(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args="", returncode=1, stdout="", stderr="renderer failed")
 
     monkeypatch.setattr(docx_export.subprocess, "run", fail_renderer)
 
@@ -328,7 +333,7 @@ def test_docx_export_keeps_tables_editable(tmp_path: Path) -> None:
         project_dir=tmp_path,
     )
 
-    document = Document(output_path)
+    document = Document(str(output_path))
     assert len(document.tables) == 1
     table = document.tables[0]
     assert table.cell(0, 0).text == "模块"

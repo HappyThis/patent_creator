@@ -5,30 +5,30 @@ import difflib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, Protocol, TypeVar
 
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.message_preparation import prepare_messages_for_model_request
-from ..agents.runtime.openai_responses import OpenAIResponsesClient
-from ..agents.workers import MAIN_AGENT_TOOLS, MainAgentToolCall, decide_main_agent_step
+from ..agents.workers import MAIN_AGENT_TOOLS, MainAgentToolCall, SupportsGenerateWithTools, decide_main_agent_step
 from ..core import ApiError, Settings, generate_id, now_iso
 from ..domain.document_tool_results import tool_failed
 from ..runtime.context import ContextManager
 from ..runtime.executor import ExecutorEngine, ToolRuntimeContext
 from ..tools import DOCUMENT_WRITE_TOOL_NAMES, get_tool_declaration
-from ..schemas import ChatMessageRequest, ChatMessageResponse, ProjectRecord
+from ..schemas import ChatMessageRequest, ChatMessageResponse, ProjectRecord, SessionEventType
 from ..storage.workspace_store import WorkspaceStore
 from .chat_events import ChatEventEmitter
 from .chat_protocol import DEFAULT_CHANGED_PAYLOAD, RoundState, assistant_message_text, build_commit_message
 from .event_bus import SessionEventBus
-from .technical_solution_checker import (
+from .technical_solution_enhancement import (
     TechnicalSolutionChangeAssessmentResult,
     TechnicalSolutionChangeAssessor,
-    TechnicalSolutionCheckResult,
-    TechnicalSolutionCheckValidationError,
     TechnicalSolutionEnhancementSummaryResult,
     TechnicalSolutionEnhancementSummarizer,
+    TechnicalSolutionImprovementAdviceResult,
     TechnicalSolutionImprovementAdvisor,
+    TechnicalSolutionStructuredOutputValidationError,
+    SupportsTechnicalSolutionGeneration,
     enhancement_feedback_user_message,
     technical_solution_markdown,
 )
@@ -37,6 +37,21 @@ logger = logging.getLogger("patent_creator.chat")
 LockedResult = TypeVar("LockedResult")
 SESSION_TITLE_MAX_CHARS = 24
 SESSION_TITLE_TIMEOUT = 12.0
+
+
+class SupportsChatLLM(SupportsGenerateWithTools, SupportsTechnicalSolutionGeneration, Protocol):
+    async def generate_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        messages: list[dict[str, Any]] | None = None,
+        temperature: float = 0.2,
+        timeout: float | None = None,
+        trace_context: dict[str, Any] | None = None,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> str:
+        ...
 
 
 @dataclass
@@ -62,7 +77,7 @@ class ChatService:
         executor: ExecutorEngine,
         bus: SessionEventBus,
         settings: Settings,
-        llm_client: OpenAIResponsesClient,
+        llm_client: SupportsChatLLM,
     ) -> None:
         self.store = store
         self.context_manager = context_manager
@@ -244,6 +259,22 @@ class ChatService:
                 },
             )
 
+        async def publish_context_usage(reason: str, *, step_index: int | None = None) -> None:
+            usage = self.context_manager.context_usage(project_id, state.session_id)
+            if usage is None:
+                return
+            payload: dict[str, Any] = {
+                **usage.model_dump(),
+                "scope": "main",
+                "session_id": state.session_id,
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+                "reason": reason,
+            }
+            if step_index is not None:
+                payload["step_index"] = step_index
+            await self.bus.publish(key, "context_usage_updated", payload)
+
         async def publish_llm_retry_status(event_payload: dict[str, Any]) -> None:
             stored_payload = {**event_payload, "scope": "main"}
             await self._record_and_publish_main_event(
@@ -317,6 +348,7 @@ class ChatService:
                     on_context_event=on_context_event,
                     on_retry_event=on_llm_retry_event,
                 )
+                await publish_context_usage("before_main_agent_call", step_index=step_index)
 
                 async def on_text_delta(delta: str) -> None:
                     if not delta:
@@ -364,6 +396,9 @@ class ChatService:
                 )
 
                 if action.type == "respond":
+                    assistant_message = action.assistant_message
+                    if assistant_message is None:
+                        raise ApiError(502, "main_agent_invalid_action", "主 agent respond 缺少 assistant_message。")
                     final_reply = action.text or ""
                     if action.interrupted:
                         final_reply_status = "interrupted"
@@ -376,7 +411,7 @@ class ChatService:
                     await self.events.agent_message(
                         project_id,
                         state,
-                        message=action.assistant_message,
+                        message=assistant_message,
                         model=self.settings.openai_model,
                     )
                     logger.info(
@@ -384,7 +419,7 @@ class ChatService:
                         step_index,
                         len(final_reply),
                     )
-                    messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
+                    messages.append(prepare_messages_for_model_request([assistant_message])[0])
                     await self.events.agent_output(
                         project_id,
                         state,
@@ -392,6 +427,7 @@ class ChatService:
                         status=final_reply_status,
                         detail=final_reply_detail,
                     )
+                    await publish_context_usage("after_main_agent_call", step_index=step_index)
 
                     if action.interrupted:
                         break
@@ -445,7 +481,18 @@ class ChatService:
                                 technical_solution_diff=initial_diff,
                                 on_retry_event=on_llm_retry_event,
                             )
-                            if assessment is None or not assessment.should_review:
+                            if assessment is None:
+                                await self._publish_technical_solution_enhancement_status(
+                                    project_id,
+                                    state,
+                                    phase="failed",
+                                    status="failed",
+                                    progress=100,
+                                    summary="增强模式：技术方案增强未完成",
+                                )
+                                break
+
+                            if not assessment.should_review:
                                 await self._publish_technical_solution_enhancement_status(
                                     project_id,
                                     state,
@@ -489,6 +536,9 @@ class ChatService:
                     break
 
                 tool_calls = action.tool_calls or []
+                assistant_message = action.assistant_message
+                if assistant_message is None:
+                    raise ApiError(502, "main_agent_invalid_action", "主 agent tool_calls 缺少 assistant_message。")
                 logger.info("round step=%d action=tool_calls count=%d", step_index, len(tool_calls))
                 await self.events.audit_events(
                     project_id,
@@ -498,13 +548,14 @@ class ChatService:
                 await self.events.agent_message(
                     project_id,
                     state,
-                    message=action.assistant_message,
+                    message=assistant_message,
                     model=self.settings.openai_model,
                 )
-                messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
-                tool_preamble = assistant_message_text(action.assistant_message)
+                messages.append(prepare_messages_for_model_request([assistant_message])[0])
+                tool_preamble = assistant_message_text(assistant_message)
                 if tool_preamble:
                     await self.events.agent_output(project_id, state, tool_preamble)
+                await publish_context_usage("after_main_agent_call", step_index=step_index)
 
                 for tool_call in tool_calls:
                     result = await self._execute_tool_call(
@@ -562,6 +613,7 @@ class ChatService:
                             "content": json.dumps(result, ensure_ascii=False),
                         }
                     )
+                await publish_context_usage("after_tool_results", step_index=step_index)
                 await self._sleep()
 
             await self._sleep(self.settings.round_finish_delay)
@@ -631,8 +683,9 @@ class ChatService:
                     **changed_payload,
                 },
             )
+            await publish_context_usage("round_failed")
             committed = False
-            commit_error: dict[str, str] | None = None
+            commit_error = None
             if partial_changed:
                 committed, commit_error = await self._commit(project_id, changed_payload)
             await self._set_project_idle(project_id)
@@ -706,30 +759,42 @@ class ChatService:
             state,
             tool=tool_call.tool,
             arguments=tool_call.arguments,
-            summary=declaration.started_summary(tool_call.arguments),
+            summary=self._safe_tool_started_summary(declaration, tool_call.arguments),
             call_id=tool_call.tool_call_id,
         )
-        result = await self.executor.execute_tool(
-            project_id,
-            tool_call.tool,
-            tool_call.arguments,
-            runtime_context=ToolRuntimeContext(
-                session_id=state.session_id,
-                round_id=state.round_id,
-                message_id=state.message_id,
-                caller_messages=caller_messages,
-                system_prompt=system_prompt,
-                tools=MAIN_AGENT_TOOLS,
-                llm_client=self.llm_client,
-                settings=self.settings,
-            ),
-        )
+        try:
+            result = await self.executor.execute_tool(
+                project_id,
+                tool_call.tool,
+                tool_call.arguments,
+                runtime_context=ToolRuntimeContext(
+                    session_id=state.session_id,
+                    round_id=state.round_id,
+                    message_id=state.message_id,
+                    caller_messages=caller_messages,
+                    system_prompt=system_prompt,
+                    tools=MAIN_AGENT_TOOLS,
+                    llm_client=self.llm_client,
+                    settings=self.settings,
+                ),
+            )
+        except Exception as exc:
+            result = tool_failed("tool_runtime_error", str(exc))
+            await self.events.tool_finished(
+                project_id,
+                state,
+                tool=tool_call.tool,
+                result=result,
+                summary=self._safe_tool_finished_summary(declaration, tool_call.arguments, result),
+                call_id=tool_call.tool_call_id,
+            )
+            raise
         await self.events.tool_finished(
             project_id,
             state,
             tool=tool_call.tool,
             result=result,
-            summary=declaration.finished_summary(tool_call.arguments, result),
+            summary=self._safe_tool_finished_summary(declaration, tool_call.arguments, result),
             call_id=tool_call.tool_call_id,
         )
         logger.info(
@@ -748,7 +813,7 @@ class ChatService:
         project_id: str,
         state: RoundState,
         *,
-        event_type: str,
+        event_type: SessionEventType,
         payload: dict[str, Any],
         event_name: str | None = None,
     ) -> None:
@@ -792,12 +857,32 @@ class ChatService:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "status": "failed",
-            "code": validation_code if isinstance(exc, TechnicalSolutionCheckValidationError) else fallback_code,
+            "code": validation_code if isinstance(exc, TechnicalSolutionStructuredOutputValidationError) else fallback_code,
             "message": str(exc),
         }
-        if isinstance(exc, TechnicalSolutionCheckValidationError):
+        if isinstance(exc, TechnicalSolutionStructuredOutputValidationError):
             payload["attempts"] = exc.attempts
         return payload
+
+    @staticmethod
+    def _safe_tool_started_summary(declaration: Any, arguments: dict[str, Any]) -> str:
+        try:
+            return declaration.started_summary(arguments)
+        except Exception as exc:
+            logger.warning("tool started summary failed tool=%s error=%s", getattr(declaration, "name", ""), exc)
+            return f"开始执行 {getattr(declaration, 'name', '工具')}"
+
+    @staticmethod
+    def _safe_tool_finished_summary(
+        declaration: Any,
+        arguments: dict[str, Any],
+        result: dict[str, Any],
+    ) -> str:
+        try:
+            return declaration.finished_summary(arguments, result)
+        except Exception as exc:
+            logger.warning("tool finished summary failed tool=%s error=%s", getattr(declaration, "name", ""), exc)
+            return "执行失败" if result.get("status") == "failed" else f"{getattr(declaration, 'name', '工具')} 已完成"
 
     @staticmethod
     def _technical_solution_diff(before: str, after: str) -> str:
@@ -905,7 +990,7 @@ class ChatService:
         technical_solution_markdown_value: str,
         technical_solution_diff: str,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    ) -> TechnicalSolutionCheckResult | None:
+    ) -> TechnicalSolutionImprovementAdviceResult | None:
         await self._publish_technical_solution_enhancement_status(
             project_id,
             state,
@@ -916,7 +1001,7 @@ class ChatService:
         )
         recent_history = self.store.recent_technical_solution_enhancement_history(project_id, limit=3)
         try:
-            result = await self.technical_solution_improvement_advisor.check(
+            result = await self.technical_solution_improvement_advisor.advise(
                 technical_solution_markdown=technical_solution_markdown_value,
                 user_request=user_request,
                 technical_solution_diff=technical_solution_diff,
@@ -960,7 +1045,7 @@ class ChatService:
         self,
         project_id: str,
         state: RoundState,
-        result: TechnicalSolutionCheckResult,
+        result: TechnicalSolutionImprovementAdviceResult,
     ) -> None:
         feedback = enhancement_feedback_user_message(result)
         self.store.append_session_event(

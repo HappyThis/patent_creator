@@ -70,16 +70,15 @@ class ContextManager:
         project_id: str,
         session_id: str | None,
         *,
-        user_message: str,
+        user_message: str | None,
         current_message_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        history = self._restore_main_chat_messages(
+        return self._restore_main_chat_messages(
             project_id,
             session_id,
             current_user_message=user_message,
             current_message_id=current_message_id,
         )
-        return history
 
     async def prepare_main_agent_messages(
         self,
@@ -175,8 +174,8 @@ class ContextManager:
             raw_messages = self._build_main_agent_messages_raw(
                 project_id,
                 session_id,
-                user_message=user_message,
-                current_message_id=current_message_id,
+                user_message=None,
+                current_message_id=None,
             )
             raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
             usage = usage_for_messages(raw_messages, self.settings)
@@ -264,12 +263,11 @@ class ContextManager:
         if not session_id or not self.store.session_exists(project_id, session_id):
             return [{"role": "user", "content": current_user_message or ""}] if current_user_message else []
 
-        messages = restore_main_chat_messages(
+        return restore_main_chat_messages(
             self.store.iter_session_events(project_id, session_id),
             current_user_message=current_user_message,
             current_message_id=current_message_id,
         )
-        return messages
 
     async def _compress_main_history(
         self,
@@ -286,7 +284,8 @@ class ContextManager:
         compression_marker, candidate_events = main_context_events_after_latest_summary(
             self.store.iter_session_events(project_id, session_id)
         )
-        segments = project_main_event_segments(candidate_events)
+        compressible_events = candidate_events
+        segments = project_main_event_segments(compressible_events)
         if not segments:
             logger.info(
                 "context compression skipped scope=main reason=no_complete_segment project_id=%s session_id=%s round_id=%s message_id=%s candidate_events=%s cursor_seq=%s",
@@ -294,11 +293,11 @@ class ContextManager:
                 session_id,
                 round_id,
                 current_message_id,
-                len(candidate_events),
+                len(compressible_events),
                 compression_marker["cursor_seq"],
             )
             return None
-        latest_candidate_seq = candidate_events[-1].seq
+        latest_candidate_seq = compressible_events[-1].seq
         if segments[-1].end_seq < latest_candidate_seq:
             logger.info(
                 "context compression skipped scope=main reason=latest_event_not_complete_segment project_id=%s session_id=%s round_id=%s message_id=%s covered_seq_end=%s latest_candidate_seq=%s",
@@ -322,7 +321,7 @@ class ContextManager:
                 session_id,
                 round_id,
                 current_message_id,
-                len(candidate_events),
+                len(compressible_events),
                 len(source_messages),
             )
             return None
@@ -340,7 +339,7 @@ class ContextManager:
             current_message_id,
             covered_seq_start,
             covered_seq_end,
-            len(candidate_events),
+            len(compressible_events),
             len(segments),
             len(source_messages),
             usage_before.used_tokens,

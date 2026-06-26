@@ -28,6 +28,7 @@ def test_context_compression_user_prompt_defines_xml_summary_protocol() -> None:
     assert "<summary>" in prompt
     assert "不要输出 JSON" in prompt
     assert "## 当前任务" in prompt
+    assert "## 用户最近意图" in prompt
     assert "## 执行进度" in prompt
     assert "## 已完成事项" in prompt
     assert "## 关键事实与证据" in prompt

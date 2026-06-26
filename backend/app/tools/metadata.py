@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import inspect
 import json
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -36,7 +36,7 @@ def agent_tool(
             usage_rules=tuple(parsed_doc["usage_rules"]),
             examples=tuple(parsed_doc["examples"]),
         )
-        setattr(func, "__agent_tool__", metadata)
+        cast(Any, func).__agent_tool__ = metadata
         return func
 
     return decorate

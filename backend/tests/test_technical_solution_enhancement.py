@@ -6,18 +6,20 @@ from typing import Any
 import pytest
 
 from app.core.config import Settings
-from app.services.technical_solution_checker import (
-    TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS,
-    TechnicalSolutionChecker,
-    _checker_system_prompt,
-    _checker_user_prompt,
+from app.services.technical_solution_enhancement import (
+    TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS,
+    TechnicalSolutionChangeAssessor,
+    TechnicalSolutionEnhancementSummarizer,
+    TechnicalSolutionImprovementAdvisor,
+    _improvement_advisor_system_prompt,
+    _improvement_advisor_user_prompt,
     parse_technical_solution_change_assessment_result,
-    parse_technical_solution_check_result,
     parse_technical_solution_enhancement_summary_result,
+    parse_technical_solution_improvement_advice_result,
 )
 
 
-class FakeCheckerLLMClient:
+class FakeAdviceLLMClient:
     def __init__(self, payloads: list[dict[str, Any]]) -> None:
         self.payloads = list(payloads)
         self.prompts: list[dict[str, Any]] = []
@@ -44,8 +46,8 @@ class FakeCheckerLLMClient:
         return self.payloads.pop(0)
 
 
-def test_technical_solution_check_result_strict_schema_accepts_valid_payload() -> None:
-    result = parse_technical_solution_check_result(
+def test_technical_solution_improvement_advice_result_strict_schema_accepts_valid_payload() -> None:
+    result = parse_technical_solution_improvement_advice_result(
         {
             "review_markdown": "  ## 检查意见\n\n- 技术手段不足。  ",
         }
@@ -63,9 +65,11 @@ def test_technical_solution_check_result_strict_schema_accepts_valid_payload() -
         {"review_markdown": " "},
     ],
 )
-def test_technical_solution_check_result_strict_schema_rejects_invalid_payload(payload: dict[str, object]) -> None:
+def test_technical_solution_improvement_advice_result_strict_schema_rejects_invalid_payload(
+    payload: dict[str, object],
+) -> None:
     with pytest.raises(ValueError):
-        parse_technical_solution_check_result(payload)
+        parse_technical_solution_improvement_advice_result(payload)
 
 
 def test_technical_solution_change_assessment_result_strict_schema() -> None:
@@ -96,8 +100,56 @@ def test_technical_solution_enhancement_summary_result_strict_schema() -> None:
         parse_technical_solution_enhancement_summary_result({"applied_summary": "摘要", "reason": "原因"})
 
 
-def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities() -> None:
-    prompt = _checker_system_prompt() + "\n\n" + _checker_user_prompt("## 技术方案\n\n系统根据策略处理任务。")
+@pytest.mark.anyio
+async def test_technical_solution_change_assessor_uses_enhancement_timeout(tmp_path: Path) -> None:
+    client = FakeAdviceLLMClient([{"should_review": True, "reason": "本轮影响核心机制。"}])
+    assessor = TechnicalSolutionChangeAssessor(
+        client,
+        Settings(
+            data_dir=tmp_path / "data",
+            log_dir=tmp_path / "logs",
+            git_user_name="Test User",
+            git_user_email="test@example.com",
+            openai_api_key="test-key",
+            llm_timeout=45.0,
+        ),
+    )
+
+    await assessor.assess(
+        user_request="请完善技术方案。",
+        technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。",
+        technical_solution_diff="+系统根据策略处理任务。",
+    )
+
+    assert client.prompts[0]["timeout"] == TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS
+
+
+@pytest.mark.anyio
+async def test_technical_solution_summarizer_uses_enhancement_timeout(tmp_path: Path) -> None:
+    client = FakeAdviceLLMClient([{"applied_summary": "已补充处理阶段迁移规则。"}])
+    summarizer = TechnicalSolutionEnhancementSummarizer(
+        client,
+        Settings(
+            data_dir=tmp_path / "data",
+            log_dir=tmp_path / "logs",
+            git_user_name="Test User",
+            git_user_email="test@example.com",
+            openai_api_key="test-key",
+            llm_timeout=45.0,
+        ),
+    )
+
+    await summarizer.summarize(
+        review_markdown="## 技术方案评审意见\n\n- 补充处理阶段迁移规则。",
+        enhanced_technical_solution_markdown="## 技术方案\n\n已补充处理阶段迁移规则。",
+        enhancement_diff="+已补充处理阶段迁移规则。",
+    )
+
+    assert client.prompts[0]["timeout"] == TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS
+
+
+def test_technical_solution_advisor_prompt_contains_schema_and_concrete_entities() -> None:
+    prompt = _improvement_advisor_system_prompt() + "\n\n" + _improvement_advisor_user_prompt("## 技术方案\n\n系统根据策略处理任务。")
 
     assert "JSON Schema" in prompt
     assert '"additionalProperties": false' in prompt
@@ -152,8 +204,8 @@ def test_technical_solution_checker_prompt_contains_schema_and_concrete_entities
 
 
 @pytest.mark.anyio
-async def test_technical_solution_checker_retries_once_after_schema_validation_failure(tmp_path: Path) -> None:
-    client = FakeCheckerLLMClient(
+async def test_technical_solution_advisor_retries_once_after_schema_validation_failure(tmp_path: Path) -> None:
+    client = FakeAdviceLLMClient(
         [
             {"gate_pass": False, "review_markdown": "意见"},
             {
@@ -161,7 +213,7 @@ async def test_technical_solution_checker_retries_once_after_schema_validation_f
             },
         ]
     )
-    checker = TechnicalSolutionChecker(
+    advisor = TechnicalSolutionImprovementAdvisor(
         client,
         Settings(
             data_dir=tmp_path / "data",
@@ -172,7 +224,7 @@ async def test_technical_solution_checker_retries_once_after_schema_validation_f
         ),
     )
 
-    result = await checker.check(technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。")
+    await advisor.advise(technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。")
 
     assert len(client.prompts) == 2
     assert client.prompts[0]["trace_context"]["attempt"] == 1
@@ -182,15 +234,15 @@ async def test_technical_solution_checker_retries_once_after_schema_validation_f
 
 
 @pytest.mark.anyio
-async def test_technical_solution_checker_runs_single_review_by_default(tmp_path: Path) -> None:
-    client = FakeCheckerLLMClient(
+async def test_technical_solution_advisor_runs_single_review_by_default(tmp_path: Path) -> None:
+    client = FakeAdviceLLMClient(
         [
             {
                 "review_markdown": "## 技术方案评审意见\n\n### 技术深度修订点\n1. 补充处理阶段迁移规则。",
             },
         ]
     )
-    checker = TechnicalSolutionChecker(
+    advisor = TechnicalSolutionImprovementAdvisor(
         client,
         Settings(
             data_dir=tmp_path / "data",
@@ -201,9 +253,9 @@ async def test_technical_solution_checker_runs_single_review_by_default(tmp_path
         ),
     )
 
-    result = await checker.check(technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。")
+    result = await advisor.advise(technical_solution_markdown="## 技术方案\n\n系统根据策略处理任务。")
 
     assert len(client.prompts) == 1
     assert {prompt["temperature"] for prompt in client.prompts} == {0.7}
-    assert {prompt["timeout"] for prompt in client.prompts} == {TECHNICAL_SOLUTION_CHECK_TIMEOUT_SECONDS}
+    assert {prompt["timeout"] for prompt in client.prompts} == {TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS}
     assert "补充处理阶段迁移规则" in result.review_markdown

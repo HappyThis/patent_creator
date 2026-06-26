@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ...domain.disclosure import section_title_text
 from ...domain.figures import FIGURE_LINK_PATTERN, figure_ref, figure_summary, parse_figure_ref
@@ -64,6 +64,10 @@ def figure_kit(
         - 读取附图源码: {"action":"read","ref":"figure:fig_000001"}
         - 检查一致性: {"action":"check"}
     """
+    parsed = _validate_figure_arguments(arguments)
+    if parsed["status"] == "failed":
+        return parsed
+    arguments = parsed["output"]["arguments"]
     action = str(arguments.get("action") or "")
     if action == "list":
         return {"status": "success", "output": {"figures": store.figure_summaries(project_id)}}
@@ -98,8 +102,8 @@ def figure_kit(
         if not mermaid:
             return tool_failed("figure_mermaid_required", "figure_kit.update 需要非空 mermaid。")
         title_value = arguments.get("title")
-        title = str(title_value).strip() if title_value is not None else None
-        result = store.update_figure(project_id, figure_id, title=title, mermaid=mermaid)
+        update_title = str(title_value).strip() if title_value is not None else None
+        result = store.update_figure(project_id, figure_id, title=update_title, mermaid=mermaid)
         if result.get("status") == "failed":
             return result
         return {
@@ -116,6 +120,21 @@ def figure_kit(
         return {"status": "success", "output": {"deleted": True, "figure_id": figure_id, "ref": figure_ref(figure_id)}}
 
     return tool_failed("invalid_action", f"不支持的 figure_kit action：{action}")
+
+
+def _validate_figure_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        parsed = FigureKitArguments.model_validate(arguments)
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        location = ".".join(str(part) for part in first.get("loc", ())) or "arguments"
+        message = str(first.get("msg") or "参数不符合工具 schema。")
+        return tool_failed(
+            "invalid_tool_arguments",
+            f"工具参数不符合 schema：{location}: {message}",
+            retry_hint="请严格按照当前工具的 parameters schema 重新调用。",
+        )
+    return {"status": "success", "output": {"arguments": parsed.model_dump(exclude_none=True)}}
 
 
 def check_figures(store: WorkspaceStore, project_id: str) -> dict[str, Any]:
