@@ -1,0 +1,31 @@
+{
+  "status": "scored",
+  "total_score": 97,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住共享 Markdown 可审阅/可版本控制与访问、命中、热度、近期性等高频运行时信号之间的矛盾，并明确目标是不污染 Git diff 同时保留排序价值。",
+    "核心构思完整，覆盖共享稳定层、本机运行时信号层、知识标识映射、事件队列、幂等更新、读取融合、写入剥离、旧动态字段迁移和清理一致性。",
+    "技术手段粒度高，给出了字段分层、knowledgeId 生成、轻量签名与稳定内容指纹、多级迁移匹配、事务批处理、衰减排序公式、父级传播、orphan/migrated/archived/deleted 状态机等可保护机制。",
+    "要素协同清楚，能说明 Markdown、sidecar 状态库、检索索引、共享只读来源、派生摘要、文件变化扫描、合并删除补偿之间的运行关系。",
+    "对项目快照事实适配较好，识别了 Markdown frontmatter、importance/maturity/recency/accessCount/updateCount、read-only source、derived abstract/overview 与 stale knowledge 清理等背景。"
+  ],
+  "weaknesses": [
+    "方案篇幅很大，部分参数和权重如 0.55/0.15/0.10 的排序公式、阈值、状态字段偏具体实现假设，作为交底书可以保留为实施例，但技术效果论证没有逐项解释这些数值选择的必要性。",
+    "sidecar 或本机状态库故障的 fail-open 机制已有描述，但主要集中在反馈事件和检索静态回退，对知识写入、人工整理保存时 sidecar 故障如何隔离的说明稍弱于其他部分。",
+    "成熟度被拆成人工成熟度和 localMaturityDelta 是合理变形，但对需求中“成熟度”动态信号与共享稳定成熟度之间的边界可以再更明确。"
+  ],
+  "missing_key_mechanisms": [
+    "更明确的 sidecar 读写失败诊断与主流程隔离规则，例如知识内容保存成功但动态信号写入失败时的错误记录、重试和不回写 Markdown 的处理。",
+    "对排序公式权重、迁移置信阈值、保留期限等参数的可配置范围或替代实施方式说明可进一步补强。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到本 case 的高分深度标尺。它不是只说“把元数据放数据库”，而是完整提出共享语义 frontmatter 与本机运行时 sidecar 的分层存储、基于知识标识和指纹的绑定/迁移、事件队列事务更新、检索时静态特征与动态信号融合排序、旧 frontmatter 动态字段迁移兼容、只读 source 写入隔离、派生摘要处理以及删除/合并/归档的一致性机制。与参考路径相比，它采用了更细的状态机、指纹迁移和排序公式，属于等价且更展开的机制路线。未触发“没有读取融合”“没有迁移兼容”“sidecar 阻断主流程”等上限；扣分主要来自少量过度具体的未校准权重和 fail-open 主流程隔离描述不如其他机制充分。"
+}

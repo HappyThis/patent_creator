@@ -1,0 +1,76 @@
+[
+  {
+    "case_id": "002",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      92.0,
+      93.0,
+      91.0,
+      94.0,
+      93.0
+    ],
+    "average_score": 92.6,
+    "min_score": 91.0,
+    "max_score": 94.0,
+    "score_stddev": 1.019803902718557,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "“最多启动一次有效推理”的效果表述略强，方案更稳妥的效果应表述为通过任务阶段和执行标识防止同一外部输入被并发或重复有效处理。",
+      "交底书表达整体可保护性较强，但部分内容仍带工程设计口吻，如字段清单和接口返回项较多，专利必要特征可再凝练。",
+      "任务记录字段中写到“原始输入或输入摘要”，若只保留摘要则不足以在崩溃后安全重建用户输入；方案没有明确要求恢复所需的完整输入或可重放输入引用必须持久化。",
+      "关于“同一会话路由到对应 agent 实例”“同一持久化执行环境”“执行 fiber 记录”等部分更像可选实现假设；若项目快照未确认这些既有结构，作为既有能力表述略有风险。",
+      "后台执行单元的领取机制仍偏概述，未充分展开 accepted 到 running 的条件领取、执行者标识或租约，以防调度、恢复和重复唤醒同时处理同一非终态任务。"
+    ],
+    "top_missing_key_mechanisms": [
+      "任务记录中独立的输入应用边界字段或 checkpoint，例如 input_applied、applied_message_id、applied_at，用于直接区分写入前崩溃和写入后崩溃。",
+      "全流程条件终态写入规则，例如完成回调只能在状态仍为 running 且版本匹配时写入 completed，不能覆盖 cancelRequested、cancelled 或 cleaned。",
+      "后台执行器的条件领取/租约机制：以事务或 CAS 将待执行任务改为执行中，并绑定执行者或执行轮次，防止多个执行者同时处理。",
+      "后台执行器领取待执行任务时的事务性 compare-and-set、execution_owner 或租约机制。",
+      "已应用输入但缺少可恢复执行证据时的保守处置路径，例如标记 failed/diagnostic，而不是默认续接或重新驱动。"
+    ]
+  },
+  {
+    "case_id": "006",
+    "runs": 5,
+    "parsed_runs": 5,
+    "scored_runs": 5,
+    "artifact_success_rate": 1.0,
+    "artifact_success_runs": 5,
+    "status_counts": {
+      "scored": 5
+    },
+    "scores": [
+      88.0,
+      86.0,
+      89.0,
+      91.0,
+      93.0
+    ],
+    "average_score": 89.4,
+    "min_score": 86.0,
+    "max_score": 93.0,
+    "score_stddev": 2.4166091947189146,
+    "failure_statuses": [],
+    "top_weaknesses": [
+      "sidecar 的批量读取接口和索引组织没有展开，虽然流程可实施，但在高并发检索或大规模知识树场景下的读取效率机制仍不够具体。",
+      "交底书表达中包含较多实现和产品流程描述，可保护的必要技术特征已经存在，但边界特征还可以更权利要求化。",
+      "团队级聚合摘要通道作为扩展合理，但与核心分层方案相比机制较概括，审核写入低频字段的边界还可更明确。",
+      "对 sidecar 或运行态信号层的并发安全、原子读改写、版本检查、单写队列等机制没有明确展开，是相对参考高分方案的主要缺口。",
+      "对旧 Markdown 中已经存在的动态 frontmatter 字段如何兼容读取、懒迁移或剥离到本机层说明不足。"
+    ],
+    "top_missing_key_mechanisms": [
+      "sidecar 读写失败时的 fail-open 规则和诊断记录方式。",
+      "sidecar/本机信号存储不可用、损坏或读写失败时的失败隔离和 fail-open 回退规则。",
+      "sidecar/本机运行时信号层读写失败时的 fail-open、诊断和默认值回退机制。",
+      "动态层故障隔离机制：sidecar/SQLite/JSON 损坏、锁冲突或写入失败时使用默认信号生成融合视图，并保证 Markdown 内容读取和保存不被阻断。",
+      "批量动态信号读取机制：索引或检索阶段按候选键集合一次性加载动态记录，减少排序融合阶段的 I/O 放大。"
+    ]
+  }
+]

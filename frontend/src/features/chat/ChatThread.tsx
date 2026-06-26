@@ -7,7 +7,10 @@ type ChatThreadProps = {
   events: ChatEvent[];
 };
 
-type StatusEvent = Extract<ChatEvent, { kind: 'round_status' | 'context_status' }>;
+type StatusEvent = Extract<
+  ChatEvent,
+  { kind: 'round_status' | 'context_status' | 'quality_enhancement_status' | 'llm_retry_status' }
+>;
 
 type TraceBlock =
   | { kind: 'message'; event: ChatMessageEvent }
@@ -28,7 +31,8 @@ type RenderBlock =
 
 export function ChatThread({ events }: ChatThreadProps) {
   const [hoveredAssistantRound, setHoveredAssistantRound] = useState<string | null>(null);
-  const hasLiveRound = useMemo(() => hasLiveAssistantRound(events), [events]);
+  const [openTraceRounds, setOpenTraceRounds] = useState<Set<string>>(() => new Set());
+  const hasLiveRound = useMemo(() => hasLiveThreadActivity(events), [events]);
   const liveNowMs = useLiveNow(hasLiveRound);
   const blocks = useMemo(() => buildRenderBlocks(events, liveNowMs), [events, liveNowMs]);
 
@@ -40,6 +44,7 @@ export function ChatThread({ events }: ChatThreadProps) {
         }
 
         if (block.kind === 'assistant_round') {
+          const traceKey = `${block.roundKey}_${index}`;
           const isTimeVisible = hoveredAssistantRound === block.roundKey;
           const hoverProps = {
             onMouseEnter: () => setHoveredAssistantRound(block.roundKey),
@@ -47,21 +52,40 @@ export function ChatThread({ events }: ChatThreadProps) {
             onFocus: () => setHoveredAssistantRound(block.roundKey),
             onBlur: () => setHoveredAssistantRound((current) => (current === block.roundKey ? null : current)),
           };
+          const isTraceOpen = openTraceRounds.has(traceKey);
+          const toggleTrace = () => {
+            setOpenTraceRounds((current) => {
+              const next = new Set(current);
+              if (next.has(traceKey)) {
+                next.delete(traceKey);
+              } else {
+                next.add(traceKey);
+              }
+              return next;
+            });
+          };
 
           return (
             <div key={`assistant_round_${block.roundKey}_${index}`} className="assistant-round" {...hoverProps}>
-              {block.traceBlocks.length > 0 ? (
-                <details className="assistant-round-trace">
-                  <summary>
+              {block.traceBlocks.length > 0 || block.durationLabel ? (
+                <div className={`assistant-round-trace ${isTraceOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="assistant-round-trace-summary"
+                    aria-expanded={isTraceOpen}
+                    onClick={toggleTrace}
+                  >
                     <span>过程记录</span>
                     <small>{formatTraceSummary(block.traceBlocks, block.durationLabel)}</small>
-                  </summary>
-                  {block.traceBlocks.length > 0 ? (
+                  </button>
+                  {isTraceOpen && block.traceBlocks.length > 0 ? (
                     <div className="assistant-round-trace-body">
-                      {block.traceBlocks.map((traceBlock, traceIndex) => renderTraceBlock(traceBlock, traceIndex))}
+                      {block.traceBlocks.map((traceBlock, traceIndex) =>
+                        renderTraceBlock(traceBlock, traceIndex, liveNowMs),
+                      )}
                     </div>
                   ) : null}
-                </details>
+                </div>
               ) : null}
               {renderMessage(block.finalMessage, 'assistant', isTimeVisible)}
             </div>
@@ -72,13 +96,14 @@ export function ChatThread({ events }: ChatThreadProps) {
           return <TimelineList key={`process_${index}`} items={block.items} />;
         }
 
-        return renderStatus(block.event);
+        return renderStatus(block.event, undefined, liveNowMs);
       })}
     </section>
   );
 }
 
 function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], showRoundTime = false) {
+  const shouldRenderBubble = !(role === 'assistant' && event.status === 'failed');
   return (
     <article
       key={event.id}
@@ -86,22 +111,32 @@ function renderMessage(event: ChatMessageEvent, role: ChatMessageEvent['role'], 
         'message-row',
         role,
         showRoundTime ? 'show-round-time' : '',
+        !shouldRenderBubble ? 'note-only' : '',
       ].filter(Boolean).join(' ')}
     >
-      <div
-        className={`message-bubble ${role}`}
-        onCopy={role === 'user' ? (copyEvent) => copyPlainUserMessage(copyEvent, event.text ?? '') : undefined}
-      >
-        {role === 'user' ? (
-          <div className="plain-message-text">{event.text ?? ''}</div>
-        ) : event.is_placeholder && event.is_streaming ? (
-          <ThinkingIndicator />
-        ) : (
-          <div className="markdown-body">
-            <MarkdownContent>{event.text ?? ''}</MarkdownContent>
-          </div>
-        )}
-      </div>
+      {shouldRenderBubble ? (
+        <div
+          className={`message-bubble ${role}`}
+          onCopy={role === 'user' ? (copyEvent) => copyPlainUserMessage(copyEvent, event.text ?? '') : undefined}
+        >
+          {role === 'user' ? (
+            <div className="plain-message-text">{event.text ?? ''}</div>
+          ) : event.is_placeholder && event.is_streaming ? (
+            <ThinkingIndicator />
+          ) : (
+            <div className="markdown-body">
+              <MarkdownContent>{event.text ?? ''}</MarkdownContent>
+            </div>
+          )}
+        </div>
+      ) : null}
+      {role === 'assistant' && event.status ? (
+        <div className={`message-note ${event.status}`}>
+          {event.status === 'interrupted'
+            ? event.detail ?? '输出中断，已保留当前内容。'
+            : event.detail ?? '本轮未完成。'}
+        </div>
+      ) : null}
       <time>{event.timestamp}</time>
     </article>
   );
@@ -150,7 +185,7 @@ function stripSelectionBoundaryNewlines(value: string) {
   return value.replace(/^(?:\r?\n)+/, '').replace(/(?:\r?\n)+$/, '');
 }
 
-function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
+function renderTraceBlock(block: TraceBlock, index: number, liveNowMs: number | null): ReactNode {
   if (block.kind === 'message') {
     return (
       <article key={`trace_message_${block.event.id}_${index}`} className="trace-message">
@@ -165,25 +200,87 @@ function renderTraceBlock(block: TraceBlock, index: number): ReactNode {
     return <TimelineList key={`trace_process_${index}`} items={block.items} label="工具调用" defaultOpen />;
   }
 
-  return renderStatus(block.event, `trace_status_${block.event.id}_${index}`);
+  return renderStatus(block.event, `trace_status_${block.event.id}_${index}`, liveNowMs);
 }
 
-function renderStatus(event: StatusEvent, key = event.id) {
+function renderStatus(event: StatusEvent, key = event.id, liveNowMs: number | null = null) {
+  if (event.kind === 'llm_retry_status') {
+    const label = formatLLMRetryLabel(event, liveNowMs);
+    const status =
+      event.status === 'failed' ? 'failed' : event.status === 'done' ? 'done' : 'running';
+    return renderProcessStatusDivider({
+      key,
+      className: 'llm-retry-status',
+      status,
+      label,
+      detail: event.detail,
+      ariaLabel: label,
+    });
+  }
+
+  if (event.kind === 'quality_enhancement_status') {
+    const label =
+      event.status === 'failed' ? '未增强' : event.status === 'done' ? '已增强' : '增强中';
+    return renderProcessStatusDivider({
+      key,
+      className: `quality-enhancement-status ${event.phase}`,
+      status: event.status,
+      label,
+      progress: `${event.progress}%`,
+      detail: event.detail,
+      ariaLabel: `${event.summary}，${event.progress}%`,
+    });
+  }
+
   if (event.kind === 'context_status') {
-    return (
-      <article key={key} className={`context-divider ${event.status}`}>
-        <span>
-          {event.summary}
-          {event.detail ? <small>{event.detail}</small> : null}
-        </span>
-      </article>
-    );
+    const label =
+      event.status === 'failed' ? '压缩失败' : event.status === 'done' ? event.summary : '压缩中';
+    return renderProcessStatusDivider({
+      key,
+      className: 'context-divider',
+      status: event.status,
+      label,
+      detail: event.detail,
+      ariaLabel: event.summary,
+    });
   }
 
   return (
     <article key={key} className={`round-status ${event.status}`}>
       <span>{event.summary}</span>
       {event.detail ? <small>{event.detail}</small> : null}
+    </article>
+  );
+}
+
+function renderProcessStatusDivider({
+  key,
+  className,
+  status,
+  label,
+  progress,
+  detail,
+  ariaLabel,
+}: {
+  key: string;
+  className: string;
+  status: 'running' | 'done' | 'failed';
+  label: string;
+  progress?: string;
+  detail?: string;
+  ariaLabel: string;
+}) {
+  return (
+    <article
+      key={key}
+      className={`process-status-divider ${className} ${status}`}
+      aria-label={ariaLabel}
+    >
+      <div className="process-status-row">
+        <span className="process-status-label">{label}</span>
+        {progress ? <b>{progress}</b> : null}
+      </div>
+      {detail ? <small>{detail}</small> : null}
     </article>
   );
 }
@@ -352,6 +449,18 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
       continue;
     }
 
+    if (event.kind === 'quality_enhancement_status') {
+      flushRound();
+      blocks.push({ kind: 'status', event });
+      continue;
+    }
+
+    if (event.kind === 'llm_retry_status') {
+      flushRound();
+      blocks.push({ kind: 'status', event });
+      continue;
+    }
+
     if (event.kind === 'round_status') {
       const roundKey = resolveRoundKey(event.round_id, event.message_id);
       if (roundKey && (!pendingRound || pendingRound.roundKey !== roundKey)) {
@@ -379,8 +488,35 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
   return blocks;
 }
 
-function hasLiveAssistantRound(events: ChatEvent[]) {
-  return events.some((event) => event.kind === 'message' && event.role === 'assistant' && event.is_streaming);
+function hasLiveThreadActivity(events: ChatEvent[]) {
+  return events.some(
+    (event) =>
+      (event.kind === 'message' && event.role === 'assistant' && event.is_streaming) ||
+      (event.kind === 'llm_retry_status' && (event.status === 'waiting' || event.status === 'retrying')),
+  );
+}
+
+function formatLLMRetryLabel(event: Extract<ChatEvent, { kind: 'llm_retry_status' }>, liveNowMs: number | null) {
+  if (event.status === 'done') {
+    return `模型连接已恢复，完成第 ${event.retry_index}/${event.max_retries} 次重试`;
+  }
+  if (event.status === 'failed') {
+    return `模型连接失败，第 ${event.retry_index}/${event.max_retries} 次重试后仍未恢复`;
+  }
+  if (event.status === 'retrying') {
+    return `${event.reason}，正在进行第 ${event.retry_index}/${event.max_retries} 次重试`;
+  }
+
+  const fallbackRemaining = Math.ceil(event.retry_after_seconds);
+  const retryAtMs = event.retry_at_ms;
+  const remainingSeconds =
+    retryAtMs && liveNowMs
+      ? Math.max(0, Math.ceil((retryAtMs - liveNowMs) / 1000))
+      : Math.max(0, fallbackRemaining);
+  if (remainingSeconds <= 0) {
+    return `${event.reason}，正在进行第 ${event.retry_index}/${event.max_retries} 次重试`;
+  }
+  return `${event.reason}，${remainingSeconds} 秒后进行第 ${event.retry_index}/${event.max_retries} 次重试`;
 }
 
 function getAssistantRoundKey(event: ChatMessageEvent) {

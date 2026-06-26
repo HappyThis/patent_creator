@@ -246,6 +246,41 @@ class WorkspaceStore:
     def read_session_events(self, project_id: str, session_id: str) -> list[SessionEvent]:
         return list(self.iter_session_events(project_id, session_id))
 
+    def recent_technical_solution_enhancement_history(
+        self,
+        project_id: str,
+        *,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        records: list[tuple[str, int, dict[str, Any]]] = []
+        sessions_dir = self.project_dir(project_id) / "sessions"
+        if not sessions_dir.exists():
+            return []
+
+        for path in sessions_dir.glob("*.jsonl"):
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        event = SessionEvent.model_validate_json(line)
+                        if event.type != "technical_solution_enhancement_summary":
+                            continue
+                        record = event.payload.get("record")
+                        if isinstance(record, dict):
+                            records.append((event.ts, event.seq, record))
+            except (OSError, UnicodeDecodeError, ValueError, ValidationError) as exc:
+                logger.warning(
+                    "skipping invalid enhancement history project_id=%s path=%s error=%s",
+                    project_id,
+                    path,
+                    exc,
+                )
+                continue
+
+        records.sort(key=lambda item: (item[0], item[1]))
+        return [record for _, _, record in records[-max(0, limit) :]]
+
     def iter_session_events(self, project_id: str, session_id: str) -> Iterator[SessionEvent]:
         path = self.session_file(project_id, session_id)
         if not path.exists():

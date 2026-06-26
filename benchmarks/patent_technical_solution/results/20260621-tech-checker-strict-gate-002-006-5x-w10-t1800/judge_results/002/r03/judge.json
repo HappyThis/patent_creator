@@ -1,0 +1,33 @@
+{
+  "status": "scored",
+  "total_score": 92,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 19,
+    "technical_depth": 22,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住外部提交场景的快速确认、异步执行、幂等重试、会话输入重复写入和休眠重启恢复判定之间的核心矛盾。",
+    "提出了持久化任务账本、幂等索引、状态机、后台调度、对话注入边界、taskId 与 requestId/消息/流标识映射、取消清理和恢复协调器的组合机制，技术构思完整。",
+    "对输入应用边界描述较充分：accepted/queued 与 injecting/running 分离，消息持久化后记录消息标识，恢复时禁止再次追加同一用户输入。",
+    "恢复分支覆盖了未注入、注入中但无消息、已注入、有取消标志和运行中断等主要状态，能支持重启后一致性判定。",
+    "技术效果能从幂等索引、持久状态、输入应用 checkpoint 和恢复规则自然推出，符合本题高质量深度标尺。"
+  ],
+  "weaknesses": [
+    "后台执行器如何防止多个执行者并发领取同一 accepted/queued 任务没有明确写成条件领取、租约或版本号比较更新机制。",
+    "completed、failed、cancelled 等终态写入虽然有“终态优先”和取消晚于终态的表述，但缺少明确的条件终态更新规则，迟到完成事件不得覆盖已取消或已清理状态的保护机制不够硬。",
+    "清理状态使用 cleanup 作为阶段，但与终态记录保留、幂等索引过期和迟到执行结果之间的条件约束还可以更精确。",
+    "部分内容偏工程架构说明，例如接口层、调度器、恢复协调器命名较多；不过主体仍是可保护的技术机制。"
+  ],
+  "missing_key_mechanisms": [
+    "针对任务领取的原子条件更新机制，例如仅当状态仍为 accepted/queued 且未取消时更新为 running/injecting，并写入执行者或租约，防止并发后台执行。",
+    "针对终态写入的 compare-and-set 或版本校验机制，例如只有当前状态仍为 running/cancel_requested 时才能写入 completed/failed/cancelled，且不得覆盖 terminal/cleanup。",
+    "清理后迟到执行结果的处理规则，例如通过保留最小审计记录、状态版本或 tombstone 阻断迟到回写。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到 90 分以上强答案水平。它没有机械复述参考方案，而是以任务账本和对话注入边界形成了等价深度机制：持久接收边界保证快速确认，幂等索引合并重复提交，injecting/running 与消息标识映射构成输入应用 checkpoint，恢复协调器根据任务账本、消息记录、流记录和取消标志判定下一步动作。总分未受“未区分任务接收与会话输入应用”或“没有幂等标识”上限约束，因为这两点均有清晰机制。主要扣分来自条件领取和条件终态更新没有被明确写成原子状态转换规则，因此相对参考方案的并发执行防护和迟到结果覆盖防护略弱。"
+}

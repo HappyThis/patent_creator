@@ -7,10 +7,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
-import pytest
 
 from app.agents.runtime.openai_responses import OpenAIResponsesClient
-from app.core import ApiError
 from app.core.config import Settings
 
 
@@ -22,8 +20,12 @@ class FakeResponses:
     async def create(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         if len(self.responses) > 1:
-            return self.responses.pop(0)
-        return self.responses[0]
+            response = self.responses.pop(0)
+        else:
+            response = self.responses[0]
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class FakeOpenAIClient:
@@ -51,6 +53,16 @@ class FailingStream:
         raise self._error
 
 
+class OutputItemThenFailingStream:
+    def __init__(self, item: Any, error: Exception) -> None:
+        self._item = item
+        self._error = error
+
+    async def __aiter__(self) -> Any:
+        yield SimpleNamespace(type="response.output_item.done", item=self._item)
+        raise self._error
+
+
 def make_settings(
     tmp_path: Path,
     *,
@@ -65,6 +77,7 @@ def make_settings(
         openai_api_key="test-key",
         openai_web_search_enabled=web_search_enabled,
         llm_max_retries=llm_max_retries,
+        llm_retry_delay_seconds=0,
     )
 
 
@@ -113,6 +126,32 @@ def test_generate_json_uses_responses_json_format(tmp_path: Path) -> None:
     assert call["text"] == {"format": {"type": "json_object"}}
     assert call["reasoning"] == {"effort": "high"}
     assert call["timeout"] == 180
+
+
+def test_generate_json_retries_retryable_llm_error(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient([httpx.ConnectError("connect failed"), response_with_text('{"ok": true}')])
+    client = OpenAIResponsesClient(make_settings(tmp_path, llm_max_retries=1), client=fake)  # type: ignore[arg-type]
+    retry_events: list[dict[str, Any]] = []
+
+    async def on_retry_event(event: dict[str, Any]) -> None:
+        retry_events.append(event)
+
+    result = asyncio.run(
+        client.generate_json(
+            system_prompt="system",
+            user_prompt="user",
+            on_retry_event=on_retry_event,
+        )
+    )
+
+    assert result == {"ok": True}
+    assert len(fake.responses.calls) == 2
+    assert [event["status"] for event in retry_events] == ["waiting", "retrying"]
+    assert retry_events[0]["attempt"] == 2
+    assert retry_events[0]["max_attempts"] == 2
+    assert retry_events[0]["retry_index"] == 1
+    assert retry_events[0]["max_retries"] == 1
+    assert "connect failed" in retry_events[0]["error_message"]
 
 
 def test_generate_text_does_not_request_json_format(tmp_path: Path) -> None:
@@ -435,6 +474,34 @@ def test_generate_with_tools_stream_retries_transient_read_error_before_text_del
     assert len(fake.responses.calls) == 2
 
 
+def test_generate_with_tools_stream_retries_when_only_unseen_tool_item_was_received(tmp_path: Path) -> None:
+    call_item = SimpleNamespace(
+        type="function_call",
+        call_id="call_outline",
+        name="disclosure_outline",
+        arguments='{"section_id":"sec_1"}',
+    )
+    fake = FakeOpenAIClient(
+        [
+            OutputItemThenFailingStream(call_item, httpx.ReadError("stream broke")),
+            FakeStream(completed_event("ok")),
+        ]
+    )
+    client = OpenAIResponsesClient(make_settings(tmp_path, llm_max_retries=1), client=fake)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[function_tool()],
+        )
+    )
+
+    assert result["type"] == "respond"
+    assert result["text"] == "ok"
+    assert len(fake.responses.calls) == 2
+
+
 def test_generate_with_tools_stream_does_not_retry_after_text_delta(tmp_path: Path) -> None:
     fake = FakeOpenAIClient([FailingStream(httpx.ReadError("stream broke"), text_before_error="partial")])
     client = OpenAIResponsesClient(make_settings(tmp_path, llm_max_retries=1), client=fake)  # type: ignore[arg-type]
@@ -443,16 +510,18 @@ def test_generate_with_tools_stream_does_not_retry_after_text_delta(tmp_path: Pa
     async def on_text_delta(delta: str) -> None:
         deltas.append(delta)
 
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            client.generate_with_tools_stream(
-                system_prompt="system",
-                messages=[{"role": "user", "content": "hello"}],
-                tools=[],
-                on_text_delta=on_text_delta,
-            )
+    result = asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[],
+            on_text_delta=on_text_delta,
         )
+    )
 
-    assert exc_info.value.code == "llm_stream_error"
+    assert result["type"] == "respond"
+    assert result["text"] == "partial"
+    assert result["assistant_message"]["content"] == "partial"
+    assert result["interrupted"] is True
     assert deltas == ["partial"]
     assert len(fake.responses.calls) == 1

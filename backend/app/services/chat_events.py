@@ -53,7 +53,20 @@ class ChatEventEmitter:
                 payload=event,
             )
 
-    async def agent_output(self, project_id: str, state: RoundState, text: str) -> None:
+    async def agent_output(
+        self,
+        project_id: str,
+        state: RoundState,
+        text: str,
+        *,
+        status: str | None = None,
+        detail: str | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"text": text}
+        if status:
+            payload["status"] = status
+        if detail:
+            payload["detail"] = detail
         self.store.append_session_event(
             project_id,
             state.session_id,
@@ -61,7 +74,7 @@ class ChatEventEmitter:
             scope="main",
             round_id=state.round_id,
             message_id=state.message_id,
-            payload={"text": text},
+            payload=payload,
         )
 
     async def failed_tool_result(

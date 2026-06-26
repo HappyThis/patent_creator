@@ -17,6 +17,8 @@ from ...core import ApiError, Settings
 
 logger = logging.getLogger("patent_creator.llm")
 
+RetryEventSink = Callable[[dict[str, Any]], Awaitable[None]]
+
 TRANSIENT_STREAM_ERRORS = (
     APIConnectionError,
     APITimeoutError,
@@ -27,6 +29,21 @@ TRANSIENT_STREAM_ERRORS = (
     httpcore.ReadError,
     httpcore.RemoteProtocolError,
 )
+
+RETRYABLE_LLM_ERRORS = (
+    APIStatusError,
+    APIConnectionError,
+    APITimeoutError,
+    APIError,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.RemoteProtocolError,
+    httpcore.ConnectError,
+    httpcore.ReadError,
+    httpcore.RemoteProtocolError,
+)
+
+RETRYABLE_STREAM_API_ERROR_CODES = {"llm_stream_error", "llm_empty_response"}
 
 
 class OpenAIResponsesClient:
@@ -49,7 +66,7 @@ class OpenAIResponsesClient:
             base_url=self.settings.openai_base_url,
             api_key=self.settings.openai_api_key,
             timeout=self.settings.llm_timeout,
-            max_retries=self.settings.llm_max_retries,
+            max_retries=self.settings.openai_sdk_max_retries,
         )
         return self._client
 
@@ -62,6 +79,7 @@ class OpenAIResponsesClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: RetryEventSink | None = None,
     ) -> str:
         client = self._require_client()
         input_items = [*_messages_to_response_input(messages or []), {"role": "user", "content": user_prompt}]
@@ -77,14 +95,11 @@ class OpenAIResponsesClient:
             request_options={"timeout": timeout if timeout is not None else self.settings.llm_timeout},
         )
         started = time.monotonic()
-        try:
-            response = await client.responses.create(**request_payload, timeout=timeout)
-        except APIStatusError as exc:
-            logger.warning("generate_text http_error status=%s body=%s", exc.status_code, _describe_api_error(exc))
-            raise ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}") from exc
-        except APIError as exc:
-            logger.warning("generate_text api_error %s", exc)
-            raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
+        response = await self._create_response_with_retries(
+            kind="generate_text",
+            create_call=lambda: client.responses.create(**request_payload, timeout=timeout),
+            on_retry_event=on_retry_event,
+        )
 
         logger.info(
             "generate_text done model=%s elapsed=%.2fs timeout=%s usage=%s",
@@ -103,6 +118,7 @@ class OpenAIResponsesClient:
         temperature: float = 0.2,
         timeout: float | None = None,
         trace_context: dict[str, Any] | None = None,
+        on_retry_event: RetryEventSink | None = None,
     ) -> dict[str, Any]:
         client = self._require_client()
         request_payload = self._base_request_payload(
@@ -118,14 +134,11 @@ class OpenAIResponsesClient:
             request_options={"timeout": timeout if timeout is not None else self.settings.llm_timeout},
         )
         started = time.monotonic()
-        try:
-            response = await client.responses.create(**request_payload, timeout=timeout)
-        except APIStatusError as exc:
-            logger.warning("generate_json http_error status=%s body=%s", exc.status_code, _describe_api_error(exc))
-            raise ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}") from exc
-        except APIError as exc:
-            logger.warning("generate_json api_error %s", exc)
-            raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
+        response = await self._create_response_with_retries(
+            kind="generate_json",
+            create_call=lambda: client.responses.create(**request_payload, timeout=timeout),
+            on_retry_event=on_retry_event,
+        )
 
         logger.info(
             "generate_json done model=%s elapsed=%.2fs timeout=%s usage=%s",
@@ -149,6 +162,7 @@ class OpenAIResponsesClient:
         tools: list[dict[str, Any]],
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
         on_audit_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_retry_event: RetryEventSink | None = None,
         response_format_json: bool = False,
         trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -177,13 +191,15 @@ class OpenAIResponsesClient:
             trace_context={**(trace_context or {}), "tool_names": tool_names},
         )
 
-        max_attempts = max(1, self.settings.llm_max_retries + 1)
+        max_attempts = self._max_llm_attempts()
         for attempt in range(1, max_attempts + 1):
             text_delta_emitted = False
+            text_parts: list[str] = []
 
             async def guarded_on_text_delta(delta: str) -> None:
                 nonlocal text_delta_emitted
                 text_delta_emitted = True
+                text_parts.append(delta)
                 if on_text_delta is not None:
                     await on_text_delta(delta)
 
@@ -204,13 +220,63 @@ class OpenAIResponsesClient:
                     on_audit_event=on_audit_event,
                     text_delta_emitted=lambda: text_delta_emitted,
                 )
-            except APIStatusError as exc:
+            except ApiError as exc:
+                if text_delta_emitted and exc.code in RETRYABLE_STREAM_API_ERROR_CODES:
+                    logger.warning(
+                        "generate_with_tools_stream interrupted_after_text_delta attempt=%d/%d code=%s",
+                        attempt,
+                        max_attempts,
+                        exc.code,
+                    )
+                    return _partial_stream_result("".join(text_parts), interrupted_message=exc.message)
+                if exc.code not in RETRYABLE_STREAM_API_ERROR_CODES or attempt >= max_attempts:
+                    raise
                 logger.warning(
-                    "generate_with_tools_stream http_error status=%s body=%s",
+                    "generate_with_tools_stream api_stream_error retrying attempt=%d/%d code=%s error=%s",
+                    attempt,
+                    max_attempts,
+                    exc.code,
+                    exc,
+                )
+                await self._wait_before_retry(
+                    kind="generate_with_tools_stream",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    on_retry_event=on_retry_event,
+                    error=exc,
+                )
+            except APIStatusError as exc:
+                if text_delta_emitted:
+                    logger.warning(
+                        "generate_with_tools_stream http_error_after_text_delta attempt=%d/%d status=%s",
+                        attempt,
+                        max_attempts,
+                        exc.status_code,
+                    )
+                    return _partial_stream_result("".join(text_parts), interrupted_message=_describe_api_error(exc))
+                if attempt >= max_attempts:
+                    logger.warning(
+                        "generate_with_tools_stream http_error final attempt=%d/%d status=%s body=%s",
+                        attempt,
+                        max_attempts,
+                        exc.status_code,
+                        _describe_api_error(exc),
+                    )
+                    raise _api_error_from_llm_exception(exc) from exc
+                logger.warning(
+                    "generate_with_tools_stream http_error retrying attempt=%d/%d status=%s body=%s",
+                    attempt,
+                    max_attempts,
                     exc.status_code,
                     _describe_api_error(exc),
                 )
-                raise ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}") from exc
+                await self._wait_before_retry(
+                    kind="generate_with_tools_stream",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    on_retry_event=on_retry_event,
+                    error=exc,
+                )
             except TRANSIENT_STREAM_ERRORS as exc:
                 if text_delta_emitted or attempt >= max_attempts:
                     logger.warning(
@@ -220,21 +286,132 @@ class OpenAIResponsesClient:
                         text_delta_emitted,
                         exc,
                     )
+                    if text_delta_emitted:
+                        return _partial_stream_result("".join(text_parts), interrupted_message=str(exc))
                     raise ApiError(502, "llm_stream_error", f"模型流式响应中断：{exc}") from exc
-                delay = min(2 ** (attempt - 1), 5)
                 logger.warning(
-                    "generate_with_tools_stream transient_error retrying attempt=%d/%d delay=%ss error=%s",
+                    "generate_with_tools_stream transient_error retrying attempt=%d/%d error=%s",
                     attempt,
                     max_attempts,
-                    delay,
                     exc,
                 )
-                await asyncio.sleep(delay)
+                await self._wait_before_retry(
+                    kind="generate_with_tools_stream",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    on_retry_event=on_retry_event,
+                    error=exc,
+                )
             except APIError as exc:
-                logger.warning("generate_with_tools_stream api_error %s", exc)
-                raise ApiError(502, "llm_http_error", f"模型调用失败：{exc}") from exc
+                if text_delta_emitted:
+                    logger.warning(
+                        "generate_with_tools_stream api_error_after_text_delta attempt=%d/%d error=%s",
+                        attempt,
+                        max_attempts,
+                        exc,
+                    )
+                    return _partial_stream_result("".join(text_parts), interrupted_message=str(exc))
+                if attempt >= max_attempts:
+                    logger.warning("generate_with_tools_stream api_error final attempt=%d/%d error=%s", attempt, max_attempts, exc)
+                    raise _api_error_from_llm_exception(exc) from exc
+                logger.warning("generate_with_tools_stream api_error retrying attempt=%d/%d error=%s", attempt, max_attempts, exc)
+                await self._wait_before_retry(
+                    kind="generate_with_tools_stream",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    on_retry_event=on_retry_event,
+                    error=exc,
+                )
 
         raise ApiError(502, "llm_stream_error", "模型流式响应中断。")
+
+    async def _create_response_with_retries(
+        self,
+        *,
+        kind: str,
+        create_call: Callable[[], Awaitable[Any]],
+        on_retry_event: RetryEventSink | None,
+    ) -> Any:
+        max_attempts = self._max_llm_attempts()
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if attempt > 1:
+                    logger.info("%s retry attempt=%d/%d model=%s", kind, attempt, max_attempts, self.settings.openai_model)
+                return await create_call()
+            except RETRYABLE_LLM_ERRORS as exc:
+                if attempt >= max_attempts:
+                    logger.warning("%s final_error attempt=%d/%d error=%s", kind, attempt, max_attempts, exc)
+                    raise _api_error_from_llm_exception(exc) from exc
+                logger.warning("%s retryable_error attempt=%d/%d error=%s", kind, attempt, max_attempts, exc)
+                await self._wait_before_retry(
+                    kind=kind,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    on_retry_event=on_retry_event,
+                    error=exc,
+                )
+        raise ApiError(502, "llm_http_error", "模型调用失败。")
+
+    async def _wait_before_retry(
+        self,
+        *,
+        kind: str,
+        attempt: int,
+        max_attempts: int,
+        on_retry_event: RetryEventSink | None,
+        error: Exception,
+    ) -> None:
+        next_attempt = attempt + 1
+        retry_index = attempt
+        max_retries = max(0, max_attempts - 1)
+        delay = max(0.0, self.settings.llm_retry_delay_seconds)
+        error_message = _retry_error_message(error)
+        retry_at_ms = int((time.time() + delay) * 1000) if delay > 0 else None
+        logger.info(
+            "%s retry_wait next_attempt=%d/%d delay=%.2fs error_type=%s",
+            kind,
+            next_attempt,
+            max_attempts,
+            delay,
+            type(error).__name__,
+        )
+        if on_retry_event is not None:
+            await on_retry_event(
+                {
+                    "status": "waiting",
+                    "reason": "模型连接失败",
+                    "attempt": next_attempt,
+                    "max_attempts": max_attempts,
+                    "retry_index": retry_index,
+                    "max_retries": max_retries,
+                    "retry_after_seconds": delay,
+                    "retry_at_ms": retry_at_ms,
+                    "error_type": type(error).__name__,
+                    "error_message": error_message,
+                    "kind": kind,
+                }
+            )
+        if delay > 0:
+            await asyncio.sleep(delay)
+        if on_retry_event is not None:
+            await on_retry_event(
+                {
+                    "status": "retrying",
+                    "reason": "模型连接失败",
+                    "attempt": next_attempt,
+                    "max_attempts": max_attempts,
+                    "retry_index": retry_index,
+                    "max_retries": max_retries,
+                    "retry_after_seconds": 0,
+                    "retry_at_ms": None,
+                    "error_type": type(error).__name__,
+                    "error_message": error_message,
+                    "kind": kind,
+                }
+            )
+
+    def _max_llm_attempts(self) -> int:
+        return max(1, self.settings.llm_max_retries + 1)
 
     def _base_request_payload(
         self,
@@ -461,6 +638,38 @@ def _assistant_message(*, content: str, tool_calls: list[dict[str, Any]], usage:
     if usage_payload:
         message["usage"] = usage_payload
     return message
+
+
+def _partial_stream_result(text: str, *, interrupted_message: str) -> dict[str, Any]:
+    return {
+        "type": "respond",
+        "text": text,
+        "assistant_message": _assistant_message(content=text, tool_calls=[]),
+        "audit_events": [],
+        "interrupted": True,
+        "interrupted_message": interrupted_message,
+    }
+
+
+def _api_error_from_llm_exception(exc: Exception) -> ApiError:
+    if isinstance(exc, APIStatusError):
+        return ApiError(502, "llm_http_error", f"模型调用失败：{_describe_api_error(exc)}")
+    if isinstance(exc, APIError):
+        return ApiError(502, "llm_http_error", f"模型调用失败：{exc}")
+    return ApiError(502, "llm_http_error", f"模型调用失败：{exc}")
+
+
+def _retry_error_message(error: Exception) -> str:
+    if isinstance(error, APIStatusError):
+        message = _describe_api_error(error)
+    elif isinstance(error, ApiError):
+        message = error.message
+    else:
+        message = str(error)
+    normalized = " ".join(message.split()).strip()
+    if not normalized:
+        normalized = type(error).__name__
+    return normalized[:300]
 
 
 def _extract_function_tool_calls(response: Any) -> list[dict[str, Any]]:

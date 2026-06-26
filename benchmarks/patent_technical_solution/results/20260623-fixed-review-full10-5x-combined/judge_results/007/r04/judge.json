@@ -1,0 +1,31 @@
+{
+  "status": "scored",
+  "total_score": 97,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 9,
+    "feasibility": 10,
+    "disclosure_fit": 4
+  },
+  "strengths": [
+    "准确抓住浏览器本地观察生命周期与服务端 durable agent turn 执行生命周期不能直接绑定的问题，并明确区分本地清理、恢复连接和执行取消三类原因。",
+    "核心构思完整：观察通道与取消通道解耦，以 turnId/requestId/runId/streamId/observerId/generationId 分别寻址执行、观察、恢复和本地代际状态。",
+    "必要技术特征覆盖充分，包括显式 cancel 控制帧、原因码映射、服务端状态机、观察者集合、恢复缓冲、ACK 游标、迟到 chunk/result 处理、幂等取消、多标签页 fan-out 和工具 continuation。",
+    "运行机理清楚，说明了 detach/resume/cancel 的状态迁移、compare-and-set 终态保护、replay 高水位与 live stream 合并，以及无观察者 grace window 的策略决策。",
+    "可配置空间充分，支持默认后台继续、按策略升级取消、资源限额取消、无观察者超时取消等不同应用语义。"
+  ],
+  "weaknesses": [
+    "技术效果部分主要分散在各机制描述中，虽然因果关系基本可推出，但没有单独集中概括为误杀避免、明确停止、UI 污染防止和资源控制等效果闭环，因此技术效果维度略有扣分。",
+    "交底书表达偏工程设计文档，字段和表格较密，专利交底中的必要特征提炼可以更集中；不过内容本身具有可保护技术特征。",
+    "个别机制如服务端重启后恢复运行实例、缓冲压缩为终态摘要等属于扩展边界，未进一步限定实施条件，但不影响主方案成立。"
+  ],
+  "missing_key_mechanisms": [
+    "缺少更集中明确的技术效果段落，将各技术手段与避免误取消、支持恢复、明确取消和迟到消息隔离逐项建立因果闭环。",
+    "可进一步提炼一组最小必要权利要求式特征，避免大量可选字段稀释核心保护点。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到并超过参考方案的等价深度。它不仅包含本地清理与服务端取消解耦、活动 turn 标识、显式取消通道、可配置策略、恢复兼容、迟到消息处理、continuation 和多观察者边界，还给出了状态机、消息字段、恢复游标、幂等取消和终态保护等可实施机制。未发现把材料未确认的既有结构或能力冒充为已有事实的问题，相关字段和状态均作为新增方案机制提出。扣分主要来自表达略偏工程规格、技术效果未集中闭环总结；不存在 rubric 中的上限扣分情形。"
+}

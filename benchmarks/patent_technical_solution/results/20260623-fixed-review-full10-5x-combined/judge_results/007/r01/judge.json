@@ -1,0 +1,34 @@
+{
+  "status": "scored",
+  "total_score": 94,
+  "dimension_scores": {
+    "technical_problem": 14.5,
+    "core_concept": 19,
+    "technical_depth": 24,
+    "mechanism_coherence": 14,
+    "technical_effect": 9.5,
+    "feasibility": 8.5,
+    "disclosure_fit": 4.5
+  },
+  "strengths": [
+    "准确抓住本地观察连接生命周期与服务端 agent turn 生命周期不能直接绑定的核心问题，并明确区分 localCleanup、serverCancel、deferUntilRequestId、retryCancel 等语义。",
+    "核心构思完整覆盖生命周期解耦、活动 requestId/turnId/runId 跟踪、显式取消消息、可配置策略、恢复兼容、工具续跑和多标签观察。",
+    "技术手段粒度很高，给出了客户端状态、服务端 controllerRegistry/streamRegistry、取消消息字段、分块序号、终止状态、幂等键和恢复水位线等必要特征。",
+    "运行机理清楚，说明了 reader cancel、组件卸载、刷新、用户停止、连接不可用、工具续跑握手前后、多标签权限等路径如何分别处理。",
+    "技术效果能够由手段自然推出：本地清理不触发服务端 abort，因此避免误杀长任务；显式取消按目标标识定位 controller，因此能中止指定 turn；chunkSeq/lastAppliedSeq 去重可减少恢复和广播交错造成的 UI 污染。"
+  ],
+  "weaknesses": [
+    "方案略显过度展开，部分字段和状态模型非常具体，但与本 case 真实项目边界的贴合度没有被充分约束，专利交底可读性略受影响。",
+    "对某些现有基础设施的表述使用了确定语气，尤其是“既有 WebSocket 流式传输”和“每请求取消控制”，若探索环境未确认这些能力，会构成事实依据风险。",
+    "配置策略虽覆盖面广，但“request-lifetime 模式”或等价的客户端 abort 同步取消服务端任务模式没有像参考方案那样以独立模式名称突出，主要分散在配置项和分类输出中。"
+  ],
+  "missing_key_mechanisms": [
+    "基本无关键机制缺失；若进一步完善，可更明确给出 durable 模式与 request-lifetime 模式之间的配置矩阵示例。",
+    "可补充更简洁的既有系统适配边界，例如哪些字段是新增、哪些只是可选实施例，避免把实施例误读为当前项目事实。"
+  ],
+  "unsupported_claims": [
+    "“既有浏览器端 agent chat、WebSocket 流式传输、服务端可恢复流和每请求取消控制”中的 WebSocket 和每请求取消控制属于对现有项目能力的确定性声明；在给定需求文本中只明确了浏览器连接流式响应和一定断线重连/恢复，未明确已有 WebSocket 或每请求取消控制。",
+    "“服务端以请求标识维护正在执行的 agent turn，并通过可恢复流保存已产生的响应分块”若作为现有事实理解，材料中仅部分支持可恢复方向，具体以请求标识维护和分块保存结构未被确认；但作为新增方案机制则可接受。"
+  ],
+  "score_rationale": "该方案达到高分档：技术问题定位准确，核心方案不是简单增加停止按钮，而是建立本地流清理与服务端 turn 取消的解耦控制体系，并通过 requestId/turnId/runId、显式取消帧、controllerRegistry/streamRegistry、状态机、幂等取消、恢复重放、迟到分块处理、工具 continuation 和多观察者权限来形成完整运行闭环。它与参考方案路径高度等价且机制更细，因此不适用“无活动标识、无配置矩阵、无恢复/continuation 边界”等上限。扣分主要来自少量对既有系统事实的确定性表述可能无依据，以及方案篇幅和字段设计偏重，导致交底表达稍显复杂。"
+}

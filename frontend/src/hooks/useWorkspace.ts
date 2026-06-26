@@ -6,10 +6,21 @@ import { buildSessionTabs } from '../features/chat/sessionTabs';
 import { useWorkspaceData } from './useWorkspaceData';
 import { useWorkspaceSelection } from './useWorkspaceSelection';
 import { useWorkspaceStream } from './useWorkspaceStream';
+import type { QualityMode } from '../types';
+
+const QUALITY_MODE_STORAGE_KEY = 'patent_creator_quality_mode';
+
+function readStoredQualityMode(): QualityMode {
+  if (typeof window === 'undefined') {
+    return 'normal';
+  }
+  return window.localStorage.getItem(QUALITY_MODE_STORAGE_KEY) === 'enhanced' ? 'enhanced' : 'normal';
+}
 
 export function useWorkspace(projectId: string | null) {
   const [composer, setComposer] = useState('');
   const [isCancelling, setIsCancelling] = useState(false);
+  const [qualityMode, setQualityModeState] = useState<QualityMode>(() => readStoredQualityMode());
   const {
     activeSectionId,
     activeBlockId,
@@ -56,6 +67,11 @@ export function useWorkspace(projectId: string | null) {
     loadSessionEvents,
     focusDocumentChange,
   });
+
+  const setQualityMode = useCallback((mode: QualityMode) => {
+    setQualityModeState(mode);
+    window.localStorage.setItem(QUALITY_MODE_STORAGE_KEY, mode);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,6 +237,7 @@ export function useWorkspace(projectId: string | null) {
           message,
           active_section_id: activeSectionId || null,
           active_block_id: activeBlockId,
+          quality_mode: qualityMode,
         },
       );
     } catch (error: unknown) {
@@ -244,6 +261,7 @@ export function useWorkspace(projectId: string | null) {
     composer,
     invalidateSessionEventLoads,
     project,
+    qualityMode,
     refreshProject,
     selectedSessionId,
     startChatMessageStream,
@@ -328,6 +346,7 @@ export function useWorkspace(projectId: string | null) {
     isCancelling,
     canCancelRound,
     contextUsage,
+    qualityMode,
     sessionTabs,
     activeSectionId,
     activeBlockId,
@@ -336,6 +355,7 @@ export function useWorkspace(projectId: string | null) {
     recentBlockIds,
     setComposer,
     setActiveSectionId,
+    setQualityMode,
     submitMessage,
     cancelCurrentRound,
     exportDocx,

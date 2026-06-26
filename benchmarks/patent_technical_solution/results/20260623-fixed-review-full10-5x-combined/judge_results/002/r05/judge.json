@@ -1,0 +1,37 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 15,
+    "technical_effect": 10,
+    "feasibility": 9,
+    "disclosure_fit": 3
+  },
+  "strengths": [
+    "准确抓住外部程序化提交场景的核心矛盾：快速确认、调用方重试、会话输入重复污染、后台执行、取消清理和休眠/重启恢复之间的一致性问题。",
+    "提出了独立 taskId 任务登记、持久接收边界、显式/摘要幂等键、输入消息应用 checkpoint、requestId/messageId 关联和终态条件更新的组合机制，深度与参考方案等价且更完整。",
+    "状态机和 phase 设计细，覆盖已接收、排队中、运行中、完成、失败、取消、清理、跳过等状态，并说明终态不得被运行态覆盖。",
+    "恢复分支充分区分了入队前崩溃、消息写入前后崩溃、部分流已保存、最终 assistant 消息已存在但任务状态未更新、残留运行记录等情况。",
+    "取消和清理机制没有简单删除会话历史，而是通过 cancelRequested、cleanupRequested、tombstone、messageId 引用检查和 generation 失效规则保护 transcript 一致性。",
+    "能够把项目快照中的 saveMessages、continueLastTurn、TurnQueue、AbortRegistry、ResumableStream、runFiber/stash、onChatRecovery 等既有能力纳入任务级可靠提交机制，协同关系清楚。",
+    "技术效果有明确因果链：持久登记产生快速且可恢复确认，幂等唯一约束避免重复创建任务，inputMessageId/requestId 复用避免重复写入和执行，条件状态迁移避免迟到结果覆盖。"
+  ],
+  "weaknesses": [
+    "交底书表达略偏工程架构说明，字段和接口枚举非常多，部分内容更像实现设计文档，核心可保护特征需要进一步收束。",
+    "少数机制依赖较强的工程假设，例如外部任务登记表与 AIChatAgent 内部队列、generation、流式恢复元数据之间的可访问性和事务整合方式，虽然可实施但未完全抽象化。",
+    "恢复续跑部分给出多种策略，但对于非幂等工具已执行且结果未知时如何避免重复副作用，只在异常分类中概述，未形成同等深度的工具副作用 checkpoint 机制。"
+  ],
+  "missing_key_mechanisms": [
+    "非幂等工具调用或外部副作用已经发生但模型/任务中断时的更细粒度副作用确认与补偿机制。",
+    "将任务登记事务与会话消息持久化事务跨表/跨组件一致化的抽象边界，可进一步明确为同一 Durable Object SQLite 事务或可验证的两阶段 checkpoint。",
+    "从专利保护角度提炼独立权利要求式的最小必要特征组合，目前细节较多但主从层次不够集中。"
+  ],
+  "unsupported_claims": [
+    "“generation 表示目标会话在当前 transcript 清空或重置前后的代际”可由项目中的 TurnQueue generation 类似机制支持，但作为外部任务层可直接读取和持久关联的既有能力没有完全确认。",
+    "“onChatRecovery 接收 requestId、partialText、partialParts、recoveryData 和 messages 后返回是否保存部分结果及是否续跑”整体方向有依据，但文中把它直接并入外部任务登记层的恢复决策属于新增集成方案，不应理解为现有任务级接口已存在。"
+  ],
+  "score_rationale": "该方案达到高分档：真实技术问题抓得准，核心构思不是普通异步队列，而是持久任务登记、幂等身份、输入应用边界、条件领取/终态更新和恢复判定的组合。其机制覆盖参考方案全部关键点，并进一步细化了流式输出、取消、清理、tombstone、requestId/messageId 关联和部分结果恢复。总分超过 90 的原因是它具备完整可保护的技术特征和清晰因果闭环；rubric 中关于未区分任务接收与输入应用、缺少幂等、缺少条件终态更新等上限均不适用。扣分主要来自表达偏工程实现、部分现有框架能力与新增任务层之间的边界说得过于确定，以及非幂等工具副作用恢复机制仍偏概述。"
+}

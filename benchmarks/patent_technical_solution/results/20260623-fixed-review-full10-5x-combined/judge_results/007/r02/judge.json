@@ -1,0 +1,32 @@
+{
+  "status": "scored",
+  "total_score": 96,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 9,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住本地 reader/组件/连接生命周期与服务端 durable turn 生命周期被错误耦合的问题，并明确把普通 detach 与显式 server-cancel 分层。",
+    "核心构思完整，包含 requestId/turnId 关联、显式取消通道、AbortRegistry 门控、恢复 replay、工具 continuation、多标签观察和可配置策略。",
+    "技术手段粒度高，给出了客户端状态、服务端状态、协议帧、缓存序号、取消幂等、终态覆盖规则、宽限期和全局清理等必要特征。",
+    "要素协同较清楚，能够说明 transport、ReadableStream、WebSocket 帧、服务端 turn、resumeCache、observerConnections 与 continuation 之间如何配合。",
+    "技术效果基本能由机制推出，包括避免刷新/卸载误杀长任务、保留明确停止能力、减少迟到 chunk 污染、兼容恢复和多观察者。",
+    "符合专利交底书技术方案写法，具有可保护的生命周期解耦、策略判定和取消传递机制。"
+  ],
+  "weaknesses": [
+    "方案非常详尽但部分字段和帧类型偏新增系统设计，少量内容接近接口规格而非必要技术特征，可能增加实施复杂度。",
+    "技术效果没有单独集中成因果闭环章节，虽然散布在各机制说明中，但对每类效果的因果归纳还可更凝练。",
+    "部分边界如 resumeToken、cancel-ack、terminal-chunk、observer 权限模型需要在真实代码中新增较多协议和状态支撑，实施成本较高。"
+  ],
+  "missing_key_mechanisms": [
+    "未明显缺失 rubric 要求的关键机制；主要可补强的是把当前 AI SDK abortSignal、ReadableStream.cancel 与用户 stop 之间的来源识别规则写得更精确。",
+    "可进一步明确现有 wire chunk 不携带客户端可见 seq 时，如何从已有 chunk_index/缓存顺序升级到客户端去重序号。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到并超过参考方案的等价深度：不仅区分本地清理与服务端取消，还系统化给出活动 turn 标识、显式取消帧、AbortRegistry 控制、恢复 replay、多标签观察、工具 continuation、迟到消息/终态并发处理和策略矩阵。探索环境中确有 WebSocketChatTransport、requestId、AbortRegistry、ResumableStream、stream resume ACK、continuation 等基础，因此“基于现有能力增加取消意图判定层”的大前提有依据；新增的 cancel-ack、terminal-chunk、resumeToken、observerConnections 等被表述为方案新增机制而非既有事实，不列为 unsupported_claim。扣分主要来自方案略过度工程化，且效果闭环可更集中、部分新增协议状态实施成本较高。所有 rubric 上限均不适用：方案有明确核心构思、显式服务端取消能力、活动标识、配置行为矩阵，并覆盖恢复、迟到消息、continuation 和多观察者边界。"
+}

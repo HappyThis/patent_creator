@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar
 
 from ..agents.prompts import build_main_agent_system_prompt
 from ..agents.runtime.message_preparation import prepare_messages_for_model_request
@@ -20,6 +21,17 @@ from ..storage.workspace_store import WorkspaceStore
 from .chat_events import ChatEventEmitter
 from .chat_protocol import DEFAULT_CHANGED_PAYLOAD, RoundState, assistant_message_text, build_commit_message
 from .event_bus import SessionEventBus
+from .technical_solution_checker import (
+    TechnicalSolutionChangeAssessmentResult,
+    TechnicalSolutionChangeAssessor,
+    TechnicalSolutionCheckResult,
+    TechnicalSolutionCheckValidationError,
+    TechnicalSolutionEnhancementSummaryResult,
+    TechnicalSolutionEnhancementSummarizer,
+    TechnicalSolutionImprovementAdvisor,
+    enhancement_feedback_user_message,
+    technical_solution_markdown,
+)
 
 logger = logging.getLogger("patent_creator.chat")
 LockedResult = TypeVar("LockedResult")
@@ -50,6 +62,9 @@ class ChatService:
         self.settings = settings
         self.llm_client = llm_client
         self.events = ChatEventEmitter(store, bus, executor)
+        self.technical_solution_change_assessor = TechnicalSolutionChangeAssessor(llm_client, settings)
+        self.technical_solution_improvement_advisor = TechnicalSolutionImprovementAdvisor(llm_client, settings)
+        self.technical_solution_enhancement_summarizer = TechnicalSolutionEnhancementSummarizer(llm_client, settings)
         self._project_locks: dict[str, _ProjectLockState] = {}
         self._project_locks_guard = asyncio.Lock()
         self._running_tasks: dict[tuple[str, str, str], asyncio.Task[None]] = {}
@@ -205,6 +220,9 @@ class ChatService:
     async def _run_round(self, project_id: str, payload: ChatMessageRequest, state: RoundState) -> None:
         key = (project_id, state.session_id)
         system_prompt = build_main_agent_system_prompt()
+        llm_retry_seen = False
+        llm_retry_finalized = False
+        last_llm_retry_payload: dict[str, Any] | None = None
 
         async def on_context_event(event_name: str, event_payload: dict[str, Any]) -> None:
             await self.bus.publish(
@@ -217,11 +235,59 @@ class ChatService:
                 },
             )
 
+        async def publish_llm_retry_status(event_payload: dict[str, Any]) -> None:
+            stored_payload = {**event_payload, "scope": "main"}
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="llm_retry_status",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload=stored_payload,
+            )
+            await self.bus.publish(
+                key,
+                "llm_retry_status",
+                {
+                    **stored_payload,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+
+        async def on_llm_retry_event(event_payload: dict[str, Any]) -> None:
+            nonlocal llm_retry_seen, last_llm_retry_payload
+            llm_retry_seen = True
+            last_llm_retry_payload = dict(event_payload)
+            await publish_llm_retry_status(event_payload)
+
+        async def finalize_llm_retry_status(status: str, error_message: str | None = None) -> None:
+            nonlocal llm_retry_finalized, last_llm_retry_payload
+            if not llm_retry_seen or llm_retry_finalized or last_llm_retry_payload is None:
+                return
+            llm_retry_finalized = True
+            final_payload = {
+                **last_llm_retry_payload,
+                "status": status,
+                "retry_after_seconds": 0,
+                "retry_at_ms": None,
+            }
+            if error_message:
+                final_payload["error_message"] = error_message
+            last_llm_retry_payload = final_payload
+            await publish_llm_retry_status(final_payload)
+
         changed_payload: dict[str, Any] = dict(DEFAULT_CHANGED_PAYLOAD)
         changed_payload["active_section_id"] = payload.active_section_id
         changed_payload["active_block_id"] = payload.active_block_id
         final_reply: str | None = None
+        final_reply_status: str | None = None
+        final_reply_detail: str | None = None
         messages: list[dict[str, Any]] = []
+        technical_solution_before = self._current_technical_solution_markdown(project_id)
+        enhancement_attempted = False
+        pending_enhancement: dict[str, Any] | None = None
         logger.info(
             "round started project=%s session=%s round=%s message_len=%d",
             project_id,
@@ -251,6 +317,7 @@ class ChatService:
                     system_prompt=system_prompt,
                     llm_client=self.llm_client,
                     on_context_event=on_context_event,
+                    on_retry_event=on_llm_retry_event,
                 )
 
                 async def on_text_delta(delta: str) -> None:
@@ -287,6 +354,7 @@ class ChatService:
                     messages=messages,
                     on_text_delta=on_text_delta,
                     on_audit_event=on_audit_event,
+                    on_retry_event=on_llm_retry_event,
                     trace_context={
                         "scope": "main",
                         "project_id": project_id,
@@ -299,6 +367,9 @@ class ChatService:
 
                 if action.type == "respond":
                     final_reply = action.text or ""
+                    if action.interrupted:
+                        final_reply_status = "interrupted"
+                        final_reply_detail = "输出中断，已保留当前内容。"
                     await self.events.audit_events(
                         project_id,
                         state,
@@ -316,7 +387,107 @@ class ChatService:
                         len(final_reply),
                     )
                     messages.append(prepare_messages_for_model_request([action.assistant_message])[0])
-                    await self.events.agent_output(project_id, state, final_reply)
+                    await self.events.agent_output(
+                        project_id,
+                        state,
+                        final_reply,
+                        status=final_reply_status,
+                        detail=final_reply_detail,
+                    )
+
+                    if action.interrupted:
+                        break
+
+                    if pending_enhancement is not None:
+                        enhanced_after = self._current_technical_solution_markdown(project_id)
+                        enhancement_diff = self._technical_solution_diff(
+                            str(pending_enhancement.get("before_enhancement") or ""),
+                            enhanced_after,
+                        )
+                        summary_result = await self._run_technical_solution_enhancement_summary(
+                            project_id,
+                            state,
+                            review_markdown=str(pending_enhancement.get("review_markdown") or ""),
+                            enhanced_technical_solution_markdown=enhanced_after,
+                            enhancement_diff=enhancement_diff,
+                            on_retry_event=on_llm_retry_event,
+                        )
+                        await self._append_technical_solution_enhancement_record(
+                            project_id,
+                            state,
+                            user_request=payload.message,
+                            initial_after=str(pending_enhancement.get("initial_after") or ""),
+                            initial_diff=str(pending_enhancement.get("initial_diff") or ""),
+                            assessment=pending_enhancement.get("assessment"),
+                            review_markdown=str(pending_enhancement.get("review_markdown") or ""),
+                            enhanced_after=enhanced_after,
+                            enhancement_diff=enhancement_diff,
+                            summary=summary_result,
+                        )
+                        await self._publish_technical_solution_enhancement_status(
+                            project_id,
+                            state,
+                            phase="completed",
+                            status="done",
+                            progress=100,
+                            summary="增强模式：已完成技术方案增强记录",
+                        )
+                        break
+
+                    if payload.quality_mode == "enhanced" and not enhancement_attempted:
+                        technical_solution_after = self._current_technical_solution_markdown(project_id)
+                        if technical_solution_after != technical_solution_before:
+                            enhancement_attempted = True
+                            initial_diff = self._technical_solution_diff(technical_solution_before, technical_solution_after)
+                            assessment = await self._run_technical_solution_change_assessment(
+                                project_id,
+                                state,
+                                user_request=payload.message,
+                                technical_solution_markdown_value=technical_solution_after,
+                                technical_solution_diff=initial_diff,
+                                on_retry_event=on_llm_retry_event,
+                            )
+                            if assessment is None or not assessment.should_review:
+                                await self._publish_technical_solution_enhancement_status(
+                                    project_id,
+                                    state,
+                                    phase="completed",
+                                    status="done",
+                                    progress=100,
+                                    summary="增强模式：已完成",
+                                )
+                                break
+
+                            advice = await self._run_technical_solution_improvement_advice(
+                                project_id,
+                                state,
+                                user_request=payload.message,
+                                technical_solution_markdown_value=technical_solution_after,
+                                technical_solution_diff=initial_diff,
+                                on_retry_event=on_llm_retry_event,
+                            )
+                            if advice is None:
+                                await self._publish_technical_solution_enhancement_status(
+                                    project_id,
+                                    state,
+                                    phase="failed",
+                                    status="failed",
+                                    progress=100,
+                                    summary="增强模式：技术方案增强未完成",
+                                )
+                                break
+
+                            await self._append_technical_solution_enhancement_feedback(project_id, state, advice)
+                            pending_enhancement = {
+                                "initial_after": technical_solution_after,
+                                "initial_diff": initial_diff,
+                                "assessment": assessment,
+                                "review_markdown": advice.review_markdown,
+                                "before_enhancement": technical_solution_after,
+                            }
+                            technical_solution_before = technical_solution_after
+                            await self._sleep()
+                            continue
                     break
 
                 tool_calls = action.tool_calls or []
@@ -397,6 +568,10 @@ class ChatService:
 
             await self._sleep(self.settings.round_finish_delay)
             committed, commit_error = await self._commit(project_id, changed_payload)
+            await finalize_llm_retry_status(
+                "failed" if final_reply_status == "interrupted" else "done",
+                final_reply_detail if final_reply_status == "interrupted" else None,
+            )
             await self._set_project_idle(project_id)
             logger.info(
                 "round finished project=%s session=%s changed=%s committed=%s",
@@ -410,6 +585,8 @@ class ChatService:
                 "round_finished",
                 {
                     "reply": final_reply or "",
+                    "reply_status": final_reply_status,
+                    "reply_detail": final_reply_detail,
                     **changed_payload,
                     "committed": committed,
                     "commit_error": commit_error,
@@ -434,6 +611,13 @@ class ChatService:
             )
             failure_code = exc.code if isinstance(exc, ApiError) else "round_runtime_error"
             failure_message = exc.message if isinstance(exc, ApiError) else str(exc)
+            await finalize_llm_retry_status("failed", failure_message)
+            partial_changed = changed_payload.get("changed") is True
+            failed_reply = (
+                "已完成部分修改，但模型连接失败，未生成最终回复。请重试继续处理。"
+                if partial_changed
+                else "本轮未完成，请重试或补充信息。"
+            )
             self.store.append_session_event(
                 project_id,
                 state.session_id,
@@ -442,12 +626,17 @@ class ChatService:
                 round_id=state.round_id,
                 message_id=state.message_id,
                 payload={
-                    "text": "本轮未完成，请重试或补充信息。",
+                    "text": failed_reply,
                     "status": "failed",
                     "code": failure_code,
                     "message": failure_message,
+                    **changed_payload,
                 },
             )
+            committed = False
+            commit_error: dict[str, str] | None = None
+            if partial_changed:
+                committed, commit_error = await self._commit(project_id, changed_payload)
             await self._set_project_idle(project_id)
             await self.bus.publish(
                 key,
@@ -455,7 +644,10 @@ class ChatService:
                 {
                     "code": failure_code,
                     "message": failure_message,
-                    "reply": "本轮未完成，请重试或补充信息。",
+                    "reply": failed_reply,
+                    **changed_payload,
+                    "committed": committed,
+                    "commit_error": commit_error,
                     "round_id": state.round_id,
                     "message_id": state.message_id,
                 },
@@ -549,6 +741,365 @@ class ChatService:
             result.get("status"),
         )
         return result
+
+    def _current_technical_solution_markdown(self, project_id: str) -> str:
+        return technical_solution_markdown(self.store.get_disclosure(project_id))
+
+    @staticmethod
+    def _technical_solution_diff(before: str, after: str) -> str:
+        return "\n".join(
+            difflib.unified_diff(
+                before.splitlines(),
+                after.splitlines(),
+                fromfile="before.md",
+                tofile="after.md",
+                lineterm="",
+            )
+        ).strip()
+
+    async def _publish_technical_solution_enhancement_status(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        phase: str,
+        status: str,
+        progress: int,
+        summary: str,
+        detail: str | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "status": status,
+            "progress": max(0, min(100, progress)),
+            "summary": summary,
+        }
+        if detail:
+            payload["detail"] = detail
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_enhancement_status",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload=payload,
+        )
+        await self.bus.publish(
+            (project_id, state.session_id),
+            "quality_enhancement_status",
+            {
+                **payload,
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
+
+    async def _run_technical_solution_change_assessment(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        user_request: str,
+        technical_solution_markdown_value: str,
+        technical_solution_diff: str,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> TechnicalSolutionChangeAssessmentResult | None:
+        key = (project_id, state.session_id)
+        await self._publish_technical_solution_enhancement_status(
+            project_id,
+            state,
+            phase="assessing",
+            status="running",
+            progress=25,
+            summary="增强模式：正在评估本轮修改...",
+        )
+        try:
+            result = await self.technical_solution_change_assessor.assess(
+                user_request=user_request,
+                technical_solution_markdown=technical_solution_markdown_value,
+                technical_solution_diff=technical_solution_diff,
+                trace_context={
+                    "project_id": project_id,
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+                on_retry_event=on_retry_event,
+            )
+        except Exception as exc:
+            logger.warning(
+                "technical solution change assessment skipped project=%s session=%s round=%s error=%s",
+                project_id,
+                state.session_id,
+                state.round_id,
+                exc,
+            )
+            payload = {
+                "status": "failed",
+                "code": (
+                    "technical_solution_change_assessment_validation_failed"
+                    if isinstance(exc, TechnicalSolutionCheckValidationError)
+                    else "technical_solution_change_assessment_failed"
+                ),
+                "message": str(exc),
+            }
+            if isinstance(exc, TechnicalSolutionCheckValidationError):
+                payload["attempts"] = exc.attempts
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="technical_solution_change_assessment",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload=payload,
+            )
+            await self.bus.publish(
+                key,
+                "technical_solution_change_assessment",
+                {
+                    **payload,
+                    "scope": "main",
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+            return None
+
+        payload = {"status": "success", **result.as_payload()}
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_change_assessment",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload=payload,
+        )
+        await self.bus.publish(
+            key,
+            "technical_solution_change_assessment",
+            {
+                **payload,
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
+        return result
+
+    async def _run_technical_solution_improvement_advice(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        user_request: str,
+        technical_solution_markdown_value: str,
+        technical_solution_diff: str,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> TechnicalSolutionCheckResult | None:
+        key = (project_id, state.session_id)
+        await self._publish_technical_solution_enhancement_status(
+            project_id,
+            state,
+            phase="enhancing",
+            status="running",
+            progress=70,
+            summary="增强模式：正在完善技术方案...",
+        )
+        recent_history = self.store.recent_technical_solution_enhancement_history(project_id, limit=3)
+        try:
+            result = await self.technical_solution_improvement_advisor.check(
+                technical_solution_markdown=technical_solution_markdown_value,
+                user_request=user_request,
+                technical_solution_diff=technical_solution_diff,
+                recent_history=recent_history,
+                trace_context={
+                    "project_id": project_id,
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+                on_retry_event=on_retry_event,
+            )
+        except Exception as exc:
+            logger.warning(
+                "technical solution improvement advice skipped project=%s session=%s round=%s error=%s",
+                project_id,
+                state.session_id,
+                state.round_id,
+                exc,
+            )
+            payload = {
+                "status": "failed",
+                "code": (
+                    "technical_solution_improvement_advice_validation_failed"
+                    if isinstance(exc, TechnicalSolutionCheckValidationError)
+                    else "technical_solution_improvement_advice_failed"
+                ),
+                "message": str(exc),
+            }
+            if isinstance(exc, TechnicalSolutionCheckValidationError):
+                payload["attempts"] = exc.attempts
+            self.store.append_session_event(
+                project_id,
+                state.session_id,
+                event_type="technical_solution_improvement_advice",
+                scope="main",
+                round_id=state.round_id,
+                message_id=state.message_id,
+                payload=payload,
+            )
+            await self.bus.publish(
+                key,
+                "technical_solution_improvement_advice",
+                {
+                    **payload,
+                    "scope": "main",
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+            )
+            return None
+
+        payload = {"status": "success", **result.as_payload()}
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_improvement_advice",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload=payload,
+        )
+        await self.bus.publish(
+            key,
+            "technical_solution_improvement_advice",
+            {
+                **payload,
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
+        return result
+
+    async def _append_technical_solution_enhancement_feedback(
+        self,
+        project_id: str,
+        state: RoundState,
+        result: TechnicalSolutionCheckResult,
+    ) -> None:
+        feedback = enhancement_feedback_user_message(result)
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_enhancement_feedback",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload={
+                "text": feedback,
+                "review_markdown": result.review_markdown,
+                "hidden": True,
+            },
+        )
+
+    async def _run_technical_solution_enhancement_summary(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        review_markdown: str,
+        enhanced_technical_solution_markdown: str,
+        enhancement_diff: str,
+        on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> TechnicalSolutionEnhancementSummaryResult | None:
+        await self._publish_technical_solution_enhancement_status(
+            project_id,
+            state,
+            phase="summarizing",
+            status="running",
+            progress=90,
+            summary="增强模式：正在整理增强记录...",
+        )
+        try:
+            return await self.technical_solution_enhancement_summarizer.summarize(
+                review_markdown=review_markdown,
+                enhanced_technical_solution_markdown=enhanced_technical_solution_markdown,
+                enhancement_diff=enhancement_diff,
+                trace_context={
+                    "project_id": project_id,
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "message_id": state.message_id,
+                },
+                on_retry_event=on_retry_event,
+            )
+        except Exception as exc:
+            logger.warning(
+                "technical solution enhancement summary skipped project=%s session=%s round=%s error=%s",
+                project_id,
+                state.session_id,
+                state.round_id,
+                exc,
+            )
+            return None
+
+    async def _append_technical_solution_enhancement_record(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        user_request: str,
+        initial_after: str,
+        initial_diff: str,
+        assessment: Any,
+        review_markdown: str,
+        enhanced_after: str,
+        enhancement_diff: str,
+        summary: TechnicalSolutionEnhancementSummaryResult | None,
+    ) -> None:
+        record = {
+            "id": generate_id("tseh"),
+            "created_at": now_iso(),
+            "user_request": user_request,
+            "initial_after": initial_after,
+            "initial_diff": initial_diff,
+            "assessment": assessment.as_payload()
+            if isinstance(assessment, TechnicalSolutionChangeAssessmentResult)
+            else assessment,
+            "advisor": {"review_markdown": review_markdown},
+            "enhanced_after": enhanced_after,
+            "enhancement_diff": enhancement_diff,
+            "summary": summary.as_payload() if summary is not None else None,
+        }
+        payload = {
+            "status": "success" if summary is not None else "summary_skipped",
+            "applied_summary": summary.applied_summary if summary is not None else "",
+            "record": record,
+        }
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type="technical_solution_enhancement_summary",
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload=payload,
+        )
+        await self.bus.publish(
+            (project_id, state.session_id),
+            "technical_solution_enhancement_summary",
+            {
+                **payload,
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
 
     @staticmethod
     def _invalid_tool_arguments_json_result(message: str) -> dict[str, Any]:

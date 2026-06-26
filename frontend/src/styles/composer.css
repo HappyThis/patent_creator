@@ -51,7 +51,7 @@
   min-height: 34px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   margin: 0;
   padding: 0 12px 11px;
@@ -62,11 +62,52 @@
 }
 
 .composer-toolbar-left {
-  display: none;
+  display: inline-flex;
   position: relative;
   min-width: 0;
   align-items: center;
   gap: 10px;
+}
+
+.quality-mode-toggle {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(92, 82, 68, 0.11);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.55);
+}
+
+.quality-mode-toggle button {
+  min-width: 68px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7d766b;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.quality-mode-toggle button.active {
+  background: #eef3f0;
+  color: #445a60;
+  box-shadow: 0 1px 4px rgba(48, 62, 58, 0.08);
+}
+
+.quality-mode-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.quality-mode-toggle button:not(:disabled):hover {
+  color: #3f4f55;
+  background: rgba(238, 243, 240, 0.68);
 }
 
 .composer-toolbar-right {

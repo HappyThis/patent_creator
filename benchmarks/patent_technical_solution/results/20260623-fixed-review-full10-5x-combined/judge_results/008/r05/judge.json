@@ -1,0 +1,31 @@
+{
+  "status": "scored",
+  "total_score": 97,
+  "dimension_scores": {
+    "technical_problem": 15,
+    "core_concept": 20,
+    "technical_depth": 24,
+    "mechanism_coherence": 14,
+    "technical_effect": 9,
+    "feasibility": 10,
+    "disclosure_fit": 5
+  },
+  "strengths": [
+    "准确抓住本题真实问题：子 agent 不能只是普通函数调用或最终摘要，而应成为可观察、可恢复、可保留、可访问控制的持久运行实体。",
+    "核心构思完整，覆盖父侧登记表、runId、子侧映射、独立子 agent 上下文、事件回流、重放去重、访问门禁、取消、清理和后台命令式运行。",
+    "技术手段粒度很高，给出了状态机、唯一约束、幂等冲突检查、事件序号、终态不可覆盖、late event 处理、并发锁、清理 tombstone 等可实施机制。",
+    "要素协同关系清楚：父侧只登记调度和转发，子侧流存储作为权威来源，客户端按序号去重和重建面板，恢复时由父侧 registry 与子侧 mapping 协调。",
+    "对需求中的重复请求、并发执行、访问控制、取消、清理保留结果、无直接父工具调用后台子运行均有明确处理。"
+  ],
+  "weaknesses": [
+    "父模型如何接收子 agent 最终摘要或结构化失败并继续完成主请求的工具返回契约没有单独展开，更多强调 UI 事件回流和持久观察。",
+    "技术效果主要散布在机制说明中，虽能自然推出，但缺少一个集中、明确的因果效果总结段。",
+    "方案非常接近项目 RFC 路径，等价深度充足；但部分字段如 tenantId、lockOwner、stateVersion 属于扩展设计，虽然合理，仍应理解为新增机制而非项目既有结构。"
+  ],
+  "missing_key_mechanisms": [
+    "父 LLM 工具调用侧的最终返回协议：例如 runAgentTool/agentTool 在 completed、error、aborted、interrupted 时向父模型返回何种摘要、结构化错误或可重试状态。",
+    "更明确的输入/输出敏感信息保留策略，例如默认只保存 inputPreview、完整输入持久化需显式策略。"
+  ],
+  "unsupported_claims": [],
+  "score_rationale": "该方案达到高质量技术方案档位。它不仅复述“主 agent 调用子 agent 并汇总结果”，而是把子 agent 建模为由 runId 标识的 durable work，并通过父侧登记表、子侧运行映射、独立流存储、agent-tool-event、replay 标记、单运行序号、幂等启动、终态不可覆盖、访问门禁和保留清理形成完整机制闭环。与参考方案相比，它覆盖了几乎全部必要特征，并在并发、迟到事件、恢复协调和后台运行方面展开更细。未触发 rubric 中关于缺少注册表、恢复去重、取消清理或访问门禁的分数上限。主要扣分来自父模型工具结果返回契约不够明确，以及技术效果总结不够集中；这些不破坏方案成立，因此总分给 97。"
+}

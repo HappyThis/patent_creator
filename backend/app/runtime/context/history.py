@@ -7,7 +7,17 @@ from typing import Any, Iterable
 from ...schemas import SessionEvent
 from .compression import prepare_compressed_markdown_messages
 
-MAIN_CONTEXT_EVENT_TYPES = {"user_input", "agent_message", "agent_output", "tool_call", "tool_result"}
+MAIN_CONTEXT_EVENT_TYPES = {
+    "user_input",
+    "agent_message",
+    "agent_output",
+    "tool_call",
+    "tool_result",
+    "technical_solution_check_feedback",
+    "technical_solution_enhancement_feedback",
+}
+
+INTERRUPTED_OUTPUT_CONTEXT_NOTE = "【系统注记：上一条 assistant 输出因模型流式连接中断，内容可能不完整。】"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +112,7 @@ def project_main_event_segments(events: list[SessionEvent]) -> list[MessageSegme
     index = 0
     while index < len(events):
         event = events[index]
-        if event.type == "user_input":
+        if event.type in {"user_input", "technical_solution_check_feedback", "technical_solution_enhancement_feedback"}:
             segments.append(
                 MessageSegment(
                     start_seq=event.seq,
@@ -121,7 +131,12 @@ def project_main_event_segments(events: list[SessionEvent]) -> list[MessageSegme
             continue
 
         if event.type == "agent_output":
+            if _is_failed_agent_output(event):
+                index += 1
+                continue
             preamble = str(event.payload.get("text") or "")
+            if _is_interrupted_agent_output(event):
+                preamble = _append_interrupted_context_note(preamble)
             next_event = events[index + 1] if index + 1 < len(events) else None
             if next_event is not None and next_event.type in {"tool_call", "tool_result"}:
                 segment, index = _consume_tool_block_segment(events, index + 1, assistant_content=preamble)
@@ -168,17 +183,21 @@ def _consume_agent_message_segment(
     messages = [message]
     index = start_index + 1
     end_seq = event.seq
+    output_interrupted = False
     while (
         index < len(events)
         and events[index].type == "agent_output"
         and events[index].round_id == event.round_id
         and events[index].message_id == event.message_id
     ):
+        output_interrupted = output_interrupted or _is_interrupted_agent_output(events[index])
         end_seq = events[index].seq
         index += 1
 
     raw_calls = message.get("tool_calls")
     if not isinstance(raw_calls, list) or not raw_calls:
+        if output_interrupted:
+            messages[0] = _assistant_message_with_interrupted_note(message)
         return MessageSegment(event.seq, end_seq, messages), index
 
     call_ids = {str(call.get("id") or "") for call in raw_calls if isinstance(call, dict) and call.get("id")}
@@ -211,6 +230,28 @@ def _agent_message(event: SessionEvent) -> dict[str, Any] | None:
     elif not isinstance(content, str):
         message["content"] = str(content)
     return message
+
+
+def _is_interrupted_agent_output(event: SessionEvent) -> bool:
+    return event.type == "agent_output" and event.payload.get("status") == "interrupted"
+
+
+def _is_failed_agent_output(event: SessionEvent) -> bool:
+    return event.type == "agent_output" and event.payload.get("status") == "failed"
+
+
+def _assistant_message_with_interrupted_note(message: dict[str, Any]) -> dict[str, Any]:
+    next_message = dict(message)
+    next_message["content"] = _append_interrupted_context_note(str(next_message.get("content") or ""))
+    return next_message
+
+
+def _append_interrupted_context_note(content: str) -> str:
+    if INTERRUPTED_OUTPUT_CONTEXT_NOTE in content:
+        return content
+    if not content:
+        return INTERRUPTED_OUTPUT_CONTEXT_NOTE
+    return f"{content}\n\n{INTERRUPTED_OUTPUT_CONTEXT_NOTE}"
 
 
 def _consume_tool_block_segment(
