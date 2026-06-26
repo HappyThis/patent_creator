@@ -481,6 +481,25 @@
   max-width: min(680px, calc(100vw - 180px));
 }
 
+.process-status-divider.context-compression-status.running .process-status-label::before {
+  background: #c5962c;
+  box-shadow: 0 0 0 0 rgba(197, 150, 44, 0.34);
+}
+
+.process-status-divider.context-compression-status.running .process-status-row::before {
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0.92) 50%, rgba(255, 255, 255, 0) 62%, transparent 100%),
+    rgba(152, 126, 71, 0.2);
+}
+
+.process-status-divider.context-compression-status.done .process-status-label::before {
+  background: #5aa06a;
+}
+
+.process-status-divider.context-compression-status.failed .process-status-label::before {
+  background: #a75f58;
+}
+
 @keyframes quality-bar-light {
   from {
     background-position: 140% 0, 0 0;

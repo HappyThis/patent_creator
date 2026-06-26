@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -14,6 +14,8 @@ TECHNICAL_SOLUTION_CHECK_MAX_ATTEMPTS = 2
 TECHNICAL_SOLUTION_CHECK_TEMPERATURE = 0.7
 TECHNICAL_SOLUTION_ASSESS_TEMPERATURE = 0.2
 TECHNICAL_SOLUTION_SUMMARY_TEMPERATURE = 0.2
+
+ResultModelT = TypeVar("ResultModelT", bound=BaseModel)
 
 
 class SupportsTechnicalSolutionCheck(Protocol):
@@ -256,33 +258,42 @@ class TechnicalSolutionEnhancementSummarizer:
 
 
 def parse_technical_solution_check_result(payload: dict[str, Any]) -> TechnicalSolutionCheckResult:
-    try:
-        return TechnicalSolutionCheckResult.model_validate(payload)
-    except ValidationError as exc:
-        raise TechnicalSolutionCheckValidationError(
-            f"technical solution check result does not match schema: {exc}",
-            attempts=1,
-        ) from exc
+    return _parse_result_model(
+        payload,
+        TechnicalSolutionCheckResult,
+        error_context="technical solution check result",
+    )
 
 
 def parse_technical_solution_change_assessment_result(payload: dict[str, Any]) -> TechnicalSolutionChangeAssessmentResult:
-    try:
-        return TechnicalSolutionChangeAssessmentResult.model_validate(payload)
-    except ValidationError as exc:
-        raise TechnicalSolutionCheckValidationError(
-            f"technical solution change assessment result does not match schema: {exc}",
-            attempts=1,
-        ) from exc
+    return _parse_result_model(
+        payload,
+        TechnicalSolutionChangeAssessmentResult,
+        error_context="technical solution change assessment result",
+    )
 
 
 def parse_technical_solution_enhancement_summary_result(
     payload: dict[str, Any],
 ) -> TechnicalSolutionEnhancementSummaryResult:
+    return _parse_result_model(
+        payload,
+        TechnicalSolutionEnhancementSummaryResult,
+        error_context="technical solution enhancement summary result",
+    )
+
+
+def _parse_result_model(
+    payload: dict[str, Any],
+    model_type: type[ResultModelT],
+    *,
+    error_context: str,
+) -> ResultModelT:
     try:
-        return TechnicalSolutionEnhancementSummaryResult.model_validate(payload)
+        return model_type.model_validate(payload)
     except ValidationError as exc:
         raise TechnicalSolutionCheckValidationError(
-            f"technical solution enhancement summary result does not match schema: {exc}",
+            f"{error_context} does not match schema: {exc}",
             attempts=1,
         ) from exc
 

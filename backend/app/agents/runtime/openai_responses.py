@@ -779,18 +779,7 @@ def _extract_response_text(response: Any) -> str:
     output_text = _field(response, "output_text")
     if isinstance(output_text, str) and output_text:
         return output_text
-    parts: list[str] = []
-    for item in _output_items(response):
-        item_dict = _as_dict(item)
-        if item_dict.get("type") != "message":
-            continue
-        for content in item_dict.get("content") or []:
-            content_dict = _as_dict(content)
-            if content_dict.get("type") in {"output_text", "text"}:
-                text = content_dict.get("text")
-                if text:
-                    parts.append(str(text))
-    return "".join(parts)
+    return _extract_output_text_from_items(_output_items(response))
 
 
 def _extract_output_text_from_items(items: list[Any]) -> str:

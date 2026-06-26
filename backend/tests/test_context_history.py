@@ -233,6 +233,34 @@ def test_restore_main_chat_messages_ignores_llm_audit_events() -> None:
     assert [item.type for item in candidates] == ["user_input", "agent_message"]
 
 
+def test_restore_main_chat_messages_ignores_legacy_technical_solution_check_feedback() -> None:
+    events = [
+        event(event_id="evt_1", seq=1, event_type="user_input", payload={"text": "写技术方案"}),
+        event(
+            event_id="evt_2",
+            seq=2,
+            event_type="technical_solution_check_feedback",
+            payload={"text": "旧质量门禁反馈"},
+        ),
+        event(
+            event_id="evt_3",
+            seq=3,
+            event_type="agent_message",
+            payload={"message": {"role": "assistant", "content": "已完成"}},
+        ),
+    ]
+
+    messages = restore_main_chat_messages(events)
+    marker, candidates = main_context_events_after_latest_summary(events)
+
+    assert messages == [
+        {"role": "user", "content": "写技术方案"},
+        {"role": "assistant", "content": "已完成"},
+    ]
+    assert marker == {"cursor_seq": 1, "compressed_markdown": ""}
+    assert [item.type for item in candidates] == ["user_input", "agent_message"]
+
+
 def test_restore_main_chat_messages_ignores_failed_agent_output() -> None:
     events = [
         event(event_id="evt_1", seq=1, event_type="user_input", payload={"text": "write"}),

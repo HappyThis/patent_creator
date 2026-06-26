@@ -91,15 +91,7 @@ export function useWorkspace(projectId: string | null) {
           return;
         }
         const message = error instanceof Error ? error.message : '初始化项目失败。';
-        setEvents([
-          {
-            id: `init_error_${Date.now()}`,
-            kind: 'message',
-            role: 'assistant',
-            text: message,
-            timestamp: formatTimestamp(),
-          },
-        ]);
+        setEvents([createAssistantNotice('init_error', message)]);
       })
       .finally(() => {
         if (!cancelled) {
@@ -173,16 +165,7 @@ export function useWorkspace(projectId: string | null) {
         clearSessionEvents();
       } catch (error: unknown) {
         const messageText = error instanceof Error ? error.message : '删除对话失败。';
-        setEvents((current) => [
-          ...current,
-          {
-            id: `delete_session_error_${Date.now()}`,
-            kind: 'message',
-            role: 'assistant',
-            text: messageText,
-            timestamp: formatTimestamp(),
-          },
-        ]);
+        setEvents((current) => [...current, createAssistantNotice('delete_session_error', messageText)]);
         await refreshProject(project.project_id);
       }
     },
@@ -243,16 +226,7 @@ export function useWorkspace(projectId: string | null) {
     } catch (error: unknown) {
       const messageText = error instanceof Error ? error.message : '发送消息失败。';
       setComposer(message);
-      setEvents((current) => [
-        ...current,
-        {
-          id: `msg_error_${Date.now()}`,
-          kind: 'message',
-          role: 'assistant',
-          text: messageText,
-          timestamp: formatTimestamp(),
-        },
-      ]);
+      setEvents((current) => [...current, createAssistantNotice('msg_error', messageText)]);
       await refreshProject(project.project_id);
     }
   }, [
@@ -283,16 +257,7 @@ export function useWorkspace(projectId: string | null) {
       }
     } catch (error: unknown) {
       const messageText = error instanceof Error ? error.message : '取消任务失败。';
-      setEvents((current) => [
-        ...current,
-        {
-          id: `cancel_error_${Date.now()}`,
-          kind: 'message',
-          role: 'assistant',
-          text: messageText,
-          timestamp: formatTimestamp(),
-        },
-      ]);
+      setEvents((current) => [...current, createAssistantNotice('cancel_error', messageText)]);
       setIsCancelling(false);
       await refreshProject(project.project_id);
     }
@@ -308,16 +273,7 @@ export function useWorkspace(projectId: string | null) {
       downloadBlob(result.blob, filename);
     } catch (error: unknown) {
       const messageText = error instanceof Error ? error.message : '导出 DOCX 失败。';
-      setEvents((current) => [
-        ...current,
-        {
-          id: `export_docx_error_${Date.now()}`,
-          kind: 'message',
-          role: 'assistant',
-          text: messageText,
-          timestamp: formatTimestamp(),
-        },
-      ]);
+      setEvents((current) => [...current, createAssistantNotice('export_docx_error', messageText)]);
     }
   }, [project]);
 
@@ -362,6 +318,16 @@ export function useWorkspace(projectId: string | null) {
     handleSessionSelect,
     handleNewSession,
     handleSessionDelete,
+  };
+}
+
+function createAssistantNotice(idPrefix: string, text: string): ChatEvent {
+  return {
+    id: `${idPrefix}_${Date.now()}`,
+    kind: 'message',
+    role: 'assistant',
+    text,
+    timestamp: formatTimestamp(),
   };
 }
 

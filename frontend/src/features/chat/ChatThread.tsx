@@ -15,7 +15,9 @@ type StatusEvent = Extract<
 type TraceBlock =
   | { kind: 'message'; event: ChatMessageEvent }
   | { kind: 'process'; items: ToolCallEvent[] }
-  | { kind: 'status'; event: StatusEvent };
+  | StatusTraceBlock;
+
+type StatusTraceBlock = { kind: 'status'; event: StatusEvent };
 
 type RenderBlock =
   | { kind: 'user_message'; event: ChatMessageEvent }
@@ -24,10 +26,19 @@ type RenderBlock =
       roundKey: string;
       finalMessage: ChatMessageEvent;
       traceBlocks: TraceBlock[];
+      statusBlocks: StatusTraceBlock[];
       durationLabel: string | null;
     }
   | { kind: 'process'; items: ToolCallEvent[] }
   | { kind: 'status'; event: StatusEvent };
+
+type PendingRound = {
+  roundKey: string;
+  finalMessage: ChatMessageEvent | null;
+  traceBlocks: TraceBlock[];
+  startedAtMs: number | null;
+  isStreaming: boolean;
+};
 
 export function ChatThread({ events }: ChatThreadProps) {
   const [hoveredAssistantRound, setHoveredAssistantRound] = useState<string | null>(null);
@@ -87,6 +98,9 @@ export function ChatThread({ events }: ChatThreadProps) {
                   ) : null}
                 </div>
               ) : null}
+              {block.statusBlocks.map((traceBlock, statusIndex) =>
+                renderTraceBlock(traceBlock, statusIndex, liveNowMs),
+              )}
               {renderMessage(block.finalMessage, 'assistant', isTimeVisible)}
             </div>
           );
@@ -203,6 +217,10 @@ function renderTraceBlock(block: TraceBlock, index: number, liveNowMs: number | 
   return renderStatus(block.event, `trace_status_${block.event.id}_${index}`, liveNowMs);
 }
 
+function isExternalRoundStatus(block: TraceBlock): block is StatusTraceBlock {
+  return block.kind === 'status' && block.event.kind === 'context_status';
+}
+
 function renderStatus(event: StatusEvent, key = event.id, liveNowMs: number | null = null) {
   if (event.kind === 'llm_retry_status') {
     const label = formatLLMRetryLabel(event, liveNowMs);
@@ -220,13 +238,13 @@ function renderStatus(event: StatusEvent, key = event.id, liveNowMs: number | nu
 
   if (event.kind === 'quality_enhancement_status') {
     const label =
-      event.status === 'failed' ? '未增强' : event.status === 'done' ? '已增强' : '增强中';
+      event.status === 'failed' ? '增强未完成' : event.status === 'done' ? '增强完成' : '增强中';
     return renderProcessStatusDivider({
       key,
       className: `quality-enhancement-status ${event.phase}`,
       status: event.status,
       label,
-      progress: `${event.progress}%`,
+      progress: event.status === 'running' ? `${event.progress}%` : undefined,
       detail: event.detail,
       ariaLabel: `${event.summary}，${event.progress}%`,
     });
@@ -237,7 +255,7 @@ function renderStatus(event: StatusEvent, key = event.id, liveNowMs: number | nu
       event.status === 'failed' ? '压缩失败' : event.status === 'done' ? event.summary : '压缩中';
     return renderProcessStatusDivider({
       key,
-      className: 'context-divider',
+      className: 'context-compression-status',
       status: event.status,
       label,
       detail: event.detail,
@@ -287,16 +305,18 @@ function renderProcessStatusDivider({
 
 function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): RenderBlock[] {
   const blocks: RenderBlock[] = [];
-  let pendingRound: {
-    roundKey: string;
-    finalMessage: ChatMessageEvent | null;
-    traceBlocks: TraceBlock[];
-    startedAtMs: number | null;
-    isStreaming: boolean;
-  } | null = null;
+  let pendingRound: PendingRound | null = null;
   let pendingProcess: ToolCallEvent[] = [];
   const roundStartTimes = new Map<string, number>();
   const roundAliases = new Map<string, string>();
+
+  const createPendingRound = (roundKey: string): PendingRound => ({
+    roundKey,
+    finalMessage: null,
+    traceBlocks: [],
+    startedAtMs: roundStartTimes.get(roundKey) ?? null,
+    isStreaming: false,
+  });
 
   const rememberRoundAlias = (roundId?: string, messageId?: string, fallbackId?: string) => {
     const canonical = roundId ?? messageId ?? fallbackId;
@@ -351,6 +371,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
             roundKey: pendingRound.roundKey,
             finalMessage: traceBlock.event,
             traceBlocks: [],
+            statusBlocks: [],
             durationLabel: null,
           });
         }
@@ -359,11 +380,13 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
       return;
     }
 
+    const { traceBlocks, statusBlocks } = partitionRoundTraceBlocks(pendingRound.traceBlocks);
     blocks.push({
       kind: 'assistant_round',
       roundKey: pendingRound.roundKey,
       finalMessage: pendingRound.finalMessage,
-      traceBlocks: pendingRound.traceBlocks,
+      traceBlocks,
+      statusBlocks,
       durationLabel: formatRoundDuration(
         pendingRound.traceBlocks,
         pendingRound.finalMessage,
@@ -391,13 +414,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = {
-          roundKey,
-          finalMessage: null,
-          traceBlocks: [],
-          startedAtMs: roundStartTimes.get(roundKey) ?? null,
-          isStreaming: false,
-        };
+        pendingRound = createPendingRound(roundKey);
       }
       if (pendingRound.finalMessage && !pendingRound.finalMessage.is_placeholder) {
         pendingRound.traceBlocks.push({ kind: 'message', event: pendingRound.finalMessage });
@@ -414,13 +431,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = {
-          roundKey,
-          finalMessage: null,
-          traceBlocks: [],
-          startedAtMs: roundStartTimes.get(roundKey) ?? null,
-          isStreaming: false,
-        };
+        pendingRound = createPendingRound(roundKey);
       }
       pendingProcess.push(event);
       continue;
@@ -432,13 +443,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = {
-          roundKey,
-          finalMessage: null,
-          traceBlocks: [],
-          startedAtMs: roundStartTimes.get(roundKey) ?? null,
-          isStreaming: false,
-        };
+        pendingRound = createPendingRound(roundKey);
       }
       flushProcessToRound();
       if (pendingRound) {
@@ -467,13 +472,7 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
         if (pendingRound) {
           flushRound();
         }
-        pendingRound = {
-          roundKey,
-          finalMessage: null,
-          traceBlocks: [],
-          startedAtMs: roundStartTimes.get(roundKey) ?? null,
-          isStreaming: false,
-        };
+        pendingRound = createPendingRound(roundKey);
       }
       flushProcessToRound();
       if (pendingRound) {
@@ -486,6 +485,19 @@ function buildRenderBlocks(events: ChatEvent[], liveNowMs: number | null): Rende
 
   flushRound();
   return blocks;
+}
+
+function partitionRoundTraceBlocks(traceBlocks: TraceBlock[]) {
+  const visibleTraceBlocks: TraceBlock[] = [];
+  const statusBlocks: StatusTraceBlock[] = [];
+  for (const traceBlock of traceBlocks) {
+    if (isExternalRoundStatus(traceBlock)) {
+      statusBlocks.push(traceBlock);
+    } else {
+      visibleTraceBlocks.push(traceBlock);
+    }
+  }
+  return { traceBlocks: visibleTraceBlocks, statusBlocks };
 }
 
 function hasLiveThreadActivity(events: ChatEvent[]) {
@@ -524,28 +536,10 @@ function getAssistantRoundKey(event: ChatMessageEvent) {
 }
 
 function formatTraceSummary(traceBlocks: TraceBlock[], durationLabel: string | null) {
-  let messageCount = 0;
-  let toolCount = 0;
-  for (const block of traceBlocks) {
-    if (block.kind === 'message') {
-      messageCount += 1;
-    }
-    if (block.kind === 'process') {
-      toolCount += block.items.length;
-    }
-  }
-
-  const parts: string[] = [];
-  if (messageCount > 0) {
-    parts.push(`${messageCount} 条中间输出`);
-  }
-  if (toolCount > 0) {
-    parts.push(`${toolCount} 个工具调用`);
-  }
   if (durationLabel) {
-    parts.push(`处理 ${durationLabel}`);
+    return `处理 ${durationLabel}`;
   }
-  return parts.join(' / ');
+  return traceBlocks.length > 0 ? '查看详情' : '';
 }
 
 function formatRoundDuration(

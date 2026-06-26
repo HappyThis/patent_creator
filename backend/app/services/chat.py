@@ -45,6 +45,15 @@ class _ProjectLockState:
     leases: int = 0
 
 
+@dataclass(slots=True)
+class _PendingTechnicalSolutionEnhancement:
+    initial_after: str
+    initial_diff: str
+    assessment: TechnicalSolutionChangeAssessmentResult
+    review_markdown: str
+    before_enhancement: str
+
+
 class ChatService:
     def __init__(
         self,
@@ -237,23 +246,12 @@ class ChatService:
 
         async def publish_llm_retry_status(event_payload: dict[str, Any]) -> None:
             stored_payload = {**event_payload, "scope": "main"}
-            self.store.append_session_event(
+            await self._record_and_publish_main_event(
                 project_id,
-                state.session_id,
+                state,
                 event_type="llm_retry_status",
-                scope="main",
-                round_id=state.round_id,
-                message_id=state.message_id,
                 payload=stored_payload,
-            )
-            await self.bus.publish(
-                key,
-                "llm_retry_status",
-                {
-                    **stored_payload,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
+                event_name="llm_retry_status",
             )
 
         async def on_llm_retry_event(event_payload: dict[str, Any]) -> None:
@@ -287,7 +285,7 @@ class ChatService:
         messages: list[dict[str, Any]] = []
         technical_solution_before = self._current_technical_solution_markdown(project_id)
         enhancement_attempted = False
-        pending_enhancement: dict[str, Any] | None = None
+        pending_enhancement: _PendingTechnicalSolutionEnhancement | None = None
         logger.info(
             "round started project=%s session=%s round=%s message_len=%d",
             project_id,
@@ -401,13 +399,13 @@ class ChatService:
                     if pending_enhancement is not None:
                         enhanced_after = self._current_technical_solution_markdown(project_id)
                         enhancement_diff = self._technical_solution_diff(
-                            str(pending_enhancement.get("before_enhancement") or ""),
+                            pending_enhancement.before_enhancement,
                             enhanced_after,
                         )
                         summary_result = await self._run_technical_solution_enhancement_summary(
                             project_id,
                             state,
-                            review_markdown=str(pending_enhancement.get("review_markdown") or ""),
+                            review_markdown=pending_enhancement.review_markdown,
                             enhanced_technical_solution_markdown=enhanced_after,
                             enhancement_diff=enhancement_diff,
                             on_retry_event=on_llm_retry_event,
@@ -416,10 +414,10 @@ class ChatService:
                             project_id,
                             state,
                             user_request=payload.message,
-                            initial_after=str(pending_enhancement.get("initial_after") or ""),
-                            initial_diff=str(pending_enhancement.get("initial_diff") or ""),
-                            assessment=pending_enhancement.get("assessment"),
-                            review_markdown=str(pending_enhancement.get("review_markdown") or ""),
+                            initial_after=pending_enhancement.initial_after,
+                            initial_diff=pending_enhancement.initial_diff,
+                            assessment=pending_enhancement.assessment,
+                            review_markdown=pending_enhancement.review_markdown,
                             enhanced_after=enhanced_after,
                             enhancement_diff=enhancement_diff,
                             summary=summary_result,
@@ -478,13 +476,13 @@ class ChatService:
                                 break
 
                             await self._append_technical_solution_enhancement_feedback(project_id, state, advice)
-                            pending_enhancement = {
-                                "initial_after": technical_solution_after,
-                                "initial_diff": initial_diff,
-                                "assessment": assessment,
-                                "review_markdown": advice.review_markdown,
-                                "before_enhancement": technical_solution_after,
-                            }
+                            pending_enhancement = _PendingTechnicalSolutionEnhancement(
+                                initial_after=technical_solution_after,
+                                initial_diff=initial_diff,
+                                assessment=assessment,
+                                review_markdown=advice.review_markdown,
+                                before_enhancement=technical_solution_after,
+                            )
                             technical_solution_before = technical_solution_after
                             await self._sleep()
                             continue
@@ -745,6 +743,62 @@ class ChatService:
     def _current_technical_solution_markdown(self, project_id: str) -> str:
         return technical_solution_markdown(self.store.get_disclosure(project_id))
 
+    async def _record_and_publish_main_event(
+        self,
+        project_id: str,
+        state: RoundState,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        event_name: str | None = None,
+    ) -> None:
+        self.store.append_session_event(
+            project_id,
+            state.session_id,
+            event_type=event_type,
+            scope="main",
+            round_id=state.round_id,
+            message_id=state.message_id,
+            payload=payload,
+        )
+        if event_name is None:
+            return
+        await self.bus.publish(
+            (project_id, state.session_id),
+            event_name,
+            {
+                **payload,
+                "scope": "main",
+                "round_id": state.round_id,
+                "message_id": state.message_id,
+            },
+        )
+
+    @staticmethod
+    def _technical_solution_trace_context(project_id: str, state: RoundState) -> dict[str, str]:
+        return {
+            "project_id": project_id,
+            "session_id": state.session_id,
+            "round_id": state.round_id,
+            "message_id": state.message_id,
+        }
+
+    @staticmethod
+    def _technical_solution_error_payload(
+        exc: Exception,
+        *,
+        validation_code: str,
+        fallback_code: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": "failed",
+            "code": validation_code if isinstance(exc, TechnicalSolutionCheckValidationError) else fallback_code,
+            "message": str(exc),
+        }
+        if isinstance(exc, TechnicalSolutionCheckValidationError):
+            payload["attempts"] = exc.attempts
+        return payload
+
     @staticmethod
     def _technical_solution_diff(before: str, after: str) -> str:
         return "\n".join(
@@ -776,24 +830,12 @@ class ChatService:
         }
         if detail:
             payload["detail"] = detail
-        self.store.append_session_event(
+        await self._record_and_publish_main_event(
             project_id,
-            state.session_id,
+            state,
             event_type="technical_solution_enhancement_status",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
             payload=payload,
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "quality_enhancement_status",
-            {
-                **payload,
-                "scope": "main",
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
+            event_name="quality_enhancement_status",
         )
 
     async def _run_technical_solution_change_assessment(
@@ -806,7 +848,6 @@ class ChatService:
         technical_solution_diff: str,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionChangeAssessmentResult | None:
-        key = (project_id, state.session_id)
         await self._publish_technical_solution_enhancement_status(
             project_id,
             state,
@@ -820,12 +861,7 @@ class ChatService:
                 user_request=user_request,
                 technical_solution_markdown=technical_solution_markdown_value,
                 technical_solution_diff=technical_solution_diff,
-                trace_context={
-                    "project_id": project_id,
-                    "session_id": state.session_id,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
+                trace_context=self._technical_solution_trace_context(project_id, state),
                 on_retry_event=on_retry_event,
             )
         except Exception as exc:
@@ -836,57 +872,27 @@ class ChatService:
                 state.round_id,
                 exc,
             )
-            payload = {
-                "status": "failed",
-                "code": (
-                    "technical_solution_change_assessment_validation_failed"
-                    if isinstance(exc, TechnicalSolutionCheckValidationError)
-                    else "technical_solution_change_assessment_failed"
-                ),
-                "message": str(exc),
-            }
-            if isinstance(exc, TechnicalSolutionCheckValidationError):
-                payload["attempts"] = exc.attempts
-            self.store.append_session_event(
-                project_id,
-                state.session_id,
-                event_type="technical_solution_change_assessment",
-                scope="main",
-                round_id=state.round_id,
-                message_id=state.message_id,
-                payload=payload,
+            payload = self._technical_solution_error_payload(
+                exc,
+                validation_code="technical_solution_change_assessment_validation_failed",
+                fallback_code="technical_solution_change_assessment_failed",
             )
-            await self.bus.publish(
-                key,
-                "technical_solution_change_assessment",
-                {
-                    **payload,
-                    "scope": "main",
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
+            await self._record_and_publish_main_event(
+                project_id,
+                state,
+                event_type="technical_solution_change_assessment",
+                payload=payload,
+                event_name="technical_solution_change_assessment",
             )
             return None
 
         payload = {"status": "success", **result.as_payload()}
-        self.store.append_session_event(
+        await self._record_and_publish_main_event(
             project_id,
-            state.session_id,
+            state,
             event_type="technical_solution_change_assessment",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
             payload=payload,
-        )
-        await self.bus.publish(
-            key,
-            "technical_solution_change_assessment",
-            {
-                **payload,
-                "scope": "main",
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
+            event_name="technical_solution_change_assessment",
         )
         return result
 
@@ -900,7 +906,6 @@ class ChatService:
         technical_solution_diff: str,
         on_retry_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> TechnicalSolutionCheckResult | None:
-        key = (project_id, state.session_id)
         await self._publish_technical_solution_enhancement_status(
             project_id,
             state,
@@ -916,12 +921,7 @@ class ChatService:
                 user_request=user_request,
                 technical_solution_diff=technical_solution_diff,
                 recent_history=recent_history,
-                trace_context={
-                    "project_id": project_id,
-                    "session_id": state.session_id,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
+                trace_context=self._technical_solution_trace_context(project_id, state),
                 on_retry_event=on_retry_event,
             )
         except Exception as exc:
@@ -932,57 +932,27 @@ class ChatService:
                 state.round_id,
                 exc,
             )
-            payload = {
-                "status": "failed",
-                "code": (
-                    "technical_solution_improvement_advice_validation_failed"
-                    if isinstance(exc, TechnicalSolutionCheckValidationError)
-                    else "technical_solution_improvement_advice_failed"
-                ),
-                "message": str(exc),
-            }
-            if isinstance(exc, TechnicalSolutionCheckValidationError):
-                payload["attempts"] = exc.attempts
-            self.store.append_session_event(
-                project_id,
-                state.session_id,
-                event_type="technical_solution_improvement_advice",
-                scope="main",
-                round_id=state.round_id,
-                message_id=state.message_id,
-                payload=payload,
+            payload = self._technical_solution_error_payload(
+                exc,
+                validation_code="technical_solution_improvement_advice_validation_failed",
+                fallback_code="technical_solution_improvement_advice_failed",
             )
-            await self.bus.publish(
-                key,
-                "technical_solution_improvement_advice",
-                {
-                    **payload,
-                    "scope": "main",
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
+            await self._record_and_publish_main_event(
+                project_id,
+                state,
+                event_type="technical_solution_improvement_advice",
+                payload=payload,
+                event_name="technical_solution_improvement_advice",
             )
             return None
 
         payload = {"status": "success", **result.as_payload()}
-        self.store.append_session_event(
+        await self._record_and_publish_main_event(
             project_id,
-            state.session_id,
+            state,
             event_type="technical_solution_improvement_advice",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
             payload=payload,
-        )
-        await self.bus.publish(
-            key,
-            "technical_solution_improvement_advice",
-            {
-                **payload,
-                "scope": "main",
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
+            event_name="technical_solution_improvement_advice",
         )
         return result
 
@@ -1030,12 +1000,7 @@ class ChatService:
                 review_markdown=review_markdown,
                 enhanced_technical_solution_markdown=enhanced_technical_solution_markdown,
                 enhancement_diff=enhancement_diff,
-                trace_context={
-                    "project_id": project_id,
-                    "session_id": state.session_id,
-                    "round_id": state.round_id,
-                    "message_id": state.message_id,
-                },
+                trace_context=self._technical_solution_trace_context(project_id, state),
                 on_retry_event=on_retry_event,
             )
         except Exception as exc:
@@ -1056,7 +1021,7 @@ class ChatService:
         user_request: str,
         initial_after: str,
         initial_diff: str,
-        assessment: Any,
+        assessment: TechnicalSolutionChangeAssessmentResult,
         review_markdown: str,
         enhanced_after: str,
         enhancement_diff: str,
@@ -1068,9 +1033,7 @@ class ChatService:
             "user_request": user_request,
             "initial_after": initial_after,
             "initial_diff": initial_diff,
-            "assessment": assessment.as_payload()
-            if isinstance(assessment, TechnicalSolutionChangeAssessmentResult)
-            else assessment,
+            "assessment": assessment.as_payload(),
             "advisor": {"review_markdown": review_markdown},
             "enhanced_after": enhanced_after,
             "enhancement_diff": enhancement_diff,
@@ -1081,24 +1044,12 @@ class ChatService:
             "applied_summary": summary.applied_summary if summary is not None else "",
             "record": record,
         }
-        self.store.append_session_event(
+        await self._record_and_publish_main_event(
             project_id,
-            state.session_id,
+            state,
             event_type="technical_solution_enhancement_summary",
-            scope="main",
-            round_id=state.round_id,
-            message_id=state.message_id,
             payload=payload,
-        )
-        await self.bus.publish(
-            (project_id, state.session_id),
-            "technical_solution_enhancement_summary",
-            {
-                **payload,
-                "scope": "main",
-                "round_id": state.round_id,
-                "message_id": state.message_id,
-            },
+            event_name="technical_solution_enhancement_summary",
         )
 
     @staticmethod

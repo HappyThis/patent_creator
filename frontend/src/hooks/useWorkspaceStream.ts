@@ -265,19 +265,13 @@ export function useWorkspaceStream({
         const committed = payload.committed === true;
         const commitError = isRecord(payload.commit_error) ? payload.commit_error : null;
         if (commitError || (changed && !committed)) {
-          setEvents((current) => [
-            ...current,
-            {
-              id: `round_status_${Date.now()}_${current.length}`,
-              kind: 'round_status',
-              round_id: optionalString(payload.round_id),
-              message_id: optionalString(payload.message_id),
+          setEvents((current) =>
+            appendRoundStatus(current, payload, {
               status: 'failed',
               summary: '本轮修改已完成，但版本提交失败。',
               detail: commitError ? String(commitError.message ?? '') : undefined,
-              timestamp: formatTimestamp(),
-            },
-          ]);
+            }),
+          );
         }
         const nextProject = await refreshProject(project_id);
         await refreshSessions(project_id, nextProject.active_session_id);
@@ -321,19 +315,13 @@ export function useWorkspaceStream({
         }
         const commitError = isRecord(payload.commit_error) ? payload.commit_error : null;
         if (commitError) {
-          setEvents((current) => [
-            ...current,
-            {
-              id: `round_status_${Date.now()}_${current.length}`,
-              kind: 'round_status',
-              round_id: optionalString(payload.round_id),
-              message_id: optionalString(payload.message_id),
+          setEvents((current) =>
+            appendRoundStatus(current, payload, {
               status: 'failed',
               summary: '已完成部分修改，但版本提交失败。',
               detail: String(commitError.message ?? ''),
-              timestamp: formatTimestamp(),
-            },
-          ]);
+            }),
+          );
         }
         const nextProject = await refreshProject(project_id);
         await refreshSessions(project_id, nextProject.active_session_id);
@@ -414,16 +402,7 @@ export function useWorkspaceStream({
               return;
             }
             const messageText = error instanceof Error ? error.message : '恢复流式连接失败。';
-            setEvents((current) => [
-              ...current,
-              {
-                id: `stream_resume_error_${Date.now()}`,
-                kind: 'message',
-                role: 'assistant',
-                text: messageText,
-                timestamp: formatTimestamp(),
-              },
-            ]);
+            setEvents((current) => appendAssistantNotice(current, 'stream_resume_error', messageText));
             await refreshProject(projectId);
           })
           .finally(() => {
@@ -440,16 +419,7 @@ export function useWorkspaceStream({
         }
         runningStreamKeyRef.current = null;
         const messageText = error instanceof Error ? error.message : '恢复流式连接失败。';
-        setEvents((current) => [
-          ...current,
-          {
-            id: `stream_resume_error_${Date.now()}`,
-            kind: 'message',
-            role: 'assistant',
-            text: messageText,
-            timestamp: formatTimestamp(),
-          },
-        ]);
+        setEvents((current) => appendAssistantNotice(current, 'stream_resume_error', messageText));
         await refreshProject(projectId);
       }
     })();
@@ -486,16 +456,7 @@ export function useWorkspaceStream({
         .catch(async (error: unknown) => {
           closeStream();
           const messageText = error instanceof Error ? error.message : '流式消息处理失败。';
-          setEvents((current) => [
-            ...current,
-            {
-              id: `msg_stream_error_${Date.now()}`,
-              kind: 'message',
-              role: 'assistant',
-              text: messageText,
-              timestamp: formatTimestamp(),
-            },
-          ]);
+          setEvents((current) => appendAssistantNotice(current, 'msg_stream_error', messageText));
           await refreshProject(projectId);
         })
         .finally(() => {
@@ -513,4 +474,43 @@ export function useWorkspaceStream({
     trackOptimisticMessage,
     startChatMessageStream,
   };
+}
+
+function appendAssistantNotice(current: ChatEvent[], idPrefix: string, text: string): ChatEvent[] {
+  return [
+    ...current,
+    {
+      id: `${idPrefix}_${Date.now()}`,
+      kind: 'message',
+      role: 'assistant',
+      text,
+      timestamp: formatTimestamp(),
+      timestamp_ms: Date.now(),
+    },
+  ];
+}
+
+function appendRoundStatus(
+  current: ChatEvent[],
+  payload: Record<string, unknown>,
+  status: {
+    status: 'done' | 'failed';
+    summary: string;
+    detail?: string;
+  },
+): ChatEvent[] {
+  return [
+    ...current,
+    {
+      id: `round_status_${Date.now()}_${current.length}`,
+      kind: 'round_status',
+      round_id: optionalString(payload.round_id),
+      message_id: optionalString(payload.message_id),
+      status: status.status,
+      summary: status.summary,
+      detail: status.detail,
+      timestamp: formatTimestamp(),
+      timestamp_ms: Date.now(),
+    },
+  ];
 }
