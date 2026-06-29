@@ -18,17 +18,16 @@ class FigureKitArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["create", "read", "update", "delete", "list", "check"] = Field(
-        description="操作类型。create 新建 Mermaid 附图；read 读取源码；update 覆盖源码；delete 删除附图；list 列出可引用格式；check 检查正文引用和附录展示。"
+        description="操作类型。create 新建 HTML 附图；read 读取 diagram.html；update 覆盖 HTML 并重新截图；delete 删除附图；list 列出可引用格式；check 检查正文引用和附录展示。"
     )
     ref: str | None = Field(default=None, description="read/update/delete 使用，格式为 figure:fig_000001。")
     title: str | None = Field(default=None, description="create/update 使用，附图标题，例如 系统结构示意图。")
-    mermaid: str | None = Field(
+    html: str | None = Field(
         default=None,
         description=(
-            "create/update 使用，完整 Mermaid 源码。交底书附图优先 flowchart TD/TB；"
-            "flowchart LR 仅用于 3-6 个模块的横向结构关系，不能用于长流程链路；"
-            "架构图必须体现分层、系统边界、模块职责和依赖方向，不要画成流程/状态回环；"
-            "单图建议 6-10 个节点，节点文字使用短语，复杂图拆成多张。"
+            "create/update 使用，完整 diagram.html 源码。必须是纯 HTML/CSS，包含 id=\"diagram\" 的固定画布根节点；"
+            "画布尺寸固定为 1500x900，不要引用外部资源、脚本、iframe 或事件处理器；"
+            "交底书附图采用黑白线稿风格，重点表达结构、流程、层级、模块边界和逻辑关系。"
         ),
     )
 
@@ -39,28 +38,27 @@ def figure_kit(
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """管理项目级附图资产，附图源码使用 Mermaid，预览端使用 Mermaid 官方渲染器展示为 SVG。
+    """管理项目级 HTML 附图资产，create/update 保存 diagram.html 并同步截图为 render.png。
 
     Returns:
-        list 返回 figures，每项包含 ref、markdown_ref、caption；read/create/update 返回 figure 完整 Mermaid 源码；check 返回 errors/warnings；失败返回 failed 和 code/message。
+        list 返回 figures，每项包含 ref、markdown_ref、caption；read/create/update 返回 figure 元数据和 html 源码；check 返回 errors/warnings；失败返回 failed 和 code/message。
 
     Rules:
         - create 只用于用户明确要求新增一张图；用户说“重试/重新生成/替换/修改当前图/修改图1”时，必须 list 或 read 定位现有图，再用 update 覆盖原图，不能 create 新图。
         - 正文引用图时使用 list/create/read 返回的 markdown_ref，例如 [图1](figure:fig_000001)，不要手写或猜测图号。
         - figure block 只用于在“附录”章节展示图本体；非附录章节只能使用 Markdown 链接引用图。
-        - 修改图前先 read，基于返回的 source.content 生成完整新版 mermaid，再 update。
-        - create/update 不做自研 SVG 布局，必须提交完整 Mermaid 源码，由成熟 Mermaid 渲染器负责展示。
-        - Mermaid 生成策略必须面向交底书版心：默认使用 flowchart TD/TB；flowchart LR 仅用于 3-6 个模块的横向结构关系，禁止用于长流程链路。
-        - 先判断图型再写 Mermaid：流程图用于步骤、状态流转和判断分支；架构图用于模块协同、系统边界、层次关系和依赖方向；时序图用于跨主体调用顺序。不要把执行流程伪装成架构图。
-        - 架构图应优先使用 subgraph 表达层次或边界，例如“外部系统 / 编排层 / 执行层 / 存储与观测”；连线表达依赖或数据流，避免回环、交叉长线和无层次的中心辐射图。
-        - 架构图节点应是稳定模块或外部依赖，不应使用“轮询工单、候选过滤、二次校验、退避重试”这类步骤节点；这些应画成流程图或状态图。
-        - 单张图建议 6-10 个节点；超过 10 个节点时，应抽象为高层节点或拆成“高层结构图 + 关键子流程图”。
-        - 节点文字使用短语，建议不超过 10 个汉字；不要把完整调用链、日志流、工具调用明细、回环状态全部塞进一张图。
+        - 修改图前先 read，基于返回的 html 生成完整新版 diagram.html，再 update。
+        - create/update 必须提交完整 HTML 文档，包含 <!doctype html> 或 <html>，并包含 id="diagram" 的根节点。
+        - HTML 附图固定 1500x900 画布；不要让内容依赖滚动、动画、外链字体、外部图片或脚本。
+        - 专利附图默认采用黑白风格：白底、黑色/深灰线条、细边框、规整箭头和编号；避免彩色卡片、渐变背景和页面化装饰。
+        - 先判断图型再排版：流程图用于步骤、状态流转和判断分支；架构图用于模块协同、系统边界、层次关系和依赖方向；结构示意图用于部件、通道、数据流和约束关系。
+        - 架构图应体现分层、系统边界、模块职责和依赖方向，不要画成流程/状态回环；流程图则应突出主路径和少量关键分支。
+        - 单张图建议 6-12 个关键元素；复杂图拆成“高层结构图 + 关键子流程图”，不要把完整调用链、日志流、工具调用明细全部塞进一张图。
         - check 用于提交前或批量编辑后检查 figure 引用、图号文本和 figure block 位置是否一致。
 
     Examples:
         - 列出附图: {"action":"list"}
-        - 创建附图: {"action":"create","title":"系统结构示意图","mermaid":"flowchart TD\\nA[任务接收] --> B[策略解析]"}
+        - 创建附图: {"action":"create","title":"系统结构示意图","html":"<!doctype html><html><body><div id=\\"diagram\\">...</div></body></html>"}
         - 读取附图源码: {"action":"read","ref":"figure:fig_000001"}
         - 检查一致性: {"action":"check"}
     """
@@ -76,16 +74,16 @@ def figure_kit(
 
     if action == "create":
         title = str(arguments.get("title") or "").strip()
-        mermaid = str(arguments.get("mermaid") or "").strip()
+        html = str(arguments.get("html") or "").strip()
         if not title:
             return tool_failed("figure_title_required", "figure_kit.create 需要非空 title。")
-        if not mermaid:
-            return tool_failed("figure_mermaid_required", "figure_kit.create 需要非空 mermaid。")
-        result = store.create_figure(project_id, title=title, mermaid=mermaid)
+        if not html:
+            return tool_failed("figure_html_required", "figure_kit.create 需要非空 html。")
+        result = store.create_figure(project_id, title=title, html=html)
         if result.get("status") == "failed":
             return result
         figure = result["output"]["figure"]
-        return {"status": "success", "output": {"figure": _full_figure_payload(figure), "warnings": result["output"].get("warnings", [])}}
+        return {"status": "success", "output": {"figure": _full_figure_payload(store, project_id, figure), "warnings": result["output"].get("warnings", [])}}
 
     figure_id = _figure_id_from_arguments(arguments)
     if figure_id is None:
@@ -95,20 +93,20 @@ def figure_kit(
         figure = store.get_figure(project_id, figure_id)
         if figure is None:
             return tool_failed("figure_not_found", f"figure 不存在：{figure_id}")
-        return {"status": "success", "output": {"figure": _full_figure_payload(figure)}}
+        return {"status": "success", "output": {"figure": _full_figure_payload(store, project_id, figure)}}
 
     if action == "update":
-        mermaid = str(arguments.get("mermaid") or "").strip()
-        if not mermaid:
-            return tool_failed("figure_mermaid_required", "figure_kit.update 需要非空 mermaid。")
+        html = str(arguments.get("html") or "").strip()
+        if not html:
+            return tool_failed("figure_html_required", "figure_kit.update 需要非空 html。")
         title_value = arguments.get("title")
         update_title = str(title_value).strip() if title_value is not None else None
-        result = store.update_figure(project_id, figure_id, title=update_title, mermaid=mermaid)
+        result = store.update_figure(project_id, figure_id, title=update_title, html=html)
         if result.get("status") == "failed":
             return result
         return {
             "status": "success",
-            "output": {"figure": _full_figure_payload(result["output"]["figure"]), "warnings": result["output"].get("warnings", [])},
+            "output": {"figure": _full_figure_payload(store, project_id, result["output"]["figure"]), "warnings": result["output"].get("warnings", [])},
         }
 
     if action == "delete":
@@ -205,9 +203,12 @@ def _figure_id_from_arguments(arguments: dict[str, Any]) -> str | None:
     return parse_figure_ref(ref)
 
 
-def _full_figure_payload(figure: dict[str, Any]) -> dict[str, Any]:
+def _full_figure_payload(store: WorkspaceStore, project_id: str, figure: dict[str, Any]) -> dict[str, Any]:
     payload = dict(figure)
     payload.update(figure_summary(figure))
+    html = store.read_figure_html(project_id, str(figure.get("figure_id") or ""))
+    if html is not None:
+        payload["html"] = html
     return payload
 
 

@@ -13,6 +13,7 @@ from ..core import ApiError, Settings, setup_logging
 from ..schemas import ErrorEnvelope
 from ..services import AppServices
 from .routes import (
+    create_asset_router,
     create_chat_router,
     create_document_router,
     create_export_router,
@@ -67,6 +68,7 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
     app.include_router(create_document_router(active_services))
     app.include_router(create_chat_router(active_services))
     app.include_router(create_export_router(active_services))
+    app.include_router(create_asset_router(active_services))
     return app
 
 

@@ -69,11 +69,11 @@ def test_main_agent_registers_figure_kit() -> None:
     properties = figure["function"]["parameters"]["properties"]
     assert "markdown_ref" in description
     assert "figure block 只用于在“附录”章节展示图本体" in description
-    assert "不要把执行流程伪装成架构图" in description
-    assert "架构图应优先使用 subgraph 表达层次或边界" in description
-    assert "这些应画成流程图或状态图" in description
-    assert "架构图必须体现分层、系统边界、模块职责和依赖方向" in properties["mermaid"]["description"]
-    assert set(properties) == {"action", "ref", "title", "mermaid"}
+    assert "固定 1500x900 画布" in description
+    assert "黑白风格" in description
+    assert "架构图应体现分层、系统边界、模块职责和依赖方向" in description
+    assert 'id="diagram"' in properties["html"]["description"]
+    assert set(properties) == {"action", "ref", "title", "html"}
 
 
 def test_tool_schemas_inline_local_definitions_for_responses_api() -> None:

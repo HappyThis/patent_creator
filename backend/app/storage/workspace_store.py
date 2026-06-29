@@ -10,6 +10,7 @@ import stat
 import threading
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -17,7 +18,8 @@ from pydantic import ValidationError
 from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..domain.docx_export import DocxExportError, export_disclosure_docx
-from ..domain.figures import build_figure_record, figure_summary, mermaid_layout_warnings, update_figure_record, validate_mermaid_source
+from ..domain.document_tool_results import tool_failed
+from ..domain.figures import FIGURE_HEIGHT, FIGURE_WIDTH, build_figure_record, figure_summary, update_figure_record, validate_html_source
 from ..schemas import ProjectRecord, SessionEvent, SessionEventType, SessionSummary
 
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
@@ -495,14 +497,14 @@ class WorkspaceStore:
 
     def list_figures(self, project_id: str) -> list[dict[str, Any]]:
         figures: list[dict[str, Any]] = []
-        for path in sorted(self.figures_dir(project_id).glob("fig_*.json")):
+        for path in sorted(self.figures_dir(project_id).glob("fig_*/figure.json")):
             try:
                 figure = self.read_json(path)
             except (OSError, json.JSONDecodeError) as exc:
                 logger.warning("skipping invalid figure metadata project_id=%s path=%s error=%s", project_id, path, exc)
                 continue
             if isinstance(figure.get("figure_id"), str):
-                figures.append(self._normalize_figure(figure))
+                figures.append(self._normalize_figure(project_id, figure))
         figures.sort(key=lambda figure: figure.get("figure_id", ""))
         return figures
 
@@ -510,47 +512,69 @@ class WorkspaceStore:
         path = self.figure_json_file(project_id, figure_id)
         if not path.exists():
             return None
-        return self._normalize_figure(self.read_json(path))
+        return self._normalize_figure(project_id, self.read_json(path))
 
-    def create_figure(self, project_id: str, *, title: str, mermaid: str) -> dict[str, Any]:
+    def create_figure(self, project_id: str, *, title: str, html: str) -> dict[str, Any]:
         figure_id = self.next_figure_id(project_id)
         index = int(figure_id.removeprefix("fig_"))
-        asset_path = f"assets/figures/{figure_id}.json"
-        validate_result = validate_mermaid_source(mermaid)
+        figure_dir = self.figure_dir(project_id, figure_id)
+        source_path = f"assets/figures/{figure_id}/diagram.html"
+        render_path = f"assets/figures/{figure_id}/render.png"
+        asset_path = f"assets/figures/{figure_id}/figure.json"
+        validate_result = validate_html_source(html)
         if validate_result["status"] == "failed":
             return validate_result
+        if figure_dir.exists() and not self.figure_json_file(project_id, figure_id).exists():
+            shutil.rmtree(figure_dir)
+        figure_dir.mkdir(parents=True, exist_ok=False)
+        self.figure_html_file(project_id, figure_id).write_text(validate_result["output"]["html"] + "\n", encoding="utf-8")
+        render_result = self._render_html_figure(project_id, figure_id)
+        if render_result["status"] == "failed":
+            shutil.rmtree(figure_dir, ignore_errors=True)
+            return render_result
         figure = build_figure_record(
             figure_id=figure_id,
             index=index,
             title=title,
-            mermaid=mermaid,
+            source_path=source_path,
+            render_path=render_path,
             asset_path=asset_path,
         )
         self.write_json_atomic(self.figure_json_file(project_id, figure_id), figure)
         return {
             "status": "success",
-            "output": {"figure": self._normalize_figure(figure), "warnings": mermaid_layout_warnings(mermaid)},
+            "output": {"figure": self._normalize_figure(project_id, figure), "warnings": []},
         }
 
-    def update_figure(self, project_id: str, figure_id: str, *, title: str | None, mermaid: str) -> dict[str, Any]:
-        current = self.get_figure(project_id, figure_id)
-        if current is None:
+    def update_figure(self, project_id: str, figure_id: str, *, title: str | None, html: str) -> dict[str, Any]:
+        figure_path = self.figure_json_file(project_id, figure_id)
+        if not figure_path.exists():
             return {"status": "failed", "output": {"code": "figure_not_found", "message": f"figure 不存在：{figure_id}"}}
-        validate_result = validate_mermaid_source(mermaid)
+        current = self.read_json(figure_path)
+        validate_result = validate_html_source(html)
         if validate_result["status"] == "failed":
             return validate_result
-        updated = update_figure_record(current, title=title, mermaid=mermaid)
-        self.write_json_atomic(self.figure_json_file(project_id, figure_id), updated)
+        html_file = self.figure_html_file(project_id, figure_id)
+        previous_html = html_file.read_text(encoding="utf-8") if html_file.exists() else None
+        html_file.write_text(validate_result["output"]["html"] + "\n", encoding="utf-8")
+        render_result = self._render_html_figure(project_id, figure_id)
+        if render_result["status"] == "failed":
+            if previous_html is not None:
+                html_file.write_text(previous_html, encoding="utf-8")
+                self._render_html_figure(project_id, figure_id)
+            return render_result
+        updated = update_figure_record(current, title=title)
+        self.write_json_atomic(figure_path, updated)
         return {
             "status": "success",
-            "output": {"figure": self._normalize_figure(updated), "warnings": mermaid_layout_warnings(mermaid)},
+            "output": {"figure": self._normalize_figure(project_id, updated), "warnings": []},
         }
 
     def delete_figure(self, project_id: str, figure_id: str) -> bool:
-        path = self.figure_json_file(project_id, figure_id)
+        path = self.figure_dir(project_id, figure_id)
         if not path.exists():
             return False
-        path.unlink()
+        shutil.rmtree(path)
         return True
 
     def next_figure_id(self, project_id: str) -> str:
@@ -564,14 +588,80 @@ class WorkspaceStore:
                     continue
         return f"fig_{max_value + 1:06d}"
 
+    def figure_dir(self, project_id: str, figure_id: str) -> Path:
+        return self.figures_dir(project_id) / _validated_storage_id(figure_id, "figure_id")
+
     def figure_json_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figures_dir(project_id) / f"{_validated_storage_id(figure_id, 'figure_id')}.json"
+        return self.figure_dir(project_id, figure_id) / "figure.json"
+
+    def figure_html_file(self, project_id: str, figure_id: str) -> Path:
+        return self.figure_dir(project_id, figure_id) / "diagram.html"
+
+    def figure_render_file(self, project_id: str, figure_id: str) -> Path:
+        return self.figure_dir(project_id, figure_id) / "render.png"
+
+    def read_figure_html(self, project_id: str, figure_id: str) -> str | None:
+        path = self.figure_html_file(project_id, figure_id)
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8")
+
+    def project_asset_file(self, project_id: str, asset_path: str) -> Path:
+        project_root = self.project_dir(project_id).resolve()
+        assets_root = (project_root / "assets").resolve()
+        requested = (project_root / asset_path).resolve()
+        if not requested.is_relative_to(assets_root):
+            raise ApiError(404, "asset_not_found", f"asset 不存在：{asset_path}")
+        return requested
 
     def figure_summaries(self, project_id: str) -> list[dict[str, Any]]:
         return [figure_summary(figure) for figure in self.list_figures(project_id)]
 
-    def _normalize_figure(self, figure: dict[str, Any]) -> dict[str, Any]:
-        return dict(figure)
+    def _normalize_figure(self, project_id: str, figure: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(figure)
+        render = dict(normalized.get("render") or {})
+        render_path = render.get("path")
+        if isinstance(render_path, str) and render_path:
+            render["url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(render_path, safe='/')}"
+        normalized["render"] = render
+        return normalized
+
+    def _render_html_figure(self, project_id: str, figure_id: str) -> dict[str, Any]:
+        input_path = self.figure_html_file(project_id, figure_id)
+        output_path = self.figure_render_file(project_id, figure_id)
+        repo_root = Path(__file__).resolve().parents[3]
+        frontend_root = repo_root / "frontend"
+        script_path = frontend_root / "scripts" / "render-figure-html.mjs"
+        try:
+            result = subprocess.run(
+                [
+                    "node",
+                    str(script_path),
+                    "--input",
+                    str(input_path),
+                    "--output",
+                    str(output_path),
+                    "--width",
+                    str(FIGURE_WIDTH),
+                    "--height",
+                    str(FIGURE_HEIGHT),
+                ],
+                cwd=frontend_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=45,
+            )
+        except OSError as exc:
+            return tool_failed("figure_render_failed", f"HTML 附图渲染器启动失败：{exc}")
+        except subprocess.TimeoutExpired:
+            return tool_failed("figure_render_timeout", "HTML 附图渲染超时。")
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or "unknown renderer error"
+            return tool_failed("figure_render_failed", f"HTML 附图渲染失败：{message}")
+        if not output_path.is_file():
+            return tool_failed("figure_render_missing", "HTML 附图渲染完成但未生成 render.png。")
+        return {"status": "success", "output": {"path": str(output_path)}}
 
     @staticmethod
     def write_json(path: Path, payload: dict[str, Any]) -> None:

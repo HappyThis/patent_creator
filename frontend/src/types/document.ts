@@ -58,7 +58,16 @@ export type FigureRenderAsset = {
   title: string;
   source?: {
     type: string;
-    content: string;
+    path: string;
+    width?: number;
+    height?: number;
+  };
+  render?: {
+    type: string;
+    path: string;
+    url?: string;
+    width?: number;
+    height?: number;
   };
 };
 

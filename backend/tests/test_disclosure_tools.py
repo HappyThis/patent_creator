@@ -4,8 +4,36 @@ import json
 from pathlib import Path
 
 from app.domain.disclosure import build_render_ast
+from app.storage.workspace_store import WorkspaceStore
 
 from helpers import make_tool_executor, run_builtin_tool, section_id_by_title
+
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
+    b"\x00\x05\xfe\x02\xfeA\xd7S\x84\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _sample_figure_html(text: str = "任务接收") -> str:
+    return f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>
+html,body{{margin:0;background:#fff;}}
+#diagram{{width:1500px;height:900px;box-sizing:border-box;padding:80px;font-family:Arial,sans-serif;color:#111;}}
+.box{{border:2px solid #111;padding:28px;display:inline-block;}}
+</style></head>
+<body><div id="diagram"><div class="box">{text}</div></div></body>
+</html>"""
+
+
+def _stub_figure_renderer(monkeypatch) -> None:
+    def render(self: WorkspaceStore, project_id: str, figure_id: str) -> dict:
+        output_path = self.figure_render_file(project_id, figure_id)
+        output_path.write_bytes(PNG_BYTES)
+        return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_html_figure", render)
 
 
 def test_disclosure_v3_initial_structure(tmp_path: Path) -> None:
@@ -70,8 +98,10 @@ def test_disclosure_edit_supports_formula_block(tmp_path: Path) -> None:
     assert search["output"]["matches"][0]["locator"]["block_id"] == block_id
 
 
-def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path) -> None:
+def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
     executor, project_id = make_tool_executor(tmp_path)
+    html = _sample_figure_html()
     create = run_builtin_tool(
         executor,
         project_id,
@@ -79,7 +109,7 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
         {
             "action": "create",
             "title": "系统结构示意图",
-            "mermaid": "flowchart TD\nA[任务接收] --> B[策略解析]",
+            "html": html,
         },
     )
 
@@ -89,8 +119,18 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert figure["ref"] == "figure:fig_000001"
     assert figure["markdown_ref"] == "[图1](figure:fig_000001)"
     assert figure["caption"] == "图1 系统结构示意图"
-    assert figure["source"] == {"type": "mermaid", "content": "flowchart TD\nA[任务接收] --> B[策略解析]"}
-    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001.json").exists()
+    assert figure["source"] == {
+        "type": "html",
+        "path": "assets/figures/fig_000001/diagram.html",
+        "width": 1500,
+        "height": 900,
+    }
+    assert figure["render"]["path"] == "assets/figures/fig_000001/render.png"
+    assert figure["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
+    assert figure["html"].strip() == html
+    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001" / "figure.json").exists()
+    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001" / "diagram.html").exists()
+    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001" / "render.png").exists()
 
     listed = run_builtin_tool(executor, project_id, "figure_kit", {"action": "list"})
     assert listed["status"] == "success"
@@ -117,7 +157,7 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert {item["code"] for item in checked["output"]["warnings"]} == {"figure_not_displayed_in_appendix"}
 
 
-def test_figure_kit_warns_about_overwide_mermaid(tmp_path: Path) -> None:
+def test_figure_kit_rejects_unsafe_html(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
     create = run_builtin_tool(
         executor,
@@ -125,24 +165,13 @@ def test_figure_kit_warns_about_overwide_mermaid(tmp_path: Path) -> None:
         "figure_kit",
         {
             "action": "create",
-            "title": "过宽流程图",
-            "mermaid": (
-                "flowchart LR\n"
-                "A[前端请求] --> B[路由识别]\n"
-                "B --> C[服务编排]\n"
-                "C --> D[上下文管理]\n"
-                "D --> E[调用模型]\n"
-                "E --> F[执行工具]\n"
-                "F --> G[文档更新]\n"
-                "G --> H[返回结果]"
-            ),
+            "title": "外链附图",
+            "html": '<!doctype html><html><body><div id="diagram"><script>alert(1)</script></div></body></html>',
         },
     )
 
-    assert create["status"] == "success"
-    assert {warning["code"] for warning in create["output"]["warnings"]} == {
-        "figure_lr_too_wide",
-    }
+    assert create["status"] == "failed"
+    assert create["output"]["code"] == "figure_html_unsafe"
 
 
 def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
@@ -159,8 +188,10 @@ def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
     assert "action" in invalid_action["output"]["message"]
 
 
-def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: Path) -> None:
+def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
     executor, project_id = make_tool_executor(tmp_path)
+    html = _sample_figure_html("读取内核")
     figure = run_builtin_tool(
         executor,
         project_id,
@@ -168,7 +199,7 @@ def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: 
         {
             "action": "create",
             "title": "代理执行流程示意图",
-            "mermaid": "flowchart TD\nA[读取内核] --> B[修改交底书]",
+            "html": html,
         },
     )["output"]["figure"]
 
@@ -208,7 +239,8 @@ def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: 
     appendix_node = next(node for node in render_ast["children"] if node["title"] == "附录")
     assert appendix_node["children"][0]["type"] == "figure"
     assert render_ast["figures"][0]["label"] == "图1"
-    assert render_ast["figures"][0]["source"]["content"] == "flowchart TD\nA[读取内核] --> B[修改交底书]"
+    assert render_ast["figures"][0]["source"]["path"] == "assets/figures/fig_000001/diagram.html"
+    assert render_ast["figures"][0]["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
 
 
 def test_disclosure_outline_search_and_read_section(tmp_path: Path) -> None:

@@ -19,7 +19,7 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.styles.style import ParagraphStyle
 
 from .disclosure import build_render_ast
-from .figures import figure_caption
+from .figures import FIGURE_HEIGHT, FIGURE_WIDTH, figure_caption
 
 FIGURE_REF_PATTERN = re.compile(r"\[([^\]]+)\]\(figure:(fig_\d{6})\)")
 FORMULA_REF_PATTERN = re.compile(r"\[([^\]]+)\]\(formula:([A-Za-z0-9_-]+)\)")
@@ -180,6 +180,7 @@ def render_assets(
     project_dir: Path,
 ) -> tuple[dict[str, dict[str, Any]], Path | None]:
     items: list[dict[str, str]] = []
+    existing_figure_assets: dict[str, dict[str, Any]] = {}
 
     def add_inline_math(latex: str) -> str:
         asset_id = f"inline_{len(items) + 1:06d}_{uuid4().hex[:8]}"
@@ -219,14 +220,15 @@ def render_assets(
             elif node_type == "figure":
                 figure_id = str(node.get("figure_id") or "")
                 figure = figures_by_id.get(figure_id)
-                source = figure.get("source", {}) if isinstance(figure, dict) else {}
-                if figure_id and source.get("type") == "mermaid" and figure_id not in figure_ids:
+                if figure_id and isinstance(figure, dict) and figure_id not in figure_ids:
                     figure_ids.add(figure_id)
-                    items.append({"id": f"figure_{figure_id}", "kind": "figure", "mermaid": str(source.get("content") or "")})
+                    asset = _existing_figure_asset(figure_id, figure, project_dir)
+                    if asset:
+                        existing_figure_assets[asset["id"]] = asset
 
     visit(render_ast.get("children", []))
     if not items:
-        return {}, None
+        return existing_figure_assets, None
 
     asset_dir = project_dir / "exports" / f"docx-assets-{uuid4().hex[:8]}"
     input_path = asset_dir / "input.json"
@@ -261,7 +263,7 @@ def render_assets(
             raise DocxExportError(f"DOCX asset renderer failed: {message}")
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        assets = _validate_asset_manifest(manifest, items, output_dir)
+        assets = {**existing_figure_assets, **_validate_asset_manifest(manifest, items, output_dir)}
     except OSError as exc:
         shutil.rmtree(asset_dir, ignore_errors=True)
         raise DocxExportError(f"DOCX asset renderer failed to start: {exc}") from exc
@@ -279,6 +281,28 @@ def render_assets(
         if asset_id in assets:
             assets[f"inline:{latex}"] = assets[asset_id]
     return assets, asset_dir
+
+
+def _existing_figure_asset(figure_id: str, figure: dict[str, Any], project_dir: Path) -> dict[str, Any] | None:
+    render = figure.get("render", {})
+    if not isinstance(render, dict) or render.get("type") != "png":
+        return None
+    render_path = render.get("path")
+    if not isinstance(render_path, str) or not render_path:
+        return None
+    project_root = project_dir.resolve()
+    resolved_path = (project_root / render_path).resolve()
+    if not resolved_path.is_relative_to(project_root) or not resolved_path.is_file():
+        return None
+    width_px = render.get("width") if isinstance(render.get("width"), (int, float)) else FIGURE_WIDTH
+    height_px = render.get("height") if isinstance(render.get("height"), (int, float)) else FIGURE_HEIGHT
+    return {
+        "id": f"figure_{figure_id}",
+        "kind": "figure",
+        "path": str(resolved_path),
+        "width_px": width_px,
+        "height_px": height_px,
+    }
 
 
 def _validate_asset_manifest(

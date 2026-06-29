@@ -12,6 +12,12 @@ from app.domain.disclosure import build_initial_disclosure
 from app.domain import docx_export
 from app.domain.docx_export import DocxExportError, export_disclosure_docx
 
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
+    b"\x00\x05\xfe\x02\xfeA\xd7S\x84\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 
 def test_docx_export_renders_headings_without_word_outline_markers(tmp_path: Path) -> None:
     disclosure = build_initial_disclosure("heading export")
@@ -123,6 +129,51 @@ def test_docx_export_renders_all_inline_math_as_images(tmp_path: Path) -> None:
     assert paragraph.text == "condition  and length "
     assert len(document.inline_shapes) == 2
     assert not any(run.font.name == "Cambria Math" for run in paragraph.runs)
+    assert not list((tmp_path / "exports").glob("docx-assets-*"))
+
+
+def test_docx_export_uses_existing_html_figure_png(tmp_path: Path) -> None:
+    disclosure = build_initial_disclosure("figure export")
+    disclosure["sections"][-1]["blocks"] = [
+        {
+            "id": "blk_figure_test",
+            "type": "figure",
+            "figure_id": "fig_000001",
+        }
+    ]
+    render_path = tmp_path / "assets" / "figures" / "fig_000001" / "render.png"
+    render_path.parent.mkdir(parents=True)
+    render_path.write_bytes(PNG_BYTES)
+    figures = [
+        {
+            "figure_id": "fig_000001",
+            "label": "图1",
+            "title": "系统结构示意图",
+            "source": {
+                "type": "html",
+                "path": "assets/figures/fig_000001/diagram.html",
+                "width": 1500,
+                "height": 900,
+            },
+            "render": {
+                "type": "png",
+                "path": "assets/figures/fig_000001/render.png",
+                "width": 1500,
+                "height": 900,
+            },
+        }
+    ]
+
+    output_path = export_disclosure_docx(
+        disclosure=disclosure,
+        figures=figures,
+        export_path=tmp_path / "figure-export.docx",
+        project_dir=tmp_path,
+    )
+
+    document = Document(str(output_path))
+    assert len(document.inline_shapes) == 1
+    assert any(paragraph.text == "图1 系统结构示意图" for paragraph in document.paragraphs)
     assert not list((tmp_path / "exports").glob("docx-assets-*"))
 
 

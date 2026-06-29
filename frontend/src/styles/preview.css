@@ -273,7 +273,7 @@
   width: 100%;
 }
 
-.preview-figure-svg-content svg {
+.preview-figure-image {
   display: block;
   width: 100%;
   max-width: 100%;
@@ -407,10 +407,11 @@
   background-clip: padding-box;
 }
 
-.preview-figure-lightbox-body svg {
+.preview-figure-lightbox-image {
   display: block;
   max-width: none;
   height: auto;
+  width: min(1500px, 100%);
 }
 
 .preview-figure figcaption {

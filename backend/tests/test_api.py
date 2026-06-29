@@ -15,6 +15,12 @@ from app.core.config import Settings
 from app.schemas import ChatMessageRequest
 from app.services import AppServices
 
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
+    b"\x00\x05\xfe\x02\xfeA\xd7S\x84\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 
 def section_by_title(disclosure: dict[str, Any], title: str) -> dict[str, Any]:
     for section in disclosure["sections"]:
@@ -250,7 +256,7 @@ def test_create_app_exposes_backend_package_version(tmp_path: Path) -> None:
     app = create_app(settings, services=services)
 
     assert app.version == package_version("patent-creator-backend")
-    assert app.version == "0.4.0"
+    assert app.version == "0.4.1"
 
 
 async def collect_session_stream_events(
@@ -333,6 +339,37 @@ async def test_create_project_separates_project_name_and_disclosure_title(tmp_pa
             renamed_render_response.json()["render_ast"]["title"]
             == "一种基于 A2UI 桥接层的消息平台 Agent 动态 UI 交互方法"
         )
+
+
+@pytest.mark.anyio
+async def test_project_asset_route_serves_project_png_assets_only(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    project = services.store.create_project("资产测试")
+    asset_path = services.store.project_dir(project.project_id) / "assets" / "figures" / "fig_000001" / "render.png"
+    asset_path.parent.mkdir(parents=True)
+    asset_path.write_bytes(PNG_BYTES)
+    html_path = asset_path.with_name("diagram.html")
+    html_path.write_text("<html></html>", encoding="utf-8")
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/render.png")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.content == PNG_BYTES
+
+        html_response = await client.get(f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/diagram.html")
+        assert html_response.status_code == 404
+
+        outside_response = await client.get(f"/api/projects/{project.project_id}/asset/%2E%2E/project.json")
+        assert outside_response.status_code == 404
 
 
 @pytest.mark.anyio
