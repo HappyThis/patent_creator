@@ -27,7 +27,8 @@ class FigureKitArguments(BaseModel):
         description=(
             "create/update 使用，完整 diagram.html 源码。必须是纯 HTML/CSS，包含 id=\"diagram\" 的固定画布根节点；"
             "画布尺寸固定为 1500x900，不要引用外部资源、脚本、iframe 或事件处理器；"
-            "结构示意图采用简约黑白风格，重点帮助理解结构、流程、层级、模块边界和逻辑关系；默认不要添加专利附图编号。"
+            "图片应是简约黑白技术示意图（monochrome technical schematic / engineering block diagram），"
+            "用网格化排版、分组边界、正交箭头和少量短标签帮助理解结构、流程、层级、模块边界和逻辑关系；默认不要添加专利附图编号。"
         ),
     )
 
@@ -38,7 +39,7 @@ def figure_kit(
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """管理项目级 HTML 附图资产，create/update 保存 diagram.html 并同步截图为 render.png。
+    """创建和维护用于解释技术方案的简约黑白结构示意图，工具会保存 diagram.html 并同步截图为 render.png。
 
     Returns:
         list 返回 figures，每项包含 ref、markdown_ref、caption；read/create/update 返回 figure 元数据和 html 源码；check 返回 errors/warnings；失败返回 failed 和 code/message。
@@ -50,7 +51,12 @@ def figure_kit(
         - 修改图前先 read，基于返回的 html 生成完整新版 diagram.html，再 update。
         - create/update 必须提交完整 HTML 文档，包含 <!doctype html> 或 <html>，并包含 id="diagram" 的根节点。
         - HTML 附图固定 1500x900 画布；不要让内容依赖滚动、动画、外链字体、外部图片或脚本。
-        - 默认生成帮助理解结构的简约黑白风格示意图：白底、黑色/深灰线条、细边框、规整箭头、清晰分组和充足留白；避免彩色卡片、渐变背景和页面化装饰。
+        - 只有当图能显著降低理解成本时才创建图：适合表达模块关系、数据流向、处理阶段、层级边界、输入输出和关键反馈闭环；不适合把长段文字换成图。
+        - 默认生成帮助理解结构的简约黑白技术示意图，而不是产品页面、海报、仪表盘或正式专利标号图。
+        - 视觉样式应接近 engineering block diagram / technical schematic：白底，黑色或深灰线条，少量浅灰填充，细边框，直角/正交连接线，简洁箭头，清晰分组边界。
+        - 排版优先使用网格和对齐：画布四周保留充足边距，模块尺寸尽量一致，模块之间保持稳定间距；连线尽量水平/垂直，减少交叉、回折和穿越节点。
+        - 文本应短、可读、层级清楚：节点标题用短语，辅助说明不超过 1-2 行；避免小字号密集文字、长句、段落和说明书式正文。
+        - 避免彩色卡片、渐变、阴影、圆角过重、装饰图标、背景纹理、页面式标题栏和营销插画；可以用线框、分区框、泳道、表格式字段表达结构。
         - 默认不要在节点角落添加 101/102/201 这类专利附图编号；只有用户明确要求“附图标记/编号/正式专利附图”时才添加。
         - 先判断图型再排版：流程图用于步骤、状态流转和判断分支；架构图用于模块协同、系统边界、层次关系和依赖方向；结构示意图用于部件、通道、数据流和约束关系。
         - 架构图应体现分层、系统边界、模块职责和依赖方向，不要画成流程/状态回环；流程图则应突出主路径和少量关键分支。
