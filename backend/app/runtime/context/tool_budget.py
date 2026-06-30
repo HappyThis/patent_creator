@@ -43,7 +43,7 @@ def _tool_block_needs_budget(messages: list[dict[str, Any]], block_indexes: list
     largest_index = max(block_indexes, key=lambda item: _content_len(messages[item]), default=None)
     if largest_index is None:
         return False
-    return not _is_processed_tool_result(str(messages[largest_index].get("content") or ""))
+    return not _is_processed_tool_result(_content_text(messages[largest_index].get("content")))
 
 
 def _budget_tool_block(
@@ -56,7 +56,7 @@ def _budget_tool_block(
         largest_index = max(block_indexes, key=lambda item: _content_len(messages[item]), default=None)
         if largest_index is None:
             return
-        content = str(messages[largest_index].get("content") or "")
+        content = _content_text(messages[largest_index].get("content"))
         if _is_processed_tool_result(content):
             return
         path = write_tool_output(
@@ -88,7 +88,21 @@ def _tool_block_chars(messages: list[dict[str, Any]], block_indexes: list[int]) 
 
 
 def _content_len(message: dict[str, Any]) -> int:
-    return len(str(message.get("content") or ""))
+    return len(_content_text(message.get("content")))
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "input_text":
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return str(content or "")
 
 
 def _original_status(content: str) -> str:

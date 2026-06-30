@@ -271,6 +271,25 @@ def test_generate_with_tools_stream_converts_function_call_history(tmp_path: Pat
     ]
 
 
+def test_generate_with_tools_stream_preserves_user_content_parts(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream(completed_event("ok")))
+    client = OpenAIResponsesClient(make_settings(tmp_path), client=fake)  # type: ignore[arg-type]
+    content = [
+        {"type": "input_text", "text": "检查这张图"},
+        {"type": "input_image", "image_url": "data:image/png;base64,abcd", "detail": "high"},
+    ]
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[{"role": "user", "content": content}],
+            tools=[function_tool()],
+        )
+    )
+
+    assert fake.responses.calls[0]["input"] == [{"role": "user", "content": content}]
+
+
 def test_generate_with_tools_stream_returns_function_calls(tmp_path: Path) -> None:
     call_item = SimpleNamespace(
         type="function_call",
@@ -491,6 +510,42 @@ def test_generate_with_tools_stream_writes_payload_trace_when_enabled(tmp_path: 
     index = json.loads(index_lines[0])
     assert index["scope"] == "main"
     assert index["payload_file"] == str(payload_files[0])
+
+
+def test_generate_with_tools_stream_redacts_payload_trace_data_urls(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream(completed_event("ok")))
+    settings = make_settings(tmp_path)
+    settings.log_llm_payload = True
+    client = OpenAIResponsesClient(settings, client=fake)  # type: ignore[arg-type]
+    encoded_image = "QUJDREVGR0hJSktMTU5PUA=="
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system prompt",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "检查图"},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{encoded_image}",
+                            "detail": "high",
+                        },
+                    ],
+                }
+            ],
+            tools=[function_tool()],
+        )
+    )
+
+    trace_dir = settings.log_dir / "llm_payloads"
+    payload_files = sorted(path for path in trace_dir.glob("*.json") if path.name != "index.jsonl")
+    assert len(payload_files) == 1
+    trace_text = payload_files[0].read_text(encoding="utf-8")
+    assert encoded_image not in trace_text
+    assert "data:image/png;base64,<redacted chars=24>" in trace_text
+    assert fake.responses.calls[0]["input"][0]["content"][1]["image_url"] == f"data:image/png;base64,{encoded_image}"
 
 
 def test_generate_with_tools_stream_retries_transient_read_error_before_text_delta(tmp_path: Path) -> None:

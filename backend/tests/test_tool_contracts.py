@@ -70,13 +70,26 @@ def test_main_agent_registers_figure_kit() -> None:
     assert "markdown_ref" in description
     assert "figure block 只用于在“附录”章节展示图本体" in description
     assert "固定 1500x900 画布" in description
+    assert "离线可渲染、结果可复现、不会执行不可信代码" in description
+    assert "create/update 后模型会收到 render.png 截图用于视觉复盘" in description
+    assert "不要为了轻微审美差异反复微调" in description
+    assert 'marker-end="url(#arrow)"' in description
     assert "简约黑白技术示意图" in description
     assert "正交连接线" in description
     assert "网格和对齐" in description
+    assert "形状必须有稳定语义" in description
+    assert "主阅读路径" in description
+    assert "每条线应有清楚起点、终点、方向和含义" in description
+    assert "不要用无标签长虚线跨多个分区" in description
+    assert "图不是正文摘要" in description
     assert "默认不要在节点角落添加 101/102/201" in description
     assert "架构图应体现分层、系统边界、模块职责和依赖方向" in description
     assert 'id="diagram"' in properties["html"]["description"]
+    assert "可离线、可复现、无执行风险" in properties["html"]["description"]
+    assert 'marker-end="url(#arrow)"' in properties["html"]["description"]
     assert "monochrome technical schematic" in properties["html"]["description"]
+    assert "形状、布局、连接线和文字都必须服务语义" in properties["html"]["description"]
+    assert "每条箭头/连线有明确起点、终点、方向和含义" in properties["html"]["description"]
     assert "默认不要添加专利附图编号" in properties["html"]["description"]
     assert set(properties) == {"action", "ref", "title", "html"}
 

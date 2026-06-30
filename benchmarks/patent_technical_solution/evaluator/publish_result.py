@@ -225,17 +225,29 @@ def build_case_record(
     return {
         "case_id": case_run.case_id,
         "repeat": case_run.repeat,
+        "mode": result.get("run_config", {}).get("mode") or diagnostics.get("mode") or "solution",
         "source_run_id": case_run.run_id,
         "source_run_case_dir": relative_posix(case_run.case_run_dir, runs_dir.parent),
         "status": result.get("status") or "unparsed",
         "subject_status": result.get("subject_status"),
         "artifact_extracted": diagnostics.get("artifact_extracted"),
+        "mode_output_extracted": diagnostics.get("mode_output_extracted", diagnostics.get("artifact_extracted")),
+        "figure_artifact_count": diagnostics.get("figure_artifact_count"),
         "artifact_path": artifact_rel,
         "artifact_sha256": artifact_hash,
         "artifact_bytes": artifact_bytes,
         "judge_result_path": judge_rel,
         "total_score": judge.get("total_score"),
         "dimension_scores": judge.get("dimension_scores"),
+        "solution_score": judge.get("solution_score"),
+        "figure_score": judge.get("figure_score"),
+        "integration_score": judge.get("integration_score"),
+        "visual_quality_scores": judge.get("visual_quality_scores"),
+        "shape_issues": judge.get("shape_issues"),
+        "layout_issues": judge.get("layout_issues"),
+        "connector_issues": judge.get("connector_issues"),
+        "text_issues": judge.get("text_issues"),
+        "score_caps_applied": judge.get("score_caps_applied"),
         "diagnostics": diagnostics,
         "judge_error": result.get("judge_error"),
     }
@@ -255,6 +267,7 @@ def build_manifest(
 ) -> dict[str, Any]:
     scored_runs = [record for record in case_records if record.get("status") == "scored"]
     artifact_runs = [record for record in case_records if record.get("artifact_extracted") is True]
+    mode_artifact_runs = [record for record in case_records if record.get("mode_output_extracted") is True]
     return {
         "schema_version": 1,
         "result_id": result_id,
@@ -268,7 +281,7 @@ def build_manifest(
         "case_ids": sorted({item.case_id for item in case_runs}),
         "runs": len(case_runs),
         "scored_runs": len(scored_runs),
-        "artifact_success_runs": len(artifact_runs),
+        "artifact_success_runs": len(mode_artifact_runs or artifact_runs),
         "included_files": [
             "manifest.json",
             "evaluation_summary.json",

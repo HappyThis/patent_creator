@@ -323,9 +323,12 @@ def _assistant_tool_call(event: SessionEvent) -> dict[str, Any]:
 
 def _tool_result_message(event: SessionEvent) -> dict[str, Any]:
     payload = dict(event.payload)
-    payload.pop("tool", None)
+    tool_name = str(payload.pop("tool", "") or "")
     return {
         "role": "tool",
         "tool_call_id": str(event.call_id or ""),
         "content": json.dumps(payload, ensure_ascii=False),
+        "tool_name": tool_name,
+        "round_id": event.round_id,
+        "message_id": event.message_id,
     }

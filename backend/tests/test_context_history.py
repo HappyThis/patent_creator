@@ -183,6 +183,10 @@ def test_project_main_event_segments_keeps_assistant_tool_call_and_result_togeth
     assert segments[1].start_seq == 2
     assert segments[1].end_seq == 4
     assert [message["role"] for message in segments[1].messages] == ["assistant", "tool"]
+    tool_message = segments[1].messages[1]
+    assert tool_message["tool_name"] == "disclosure_outline"
+    assert tool_message["round_id"] == "round_1"
+    assert tool_message["message_id"] == "msg_1"
 
 
 def test_project_main_event_segments_stops_before_incomplete_tool_call() -> None:

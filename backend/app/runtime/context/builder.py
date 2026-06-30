@@ -19,6 +19,7 @@ from .history import (
 )
 from .prompts import context_compression_user_prompt
 from .tool_budget import apply_tool_result_turn_budget
+from .tool_output_content import hydrate_tool_output_content
 from .usage import ContextUsage, estimate_messages_tokens, usage_for_messages
 
 logger = logging.getLogger("patent_creator.context")
@@ -63,7 +64,7 @@ class ContextManager:
             current_message_id=current_message_id,
         )
         messages = apply_tool_result_turn_budget(self.store, project_id, messages)
-        return prepare_messages_for_model_request(self._emergency_trim_messages(messages))
+        return self._prepare_request_messages(project_id, self._emergency_trim_messages(messages), round_id=None)
 
     def _build_main_agent_messages_raw(
         self,
@@ -102,10 +103,9 @@ class ContextManager:
             current_message_id=current_message_id,
         )
         raw_messages = apply_tool_result_turn_budget(self.store, project_id, raw_messages)
-        request_messages = prepare_messages_for_model_request(raw_messages)
         usage = usage_for_messages(raw_messages, self.settings)
         if usage.used_tokens <= usage.threshold_tokens:
-            return request_messages
+            return self._prepare_request_messages(project_id, raw_messages, round_id=round_id)
 
         if not session_id or not self.store.session_exists(project_id, session_id):
             logger.info(
@@ -116,7 +116,7 @@ class ContextManager:
                 usage.threshold_tokens,
             )
             trimmed = self._emergency_trim_messages(raw_messages)
-            return prepare_messages_for_model_request(trimmed)
+            return self._prepare_request_messages(project_id, trimmed, round_id=round_id)
 
         logger.info(
             "context compression triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
@@ -200,7 +200,7 @@ class ContextManager:
                     usage.used_tokens,
                     usage.threshold_tokens,
                 )
-                return prepare_messages_for_model_request(raw_messages)
+                return self._prepare_request_messages(project_id, raw_messages, round_id=round_id)
 
             logger.warning(
                 "context compression completed but emergency trim is still needed scope=main project_id=%s session_id=%s round_id=%s message_id=%s used_tokens=%s threshold_tokens=%s",
@@ -222,7 +222,7 @@ class ContextManager:
                         "summary": "上下文压缩后仍超限，已应用最终兜底裁剪",
                     },
                 )
-            return prepare_messages_for_model_request(trimmed)
+            return self._prepare_request_messages(project_id, trimmed, round_id=round_id)
 
         logger.warning(
             "context emergency trim triggered scope=main project_id=%s session_id=%s round_id=%s message_id=%s reason=compression_unavailable used_tokens=%s threshold_tokens=%s",
@@ -244,7 +244,7 @@ class ContextManager:
                 },
             )
         trimmed = self._emergency_trim_messages(raw_messages)
-        return prepare_messages_for_model_request(trimmed)
+        return self._prepare_request_messages(project_id, trimmed, round_id=round_id)
 
     def context_usage(self, project_id: str, session_id: str | None) -> ContextUsage | None:
         if not session_id or not self.store.session_exists(project_id, session_id):
@@ -268,6 +268,16 @@ class ContextManager:
             current_user_message=current_user_message,
             current_message_id=current_message_id,
         )
+
+    def _prepare_request_messages(
+        self,
+        project_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        round_id: str | None,
+    ) -> list[dict[str, Any]]:
+        hydrated = hydrate_tool_output_content(self.store, project_id, messages, round_id=round_id)
+        return prepare_messages_for_model_request(hydrated)
 
     async def _compress_main_history(
         self,

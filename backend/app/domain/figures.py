@@ -13,11 +13,17 @@ FIGURE_WIDTH = 1500
 FIGURE_HEIGHT = 900
 MAX_HTML_CHARS = 120_000
 DIAGRAM_ROOT_PATTERN = re.compile(r"\bid\s*=\s*['\"]diagram['\"]", flags=re.IGNORECASE)
-BLOCKED_HTML_PATTERN = re.compile(r"<\s*(script|iframe|object|embed|link)\b|javascript:|\bon[a-z]+\s*=", flags=re.IGNORECASE)
-BLOCKED_EXTERNAL_RESOURCE_PATTERN = re.compile(
-    r"(\bsrc\s*=|\bhref\s*=\s*['\"]\s*(?!#)|\bxlink:href\s*=\s*['\"]\s*(?!#)|url\()",
-    flags=re.IGNORECASE,
+BLOCKED_HTML_TAG_PATTERN = re.compile(r"<\s*(script|iframe|object|embed|link)\b", flags=re.IGNORECASE)
+BLOCKED_JAVASCRIPT_URL_PATTERN = re.compile(r"javascript\s*:", flags=re.IGNORECASE)
+BLOCKED_EVENT_HANDLER_PATTERN = re.compile(r"\bon[a-z]+\s*=", flags=re.IGNORECASE)
+SRC_ATTRIBUTE_PATTERN = re.compile(r"\bsrc\s*=", flags=re.IGNORECASE)
+HREF_ATTRIBUTE_PATTERN = re.compile(
+    r"\b(?P<name>href|xlink:href)\s*=\s*(?P<quote>['\"])(?P<quoted_value>.*?)(?P=quote)|"
+    r"\b(?P<unquoted_name>href|xlink:href)\s*=\s*(?P<unquoted_value>[^\s>]+)",
+    flags=re.IGNORECASE | re.DOTALL,
 )
+URL_FUNCTION_PATTERN = re.compile(r"url\(\s*(?P<quote>['\"]?)(?P<value>.*?)(?P=quote)\s*\)", flags=re.IGNORECASE | re.DOTALL)
+LOCAL_FRAGMENT_PATTERN = re.compile(r"^#[A-Za-z_][\w:.-]*$")
 
 
 def figure_ref(figure_id: str) -> str:
@@ -105,10 +111,51 @@ def validate_html_source(html: str) -> dict[str, Any]:
         return tool_failed("figure_html_document_required", "figure_kit 需要完整 diagram.html，请包含 <!doctype html> 或 <html>。")
     if not DIAGRAM_ROOT_PATTERN.search(source):
         return tool_failed("figure_html_root_required", 'HTML 中必须包含固定画布根节点 id="diagram"。')
-    blocked = BLOCKED_HTML_PATTERN.search(source) or BLOCKED_EXTERNAL_RESOURCE_PATTERN.search(source)
+    blocked = _blocked_html_usage(source)
     if blocked:
         return tool_failed(
-            "figure_html_unsafe",
-            "HTML 附图不能包含脚本、资源引用、iframe/object/embed 或事件处理器；请使用纯 HTML/CSS 绘制。",
+            blocked["code"],
+            blocked["message"],
         )
     return {"status": "success", "output": {"html": source}}
+
+
+def _blocked_html_usage(source: str) -> dict[str, str] | None:
+    if BLOCKED_HTML_TAG_PATTERN.search(source):
+        return {
+            "code": "figure_html_embed_blocked",
+            "message": "HTML 附图不能包含 script、iframe、object、embed 或 link 标签；请使用自包含的纯 HTML/CSS/SVG 绘制。",
+        }
+    if BLOCKED_JAVASCRIPT_URL_PATTERN.search(source):
+        return {
+            "code": "figure_html_javascript_url_blocked",
+            "message": "HTML 附图不能包含 javascript: URL；请使用无脚本的静态结构图。",
+        }
+    if BLOCKED_EVENT_HANDLER_PATTERN.search(source):
+        return {
+            "code": "figure_html_event_handler_blocked",
+            "message": "HTML 附图不能包含 onclick/onload 等事件处理器；请使用无脚本的静态结构图。",
+        }
+    if SRC_ATTRIBUTE_PATTERN.search(source):
+        return {
+            "code": "figure_html_external_src_blocked",
+            "message": "HTML 附图不能包含 src 资源引用；请不要使用外部图片、脚本、字体或媒体资源。",
+        }
+    for match in HREF_ATTRIBUTE_PATTERN.finditer(source):
+        value = match.group("quoted_value") if match.group("quoted_value") is not None else match.group("unquoted_value")
+        if not _is_local_fragment_reference(value):
+            return {
+                "code": "figure_html_external_href_blocked",
+                "message": "HTML 附图的 href/xlink:href 只能引用当前文档内的 #id；请不要引用外部资源。",
+            }
+    for match in URL_FUNCTION_PATTERN.finditer(source):
+        if not _is_local_fragment_reference(match.group("value")):
+            return {
+                "code": "figure_html_external_url_blocked",
+                "message": "HTML 附图的 url(...) 只能引用当前文档内的 #id，例如 url(#arrow)；请不要引用外部图片、字体或样式资源。",
+            }
+    return None
+
+
+def _is_local_fragment_reference(value: str | None) -> bool:
+    return bool(LOCAL_FRAGMENT_PATTERN.fullmatch(str(value or "").strip()))

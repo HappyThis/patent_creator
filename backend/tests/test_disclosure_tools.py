@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.domain.disclosure import build_render_ast
 from app.storage.workspace_store import WorkspaceStore
 
@@ -24,6 +26,32 @@ html,body{{margin:0;background:#fff;}}
 .box{{border:2px solid #111;padding:28px;display:inline-block;}}
 </style></head>
 <body><div id="diagram"><div class="box">{text}</div></div></body>
+</html>"""
+
+
+def _sample_svg_marker_html(marker_ref: str = 'marker-end="url(#arrow)"') -> str:
+    return f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>
+html,body{{margin:0;background:#fff;}}
+#diagram{{width:1500px;height:900px;font-family:Arial,sans-serif;}}
+</style></head>
+<body><div id="diagram">
+<svg width="1500" height="900" viewBox="0 0 1500 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+      <path d="M0,0 L12,4 L0,8 z" fill="#111" />
+    </marker>
+    <clipPath id="clip"><rect x="80" y="80" width="360" height="160" /></clipPath>
+  </defs>
+  <rect x="80" y="80" width="360" height="160" fill="#f7f7f7" stroke="#111" clip-path="url(#clip)" />
+  <text x="260" y="165" text-anchor="middle" font-size="28">输入模块</text>
+  <line x1="440" y1="160" x2="760" y2="160" stroke="#111" stroke-width="3" {marker_ref} />
+  <a href="#localTarget"><text x="610" y="135" font-size="22">处理流</text></a>
+  <rect id="localTarget" x="760" y="80" width="360" height="160" fill="#fff" stroke="#111" />
+  <text x="940" y="165" text-anchor="middle" font-size="28">处理模块</text>
+</svg>
+</div></body>
 </html>"""
 
 
@@ -171,7 +199,71 @@ def test_figure_kit_rejects_unsafe_html(tmp_path: Path) -> None:
     )
 
     assert create["status"] == "failed"
-    assert create["output"]["code"] == "figure_html_unsafe"
+    assert create["output"]["code"] == "figure_html_embed_blocked"
+
+
+def test_figure_kit_allows_svg_internal_references(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
+    executor, project_id = make_tool_executor(tmp_path)
+
+    create = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "title": "内部引用示意图",
+            "html": _sample_svg_marker_html(),
+        },
+    )
+
+    assert create["status"] == "success"
+    assert 'marker-end="url(#arrow)"' in create["output"]["figure"]["html"]
+    assert 'clip-path="url(#clip)"' in create["output"]["figure"]["html"]
+    assert 'href="#localTarget"' in create["output"]["figure"]["html"]
+
+
+@pytest.mark.parametrize(
+    ("html", "expected_code"),
+    [
+        (
+            '<!doctype html><html><body><div id="diagram" onclick="alert(1)">任务接收</div></body></html>',
+            "figure_html_event_handler_blocked",
+        ),
+        (
+            '<!doctype html><html><body><div id="diagram"><img src="asset.png"></div></body></html>',
+            "figure_html_external_src_blocked",
+        ),
+        (
+            '<!doctype html><html><body><div id="diagram"><a href="https://example.com">外链</a></div></body></html>',
+            "figure_html_external_href_blocked",
+        ),
+        (
+            '<!doctype html><html><body><div id="diagram" style="background:url(https://example.com/a.png)">任务接收</div></body></html>',
+            "figure_html_external_url_blocked",
+        ),
+        (
+            '<!doctype html><html><body><div id="diagram"><a href="javascript:alert(1)">执行</a></div></body></html>',
+            "figure_html_javascript_url_blocked",
+        ),
+    ],
+)
+def test_figure_kit_rejects_external_or_executable_html(tmp_path: Path, html: str, expected_code: str) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+
+    create = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "title": "不安全附图",
+            "html": html,
+        },
+    )
+
+    assert create["status"] == "failed"
+    assert create["output"]["code"] == expected_code
 
 
 def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:

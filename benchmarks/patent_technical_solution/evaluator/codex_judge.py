@@ -60,10 +60,129 @@ JUDGE_SCHEMA: dict = {
     },
 }
 
+FIGURE_JUDGE_SCHEMA: dict = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "status",
+        "mode",
+        "total_score",
+        "figure_score",
+        "figures_reviewed",
+        "visual_quality_scores",
+        "strengths",
+        "weaknesses",
+        "missing_visual_mechanisms",
+        "shape_issues",
+        "layout_issues",
+        "connector_issues",
+        "text_issues",
+        "score_caps_applied",
+        "score_rationale",
+    ],
+    "properties": {
+        "status": {"type": "string", "enum": ["scored"]},
+        "mode": {"type": "string", "enum": ["figure"]},
+        "total_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "figure_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "figures_reviewed": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path", "assessment"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "assessment": {"type": "string"},
+                },
+            },
+        },
+        "visual_quality_scores": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["shape_score", "layout_score", "connector_score", "text_score"],
+            "properties": {
+                "shape_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "layout_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "connector_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "text_score": {"type": "number", "minimum": 0, "maximum": 100},
+            },
+        },
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "weaknesses": {"type": "array", "items": {"type": "string"}},
+        "missing_visual_mechanisms": {"type": "array", "items": {"type": "string"}},
+        "shape_issues": {"type": "array", "items": {"type": "string"}},
+        "layout_issues": {"type": "array", "items": {"type": "string"}},
+        "connector_issues": {"type": "array", "items": {"type": "string"}},
+        "text_issues": {"type": "array", "items": {"type": "string"}},
+        "score_caps_applied": {"type": "array", "items": {"type": "string"}},
+        "score_rationale": {"type": "string"},
+    },
+}
+
+COMBINED_JUDGE_SCHEMA: dict = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "status",
+        "mode",
+        "total_score",
+        "solution_score",
+        "figure_score",
+        "integration_score",
+        "visual_quality_scores",
+        "strengths",
+        "weaknesses",
+        "missing_key_mechanisms",
+        "figure_issues",
+        "shape_issues",
+        "layout_issues",
+        "connector_issues",
+        "text_issues",
+        "integration_issues",
+        "unsupported_claims",
+        "score_caps_applied",
+        "score_rationale",
+    ],
+    "properties": {
+        "status": {"type": "string", "enum": ["scored"]},
+        "mode": {"type": "string", "enum": ["combined"]},
+        "total_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "solution_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "figure_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "integration_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "visual_quality_scores": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["shape_score", "layout_score", "connector_score", "text_score"],
+            "properties": {
+                "shape_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "layout_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "connector_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "text_score": {"type": "number", "minimum": 0, "maximum": 100},
+            },
+        },
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "weaknesses": {"type": "array", "items": {"type": "string"}},
+        "missing_key_mechanisms": {"type": "array", "items": {"type": "string"}},
+        "figure_issues": {"type": "array", "items": {"type": "string"}},
+        "shape_issues": {"type": "array", "items": {"type": "string"}},
+        "layout_issues": {"type": "array", "items": {"type": "string"}},
+        "connector_issues": {"type": "array", "items": {"type": "string"}},
+        "text_issues": {"type": "array", "items": {"type": "string"}},
+        "integration_issues": {"type": "array", "items": {"type": "string"}},
+        "unsupported_claims": {"type": "array", "items": {"type": "string"}},
+        "score_caps_applied": {"type": "array", "items": {"type": "string"}},
+        "score_rationale": {"type": "string"},
+    },
+}
+
 
 def run_codex_judge(
     *,
+    mode: str = "solution",
     working_dir: Path,
+    case_run_dir: Path | None = None,
     request_md: str,
     evaluated_artifact_md: str,
     judge_md: str,
@@ -82,9 +201,11 @@ def run_codex_judge(
     stderr_path = output_dir / "codex_judge_stderr.txt"
     events_path = output_dir / "codex_judge_events.jsonl"
 
-    schema_path.write_text(json.dumps(JUDGE_SCHEMA, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    schema_path.write_text(json.dumps(schema_for_mode(mode), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt_path.write_text(
         build_judge_prompt(
+            mode=mode,
+            case_run_dir=case_run_dir,
             request_md=request_md,
             evaluated_artifact_md=evaluated_artifact_md,
             judge_md=judge_md,
@@ -241,7 +362,56 @@ def is_windows() -> bool:
     return os.name == "nt"
 
 
+def schema_for_mode(mode: str) -> dict:
+    if mode == "solution":
+        return JUDGE_SCHEMA
+    if mode == "figure":
+        return FIGURE_JUDGE_SCHEMA
+    if mode == "combined":
+        return COMBINED_JUDGE_SCHEMA
+    raise ValueError(f"unknown judge mode: {mode}")
+
+
 def build_judge_prompt(
+    *,
+    mode: str,
+    case_run_dir: Path | None,
+    request_md: str,
+    evaluated_artifact_md: str,
+    judge_md: str,
+    rubric_md: str,
+    reference_solution_md: str,
+) -> str:
+    if mode == "solution":
+        return build_solution_judge_prompt(
+            request_md=request_md,
+            evaluated_artifact_md=evaluated_artifact_md,
+            judge_md=judge_md,
+            rubric_md=rubric_md,
+            reference_solution_md=reference_solution_md,
+        )
+    if mode == "figure":
+        return build_figure_judge_prompt(
+            case_run_dir=case_run_dir,
+            request_md=request_md,
+            evaluated_artifact_md=evaluated_artifact_md,
+            judge_md=judge_md,
+            rubric_md=rubric_md,
+            reference_solution_md=reference_solution_md,
+        )
+    if mode == "combined":
+        return build_combined_judge_prompt(
+            case_run_dir=case_run_dir,
+            request_md=request_md,
+            evaluated_artifact_md=evaluated_artifact_md,
+            judge_md=judge_md,
+            rubric_md=rubric_md,
+            reference_solution_md=reference_solution_md,
+        )
+    raise ValueError(f"unknown judge mode: {mode}")
+
+
+def build_solution_judge_prompt(
     *,
     request_md: str,
     evaluated_artifact_md: str,
@@ -265,6 +435,106 @@ def build_judge_prompt(
 <judge.md>
 {judge_md}
 </judge.md>
+
+<request.md>
+{request_md}
+</request.md>
+
+<evaluated_artifact.md>
+{evaluated_artifact_md}
+</evaluated_artifact.md>
+
+<reference_solution.md>
+{reference_solution_md}
+</reference_solution.md>
+
+<rubric.md>
+{rubric_md}
+</rubric.md>
+"""
+
+
+def build_figure_judge_prompt(
+    *,
+    case_run_dir: Path | None,
+    request_md: str,
+    evaluated_artifact_md: str,
+    judge_md: str,
+    rubric_md: str,
+    reference_solution_md: str,
+) -> str:
+    case_run_line = f"当前 case run 根目录：{case_run_dir}" if case_run_dir else "当前工作目录是 case run 根目录。"
+    return f"""你是 Codex-as-judge，负责评估被测 agent 生成的技术示意图质量。
+
+{case_run_line}
+
+你当前工作目录是 case run 根目录，而不是单纯的项目快照目录。目录含义如下：
+
+- prepared_environment/：被测 agent 可见的探索环境，通常包含 project_snapshot/。你可以按需读取它来确认项目事实和技术对象。
+- subject/：被测 agent 的实际运行工作区。请自行查找 subject/data/projects/*/assets/figures/ 下的 figure.json、diagram.html 和 render.png，并实际查看 render.png 后评分。
+
+注意：
+- 被评估对象是 subject/ 中由 figure_kit 生成的附图资产；不要评价你自己临时生成的图片。
+- 不要因为图片数量达标就给高分；如果没有找到图片、图片无法打开、图片空白、与需求无关或只是模板化框图，应明显扣分。
+- evaluated_artifact.md 只是可选辅助文本；figure mode 的核心评分对象是图片是否帮助理解本 case 的技术结构、流程、状态、边界、数据流或协同机制。
+- 可以阅读 diagram.html 辅助理解，但最终必须基于 render.png 的可视结果判断图是否清楚。
+- 不以某一种固定模板、固定布局或固定配色作为硬性要求；重点评价图是否准确、清晰、有机制表达，而不是是否服从某个格式。
+- 必须分别评价形状、布局、箭头/连接线、文字四类视觉质量；连接线穿越节点、长距离跨区、虚实线语义不明、文字过密或形状层级混乱，都应作为实质扣分依据。
+- 必须输出符合 JSON schema 的 JSON，不要输出 Markdown。
+
+<figure_judge.md>
+{judge_md}
+</figure_judge.md>
+
+<request.md>
+{request_md}
+</request.md>
+
+<optional_evaluated_artifact.md>
+{evaluated_artifact_md}
+</optional_evaluated_artifact.md>
+
+<reference_solution.md>
+{reference_solution_md}
+</reference_solution.md>
+
+<rubric.md>
+{rubric_md}
+</rubric.md>
+"""
+
+
+def build_combined_judge_prompt(
+    *,
+    case_run_dir: Path | None,
+    request_md: str,
+    evaluated_artifact_md: str,
+    judge_md: str,
+    rubric_md: str,
+    reference_solution_md: str,
+) -> str:
+    case_run_line = f"当前 case run 根目录：{case_run_dir}" if case_run_dir else "当前工作目录是 case run 根目录。"
+    return f"""你是 Codex-as-judge，负责评估一份带附图的专利交底书“技术方案”产物。
+
+{case_run_line}
+
+你当前工作目录是 case run 根目录。目录含义如下：
+
+- prepared_environment/：被测 agent 可见的探索环境，通常包含 project_snapshot/。你可以按需读取它来确认项目事实和技术对象。
+- subject/：被测 agent 的实际运行工作区。请自行查找 subject/data/projects/*/assets/figures/ 下的 figure.json、diagram.html 和 render.png，并实际查看 render.png 后评价附图。
+
+注意：
+- 技术方案正文质量以 prompt 中注入的 evaluated_artifact.md 为准；不要用聊天回复、工具轨迹或完整 disclosure 中其他章节替代它。
+- 附图质量和文图一致性需要你自行查看 subject/ 下的图片资产和必要的 disclosure.json。
+- 参考方案不是唯一答案；若被评估方案不同但技术构思合理、机制深度相当、能解决同一技术问题，不应机械扣分。
+- 对看似合理但材料中没有依据的“已有事实、当前结构、既有能力、具体字段或接口”声明，应列入 unsupported_claims 并酌情扣分。
+- total_score 应按 combined_judge.md 的权重综合 solution_score、figure_score 和 integration_score。
+- figure_score 必须分别考虑形状、布局、箭头/连接线、文字四类视觉质量；正文质量高不能抵消图片主阅读路径混乱、连接线语义不清或文字过密。
+- 必须输出符合 JSON schema 的 JSON，不要输出 Markdown。
+
+<combined_judge.md>
+{judge_md}
+</combined_judge.md>
 
 <request.md>
 {request_md}

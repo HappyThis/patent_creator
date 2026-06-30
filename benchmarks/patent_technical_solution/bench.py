@@ -11,6 +11,7 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 REPO_DIR = BENCHMARK_DIR.parents[1]
 DEFAULT_PYTHON = REPO_DIR / "backend" / ".venv" / "bin" / "python"
 DEFAULT_TIMEOUT = 900
+MODES = ("solution", "figure", "combined")
 
 
 def main() -> None:
@@ -30,6 +31,7 @@ def main() -> None:
         command = run_case_command(
             python_bin=python_bin,
             case_id=args.case,
+            mode=args.mode,
             run_id=args.run_id,
             round_timeout=args.round_timeout,
             judge_timeout=args.judge_timeout,
@@ -38,16 +40,18 @@ def main() -> None:
         command = run_case_command(
             python_bin=python_bin,
             case_id=args.case,
+            mode=args.mode,
             run_id=args.run_id,
             round_timeout=args.round_timeout,
             judge_timeout=args.round_timeout,
             extra_args=["--skip-judge"],
         )
     elif args.command == "judge":
-        run_id = args.run_id or latest_run_id_for_case(normalize_case(args.case))
+        run_id = args.run_id or latest_run_id_for_case(normalize_case(args.case), mode=args.mode)
         command = run_case_command(
             python_bin=python_bin,
             case_id=args.case,
+            mode=args.mode,
             run_id=run_id,
             round_timeout=args.judge_timeout,
             judge_timeout=args.judge_timeout,
@@ -65,6 +69,8 @@ def main() -> None:
             str(args.round_timeout),
             "--judge-timeout",
             str(args.judge_timeout),
+            "--mode",
+            args.mode,
         ]
         if args.run_id:
             command.extend(["--run-id", args.run_id])
@@ -113,6 +119,7 @@ def parse_args() -> argparse.Namespace:
     batch.add_argument("--repeats", type=int, default=1)
     batch.add_argument("--round-timeout", type=int, default=DEFAULT_TIMEOUT)
     batch.add_argument("--judge-timeout", type=int, default=DEFAULT_TIMEOUT)
+    batch.add_argument("--mode", choices=MODES, default="solution", help="Benchmark mode.")
     batch.add_argument("--skip-judge", action="store_true")
     batch.add_argument("--dry-run", action="store_true")
 
@@ -121,6 +128,7 @@ def parse_args() -> argparse.Namespace:
 
 def add_case_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("case", help="Case id, e.g. 001.")
+    parser.add_argument("--mode", choices=MODES, default="solution", help="Benchmark mode.")
 
 
 def add_common_run_args(parser: argparse.ArgumentParser, *, judge: bool = True) -> None:
@@ -140,6 +148,7 @@ def run_case_command(
     *,
     python_bin: Path,
     case_id: str,
+    mode: str,
     run_id: str | None,
     round_timeout: int,
     judge_timeout: int,
@@ -150,6 +159,8 @@ def run_case_command(
         str(BENCHMARK_DIR / "evaluator" / "run_case.py"),
         "--case",
         normalize_case(case_id),
+        "--mode",
+        mode,
         "--round-timeout",
         str(round_timeout),
         "--judge-timeout",
@@ -223,16 +234,27 @@ def latest_run_dir() -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
 
 
-def latest_run_id_for_case(case_id: str) -> str:
+def latest_run_id_for_case(case_id: str, *, mode: str) -> str:
     runs_dir = BENCHMARK_DIR / "runs"
     artifacts = sorted(
         runs_dir.glob(f"**/cases/{case_id}/evaluated_artifact.md"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    if not artifacts:
-        raise SystemExit(f"No evaluated_artifact.md found for case {case_id}. Run subject first.")
-    return str(artifacts[0].parents[2].relative_to(runs_dir))
+    for artifact in artifacts:
+        manifest_path = artifact.parent / "input_manifest.json"
+        if not manifest_path.exists():
+            if mode == "solution":
+                return str(artifact.parents[2].relative_to(runs_dir))
+            continue
+        try:
+            manifest = read_json(manifest_path)
+        except Exception:
+            continue
+        run_mode = str(manifest.get("run_config", {}).get("mode") or "solution")
+        if run_mode == mode:
+            return str(artifact.parents[2].relative_to(runs_dir))
+    raise SystemExit(f"No evaluated_artifact.md found for case {case_id} mode {mode}. Run subject first.")
 
 
 def read_json(path: Path) -> dict:

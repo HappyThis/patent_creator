@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -46,6 +47,7 @@ RETRYABLE_LLM_ERRORS = (
 
 RETRYABLE_STREAM_API_ERROR_CODES = {"llm_stream_error", "llm_empty_response"}
 RETRYABLE_NON_STREAM_API_ERROR_CODES = {"llm_invalid_json"}
+DATA_URL_BASE64_PATTERN = re.compile(r"^data:([^;,\s]+);base64,(.*)$", re.DOTALL)
 
 
 @dataclass(slots=True)
@@ -553,8 +555,8 @@ class OpenAIResponsesClient:
         }
         payload = {
             "metadata": metadata,
-            "request_payload": _jsonable(request_payload),
-            "request_options": _jsonable(request_options or {}),
+            "request_payload": _redact_trace_value(_jsonable(request_payload)),
+            "request_options": _redact_trace_value(_jsonable(request_options or {})),
         }
 
         trace_dir = self.settings.log_dir / "llm_payloads"
@@ -596,12 +598,12 @@ def _messages_to_response_input(messages: list[dict[str, Any]]) -> list[dict[str
                 {
                     "type": "function_call_output",
                     "call_id": str(message.get("tool_call_id") or ""),
-                    "output": str(message.get("content") or ""),
+                    "output": _text_content(message.get("content")),
                 }
             )
             continue
         if role == "assistant":
-            content = str(message.get("content") or "")
+            content = _text_content(message.get("content"))
             if content:
                 input_items.append({"role": "assistant", "content": content})
             for tool_call in message.get("tool_calls") or []:
@@ -620,8 +622,33 @@ def _messages_to_response_input(messages: list[dict[str, Any]]) -> list[dict[str
                 )
             continue
         if role in {"user", "system", "developer"}:
-            input_items.append({"role": role, "content": str(message.get("content") or "")})
+            input_items.append(
+                {
+                    "role": role,
+                    "content": _message_content_for_response(message.get("content")),
+                }
+            )
     return input_items
+
+
+def _message_content_for_response(content: Any) -> Any:
+    if isinstance(content, list):
+        return content
+    return str(content or "")
+
+
+def _text_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "input_text":
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return str(content or "")
 
 
 def _response_to_agent_result(response: Any) -> dict[str, Any]:
@@ -892,6 +919,20 @@ def _jsonable(value: Any) -> Any:
         if hasattr(value, "__dict__"):
             return _jsonable(dict(value.__dict__))
         return str(value)
+
+
+def _redact_trace_value(value: Any) -> Any:
+    if isinstance(value, str):
+        match = DATA_URL_BASE64_PATTERN.match(value)
+        if match:
+            mime_type, encoded = match.groups()
+            return f"data:{mime_type};base64,<redacted chars={len(encoded)}>"
+        return value
+    if isinstance(value, dict):
+        return {key: _redact_trace_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_trace_value(item) for item in value]
+    return value
 
 
 def _describe_usage(usage: Any) -> str:
