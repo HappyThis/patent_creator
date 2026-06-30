@@ -71,8 +71,10 @@ def test_main_agent_registers_figure_kit() -> None:
     assert "figure block 只用于在“附录”章节展示图本体" in description
     assert "固定 1500x900 画布" in description
     assert "黑白风格" in description
+    assert "默认不要在节点角落添加 101/102/201" in description
     assert "架构图应体现分层、系统边界、模块职责和依赖方向" in description
     assert 'id="diagram"' in properties["html"]["description"]
+    assert "默认不要添加专利附图编号" in properties["html"]["description"]
     assert set(properties) == {"action", "ref", "title", "html"}
 
 
