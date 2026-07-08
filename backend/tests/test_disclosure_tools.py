@@ -16,6 +16,34 @@ PNG_BYTES = (
     b"\x00\x05\xfe\x02\xfeA\xd7S\x84\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
+GEOMETRY_REPORT = {
+    "version": 1,
+    "ok": False,
+    "metrics": {"elementCount": 3, "textCount": 1, "nodeCount": 1, "groupCount": 0, "connectorCount": 1},
+    "issues": [
+        {
+            "severity": "error",
+            "rule": "connector_crosses_text",
+            "elementIds": ["line_a", "label_a"],
+            "message": "连线 line_a 穿过文本「处理流」。",
+            "measurement": {"clearancePx": 0, "minClearancePx": 6},
+        },
+        {
+            "severity": "warning",
+            "rule": "connector_missing_endpoint_metadata",
+            "elementIds": ["line_a"],
+            "message": "连线 line_a 缺少 data-fig-source 或 data-fig-target。",
+        },
+        {
+            "severity": "error",
+            "rule": "semantic_orphan_business_node",
+            "category": "semantic",
+            "elementIds": ["chat_c"],
+            "message": "业务节点 Think Chat C 没有任何连接线。",
+        },
+    ],
+}
+
 
 def _sample_figure_html(text: str = "任务接收") -> str:
     return f"""<!doctype html>
@@ -60,6 +88,27 @@ def _stub_figure_renderer(monkeypatch) -> None:
         output_path = self.figure_render_file(project_id, figure_id)
         output_path.write_bytes(PNG_BYTES)
         return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_html_figure", render)
+
+
+def _stub_figure_renderer_with_geometry(monkeypatch) -> None:
+    def render(self: WorkspaceStore, project_id: str, figure_id: str) -> dict:
+        output_path = self.figure_render_file(project_id, figure_id)
+        geometry_path = self.figure_geometry_file(project_id, figure_id)
+        geometry_report_path = self.figure_geometry_report_file(project_id, figure_id)
+        output_path.write_bytes(PNG_BYTES)
+        self.write_json(geometry_path, {"version": 1, "canvas": {"width": 1500, "height": 900}})
+        self.write_json(geometry_report_path, GEOMETRY_REPORT)
+        return {
+            "status": "success",
+            "output": {
+                "path": str(output_path),
+                "geometry_path": str(geometry_path),
+                "geometry_report_path": str(geometry_report_path),
+                "geometry_report": GEOMETRY_REPORT,
+            },
+        }
 
     monkeypatch.setattr(WorkspaceStore, "_render_html_figure", render)
 
@@ -183,6 +232,35 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert checked["output"]["ok"] is False
     assert {item["code"] for item in checked["output"]["errors"]} == {"figure_label_mismatch"}
     assert {item["code"] for item in checked["output"]["warnings"]} == {"figure_not_displayed_in_appendix"}
+
+
+def test_figure_kit_returns_geometry_report_and_geometry_warnings(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer_with_geometry(monkeypatch)
+    executor, project_id = make_tool_executor(tmp_path)
+
+    create = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "title": "几何检查示意图",
+            "html": _sample_figure_html(),
+        },
+    )
+
+    assert create["status"] == "success"
+    assert [item["code"] for item in create["output"]["warnings"]] == [
+        "geometry_connector_crosses_text",
+        "geometry_connector_missing_endpoint_metadata",
+        "semantic_orphan_business_node",
+    ]
+    figure = create["output"]["figure"]
+    assert figure["geometry"]["path"] == "assets/figures/fig_000001/geometry_report.json"
+    assert figure["geometry"]["raw_path"] == "assets/figures/fig_000001/geometry.json"
+    assert figure["geometry"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/geometry_report.json"
+    assert figure["geometry"]["raw_url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/geometry.json"
+    assert figure["geometry"]["report"] == GEOMETRY_REPORT
 
 
 def test_figure_kit_rejects_unsafe_html(tmp_path: Path) -> None:
@@ -454,6 +532,11 @@ def test_disclosure_read_section_returns_writing_guide_for_empty_top_level_fixed
     assert "不要求固定写作顺序" in read["output"]["writing_guide_markdown"]
     assert "避免只写“系统根据状态进行处理”" in read["output"]["writing_guide_markdown"]
     assert "两个以上独立机制" in read["output"]["writing_guide_markdown"]
+    assert "附图可自由表达结构、边界、流向、状态、依赖或协同关系" in read["output"]["writing_guide_markdown"]
+    assert "不要求套用固定图型" in read["output"]["writing_guide_markdown"]
+    assert "流程图" not in read["output"]["writing_guide_markdown"]
+    assert "架构图" not in read["output"]["writing_guide_markdown"]
+    assert "时序图" not in read["output"]["writing_guide_markdown"]
 
 
 def test_disclosure_read_section_omits_writing_guide_for_filled_or_child_section(tmp_path: Path) -> None:

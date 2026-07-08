@@ -84,6 +84,17 @@ def test_hydrate_tool_output_content_adds_current_round_figure_image_after_tool_
     assert review_message["tool_output_attachment"] is True
     assert review_message["content"][0]["type"] == "input_text"
     assert FIGURE_VISUAL_REVIEW_PROMPT in review_message["content"][0]["text"]
+    assert "geometry_report" in review_message["content"][0]["text"]
+    assert "优先处理 issues 中 severity=error 的问题" in review_message["content"][0]["text"]
+    assert "semantic_* 结构语义问题" in review_message["content"][0]["text"]
+    assert "硬失败条件" in review_message["content"][0]["text"]
+    assert "只要命中任一条，就必须读取 diagram.html 并调用 figure_kit.update 修正" in review_message["content"][0]["text"]
+    assert "不要用“基本还行”放过明显瑕疵" in review_message["content"][0]["text"]
+    assert "业务节点没有参与任何关系" in review_message["content"][0]["text"]
+    assert "同一分组内同类节点的连接关系不一致" in review_message["content"][0]["text"]
+    assert "大外框包住整张主画面" in review_message["content"][0]["text"]
+    assert "独立线型示例、图例盒或说明卡" in review_message["content"][0]["text"]
+    assert "跨越主画面的长斜线" in review_message["content"][0]["text"]
     assert "fig_000001" in review_message["content"][0]["text"]
     assert review_message["content"][1] == {
         "type": "input_image",

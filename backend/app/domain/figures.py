@@ -53,6 +53,7 @@ def figure_summary(figure: dict[str, Any]) -> dict[str, Any]:
         "asset_path": figure.get("asset_path") or "",
         "source": figure.get("source") or {},
         "render": figure.get("render") or {},
+        "geometry": figure.get("geometry") or {},
     }
 
 
@@ -63,6 +64,8 @@ def build_figure_record(
     title: str,
     source_path: str,
     render_path: str,
+    geometry_path: str,
+    geometry_report_path: str,
     asset_path: str,
 ) -> dict[str, Any]:
     timestamp = now_iso()
@@ -82,6 +85,11 @@ def build_figure_record(
             "path": render_path,
             "width": FIGURE_WIDTH,
             "height": FIGURE_HEIGHT,
+        },
+        "geometry": {
+            "type": "json",
+            "path": geometry_report_path,
+            "raw_path": geometry_path,
         },
         "created_at": timestamp,
         "updated_at": timestamp,

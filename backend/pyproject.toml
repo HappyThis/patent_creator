@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
   "httpx>=0.28.0,<1.0.0",
-  "openai>=1.54.0,<2.0.0",
+  "openai>=2.44.0,<3.0.0",
   "pillow>=12.2.0",
   "python-docx>=1.2.0",
   "uvicorn>=0.30.0,<1.0.0",

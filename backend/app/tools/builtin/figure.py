@@ -28,8 +28,10 @@ class FigureKitArguments(BaseModel):
             "create/update 使用，完整 diagram.html 源码。必须是纯 HTML/CSS，包含 id=\"diagram\" 的固定画布根节点；"
             "画布尺寸固定为 1500x900，不要引用外部资源、脚本、iframe 或事件处理器，保证图片可离线、可复现、无执行风险；"
             "允许 SVG 内部定义引用，例如 marker-end=\"url(#arrow)\"、clip-path=\"url(#clip)\" 或 href=\"#localId\"；"
-            "图片应是简约黑白技术示意图（monochrome technical schematic / engineering block diagram），"
-            "用网格化排版、分组边界、正交箭头和少量短标签帮助理解结构、流程、层级、模块边界和逻辑关系；"
+            "主结构必须使用可检查图元标记：data-fig-role、data-fig-kind、data-fig-id，连接线还应声明 data-fig-source 和 data-fig-target；"
+            "工具会基于这些标记返回几何与结构语义检查结果，可能指出孤立业务节点、同组同类节点连接不一致等问题；"
+            "图片应是简约黑白技术示意图（monochrome technical schematic），用于表达技术结构和关系，"
+            "而不是产品页面、海报、正文摘要或固定模板图；先确定主表达意图和主关系，再选择合适的视觉组织方式；"
             "形状、布局、连接线和文字都必须服务语义：形状区分对象类型，布局给出稳定阅读路径，"
             "每条箭头/连线有明确起点、终点、方向和含义，文字短且可读；默认不要添加专利附图编号。"
         ),
@@ -45,7 +47,7 @@ def figure_kit(
     """创建和维护用于解释技术方案的简约黑白结构示意图，工具会保存 diagram.html 并同步截图为 render.png。
 
     Returns:
-        list 返回 figures，每项包含 ref、markdown_ref、caption；read/create/update 返回 figure 元数据和 html 源码；create/update 后模型会收到 render.png 截图用于视觉复盘；check 返回 errors/warnings；失败返回 failed 和 code/message。
+        list 返回 figures，每项包含 ref、markdown_ref、caption；read/create/update 返回 figure 元数据、html 源码和 geometry_report；create/update 后模型会收到 render.png 截图用于视觉复盘；check 返回 errors/warnings；失败返回 failed 和 code/message。
 
     Rules:
         - create 只用于用户明确要求新增一张图；用户说“重试/重新生成/替换/修改当前图/修改图1”时，必须 list 或 read 定位现有图，再用 update 覆盖原图，不能 create 新图。
@@ -54,22 +56,26 @@ def figure_kit(
         - 修改图前先 read，基于返回的 html 生成完整新版 diagram.html，再 update。
         - create/update 必须提交完整 HTML 文档，包含 <!doctype html> 或 <html>，并包含 id="diagram" 的根节点。
         - HTML 附图固定 1500x900 画布；不要让内容依赖滚动、动画、外链字体、外部图片或脚本，保证离线可渲染、结果可复现、不会执行不可信代码。
-        - create/update 后请查看随工具结果提供的截图，检查布局、文字、线条、箭头和形状语义；只有存在明显影响理解的问题时才用 update 修正，不要为了轻微审美差异反复微调。
+        - 主结构必须由可检查图元组成：node、group、connector、label、port、data、decision、storage、callout。所有主要图元必须带 data-fig-role 和稳定 data-fig-id；连接线必须带 data-fig-source、data-fig-target，并用 data-fig-kind 标明 main-flow、data-flow、control-flow、auxiliary、feedback 或 dependency 等语义。线旁标签使用 data-fig-role="label" 和 data-fig-for="<connector id>" 绑定到对应连接线；若某个图元只是旁注、图例、约束说明或非业务节点，请使用 callout 或 data-fig-kind="note/annotation/legend/constraint" 等语义，避免被误判为孤立业务节点。
+        - create/update 后请查看随工具结果提供的截图和 geometry_report，检查主关系、布局、文字、线条、箭头和形状语义；若 geometry_report.issues 中存在 severity=error，尤其是 semantic_* 结构语义错误，或存在明显影响理解的问题，例如业务节点孤立、同组同类节点连接不一致、线穿过节点、长虚线跨区、箭头起止点不清、形状语义混乱、文字过密或主路径不清，必须 read 后 update 修正；不要为了轻微审美差异反复微调。
         - 可以使用 SVG 内部 defs 引用来画箭头、裁剪和局部效果，例如 marker-end="url(#arrow)"、clip-path="url(#clip)"、href="#localId"；这些必须引用当前 HTML 内已经定义的 id，不能引用外部 URL。
-        - 只有当图能显著降低理解成本时才创建图：适合表达模块关系、数据流向、处理阶段、层级边界、输入输出和关键反馈闭环；不适合把长段文字换成图。
+        - 只有当图能显著降低理解成本时才创建图：适合表达模块关系、数据流向、控制关系、处理阶段、状态变化、层级边界、输入输出和关键反馈闭环；不适合把长段文字换成图。
         - 默认生成帮助理解结构的简约黑白技术示意图，而不是产品页面、海报、仪表盘或正式专利标号图。
-        - 视觉样式应接近 engineering block diagram / technical schematic：白底，黑色或深灰线条，少量浅灰填充，细边框，直角/正交连接线，简洁箭头，清晰分组边界。
-        - 排版优先使用网格和对齐：画布四周保留充足边距，模块尺寸尽量一致，模块之间保持稳定间距；连线尽量水平/垂直，减少交叉、回折和穿越节点。
+        - 视觉样式应是简约黑白 technical schematic：白底，黑色或深灰线条，少量浅灰填充，细边框，简洁箭头；边界框只在确实表达具体、局部、可命名的系统、层级、责任或约束边界时使用，不要用大外框包住整张主画面。
+        - 排版优先表达主关系：先确定读者应先看的主链路、核心分组或关键对照，再用对齐、留白和稳定间距组织元素；连线应尽量短、少交叉、少回折、少穿越节点。
         - 形状必须有稳定语义：模块/处理步骤可用矩形，判断分支可用菱形，数据对象或记录可用表格/字段框，系统边界可用分组框，注释或约束可用轻量旁注；不要所有对象都无差别使用同一种框，也不要混用形状却没有语义规则。
-        - 布局必须先确定主阅读路径：优先左到右或上到下；分层、泳道、分组、留白和对齐应让读者先看出主链路，再看辅助关系；避免把架构、流程、异常和说明全部塞进同一张拥挤图。
-        - 箭头和连接线必须表达明确关系：每条线应有清楚起点、终点、方向和含义；实线/虚线/回箭头/反馈线应各自代表稳定语义，必要时加短标签或图例；不要用无标签长虚线跨多个分区，不要让线穿过节点、文字或无关容器。
+        - 不要先套固定图型：先确定这张图要回答的核心问题、主视觉路径、辅助关系和省略内容；可以借用常见图的组织方式，但不要为了像某类图而牺牲技术关系本身。
+        - 箭头和连接线必须表达明确关系：每条线应有清楚起点、终点、方向和含义；实线、虚线、回箭头、反馈线等视觉差异必须各自代表稳定语义，必要时加线旁短标签。虚线应少用，通常只用于可选、弱依赖、未确认、反馈或边界含义；不要用无标签长虚线跨多个分区，不要让线穿过节点、文字或无关容器。
         - 文本应短、可读、层级清楚：节点标题用短语，辅助说明不超过 1-2 行；避免小字号密集文字、长句、段落和说明书式正文。
         - 图不是正文摘要：优先画结构、边界、流向、状态和约束关系；长说明应放在正文，不要塞进节点或底部长条注释。
+        - 边界样式不能与连接线语义冲突；如果虚线用于恢复、弱依赖、可选或控制路径，边界不要使用虚线，改用浅灰填充、细实线、局部标题或留白分区。
+        - 分组标题必须贴近它约束的内容，不要在大空白区域放漂浮标题；外部对象应在边界外、内部对象应在边界内，连接线只能从边界边缘进入内部节点，不要穿过边界标题区。
+        - 不要在底部或角落生成独立线型示例、图例盒或说明卡；不要用图例弥补线条混乱。线条含义优先用线旁短标签表达。
+        - 不要使用跨越主画面的长斜线、长虚线或穿越多个区域的连接线；跨层关系应通过短折线、接口节点、局部回路、旁注或拆图表达。
         - 避免彩色卡片、渐变、阴影、圆角过重、装饰图标、背景纹理、页面式标题栏和营销插画；可以用线框、分区框、泳道、表格式字段表达结构。
         - 默认不要在节点角落添加 101/102/201 这类专利附图编号；只有用户明确要求“附图标记/编号/正式专利附图”时才添加。
-        - 先判断图型再排版：流程图用于步骤、状态流转和判断分支；架构图用于模块协同、系统边界、层次关系和依赖方向；结构示意图用于部件、通道、数据流和约束关系。
-        - 架构图应体现分层、系统边界、模块职责和依赖方向，不要画成流程/状态回环；流程图则应突出主路径和少量关键分支。
-        - 单张图建议 6-12 个关键元素；复杂图拆成“高层结构图 + 关键子流程图”，不要把完整调用链、日志流、工具调用明细全部塞进一张图。
+        - 复杂度预算必须克制：单图只承载一个主关系和少量辅助关系，辅助关系最多 2 类，线条视觉语义最多 3 类；虚线只代表一种稳定含义且必须可从线旁标签或上下文看出。
+        - 单张图建议 6-12 个关键元素，同时控制连接线数量、文字密度和语义层数；若同时存在结构关系、状态链、异常恢复或控制路径，优先拆图或省略次要关系；不要把完整调用链、日志流、工具调用明细、异常和解释全部塞进一张图，也不要通过增加线条、图例或说明文字来解释已经混乱的图。如果需要靠长标题、图例或说明卡才能解释关系，应优先删减、重排、局部化或拆图。
         - check 用于提交前或批量编辑后检查 figure 引用、图号文本和 figure block 位置是否一致。
 
     Examples:
@@ -225,6 +231,11 @@ def _full_figure_payload(store: WorkspaceStore, project_id: str, figure: dict[st
     html = store.read_figure_html(project_id, str(figure.get("figure_id") or ""))
     if html is not None:
         payload["html"] = html
+    geometry_report = store.read_figure_geometry_report(project_id, str(figure.get("figure_id") or ""))
+    if geometry_report is not None:
+        geometry = dict(payload.get("geometry") or {})
+        geometry["report"] = geometry_report
+        payload["geometry"] = geometry
     return payload
 
 

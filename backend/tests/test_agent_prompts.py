@@ -193,13 +193,13 @@ def test_main_agent_prompt_uses_figures_tables_and_formulas_only_when_helpful() 
     prompt = build_main_agent_system_prompt()
 
     assert "在合适位置补充有解释价值的表格、公式或附图" in prompt
-    assert "流程图用于说明处理步骤或状态流转" in prompt
-    assert "架构图用于说明模块协同" in prompt
-    assert "时序图用于说明跨主体交互" in prompt
+    assert "附图用于解释复杂结构、模块边界、依赖关系、数据/控制流、状态变化或多主体协同" in prompt
     assert "表格用于对比条件或参数" in prompt
     assert "公式用于说明明确的数学或评分关系" in prompt
     assert "不是装饰" in prompt
     assert "不强行为每章配置" in prompt
+    assert "再判断图要表达的核心关系" in prompt
+    assert "不要强行套用固定图型" in prompt
 
 
 def test_main_agent_prompt_defines_quality_oriented_reflection() -> None:

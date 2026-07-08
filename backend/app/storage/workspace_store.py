@@ -34,6 +34,33 @@ LEGACY_IGNORED_SESSION_EVENT_TYPES = frozenset(
 logger = logging.getLogger("patent_creator.workspace_store")
 
 
+def _geometry_warnings(report: Any) -> list[dict[str, Any]]:
+    if not isinstance(report, dict):
+        return []
+    issues = report.get("issues")
+    if not isinstance(issues, list):
+        return []
+    warnings: list[dict[str, Any]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        severity = str(issue.get("severity") or "")
+        if severity not in {"error", "warning"}:
+            continue
+        rule = str(issue.get("rule") or "issue")
+        code = rule if rule.startswith("semantic_") else f"geometry_{rule}"
+        warnings.append(
+            {
+                "code": code,
+                "severity": severity,
+                "message": str(issue.get("message") or "附图检查发现问题。"),
+                "element_ids": issue.get("elementIds") or [],
+                "measurement": issue.get("measurement") or {},
+            }
+        )
+    return warnings
+
+
 class WorkspaceStore:
     def __init__(self, root_dir: Path, git_user_name: str, git_user_email: str) -> None:
         self.root_dir = root_dir
@@ -520,6 +547,8 @@ class WorkspaceStore:
         figure_dir = self.figure_dir(project_id, figure_id)
         source_path = f"assets/figures/{figure_id}/diagram.html"
         render_path = f"assets/figures/{figure_id}/render.png"
+        geometry_path = f"assets/figures/{figure_id}/geometry.json"
+        geometry_report_path = f"assets/figures/{figure_id}/geometry_report.json"
         asset_path = f"assets/figures/{figure_id}/figure.json"
         validate_result = validate_html_source(html)
         if validate_result["status"] == "failed":
@@ -538,12 +567,17 @@ class WorkspaceStore:
             title=title,
             source_path=source_path,
             render_path=render_path,
+            geometry_path=geometry_path,
+            geometry_report_path=geometry_report_path,
             asset_path=asset_path,
         )
         self.write_json_atomic(self.figure_json_file(project_id, figure_id), figure)
         return {
             "status": "success",
-            "output": {"figure": self._normalize_figure(project_id, figure), "warnings": []},
+            "output": {
+                "figure": self._normalize_figure(project_id, figure),
+                "warnings": _geometry_warnings(render_result["output"].get("geometry_report")),
+            },
         }
 
     def update_figure(self, project_id: str, figure_id: str, *, title: str | None, html: str) -> dict[str, Any]:
@@ -567,7 +601,10 @@ class WorkspaceStore:
         self.write_json_atomic(figure_path, updated)
         return {
             "status": "success",
-            "output": {"figure": self._normalize_figure(project_id, updated), "warnings": []},
+            "output": {
+                "figure": self._normalize_figure(project_id, updated),
+                "warnings": _geometry_warnings(render_result["output"].get("geometry_report")),
+            },
         }
 
     def delete_figure(self, project_id: str, figure_id: str) -> bool:
@@ -600,6 +637,22 @@ class WorkspaceStore:
     def figure_render_file(self, project_id: str, figure_id: str) -> Path:
         return self.figure_dir(project_id, figure_id) / "render.png"
 
+    def figure_geometry_file(self, project_id: str, figure_id: str) -> Path:
+        return self.figure_dir(project_id, figure_id) / "geometry.json"
+
+    def figure_geometry_report_file(self, project_id: str, figure_id: str) -> Path:
+        return self.figure_dir(project_id, figure_id) / "geometry_report.json"
+
+    def read_figure_geometry_report(self, project_id: str, figure_id: str) -> dict[str, Any] | None:
+        path = self.figure_geometry_report_file(project_id, figure_id)
+        if not path.exists():
+            return None
+        try:
+            return self.read_json(path)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("skipping invalid figure geometry report project_id=%s figure_id=%s error=%s", project_id, figure_id, exc)
+            return None
+
     def read_figure_html(self, project_id: str, figure_id: str) -> str | None:
         path = self.figure_html_file(project_id, figure_id)
         if not path.exists():
@@ -624,11 +677,21 @@ class WorkspaceStore:
         if isinstance(render_path, str) and render_path:
             render["url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(render_path, safe='/')}"
         normalized["render"] = render
+        geometry = dict(normalized.get("geometry") or {})
+        geometry_path = geometry.get("path")
+        if isinstance(geometry_path, str) and geometry_path:
+            geometry["url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(geometry_path, safe='/')}"
+        raw_geometry_path = geometry.get("raw_path")
+        if isinstance(raw_geometry_path, str) and raw_geometry_path:
+            geometry["raw_url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(raw_geometry_path, safe='/')}"
+        normalized["geometry"] = geometry
         return normalized
 
     def _render_html_figure(self, project_id: str, figure_id: str) -> dict[str, Any]:
         input_path = self.figure_html_file(project_id, figure_id)
         output_path = self.figure_render_file(project_id, figure_id)
+        geometry_path = self.figure_geometry_file(project_id, figure_id)
+        geometry_report_path = self.figure_geometry_report_file(project_id, figure_id)
         repo_root = Path(__file__).resolve().parents[3]
         frontend_root = repo_root / "frontend"
         script_path = frontend_root / "scripts" / "render-figure-html.mjs"
@@ -641,6 +704,10 @@ class WorkspaceStore:
                     str(input_path),
                     "--output",
                     str(output_path),
+                    "--geometry-output",
+                    str(geometry_path),
+                    "--geometry-report-output",
+                    str(geometry_report_path),
                     "--width",
                     str(FIGURE_WIDTH),
                     "--height",
@@ -661,7 +728,16 @@ class WorkspaceStore:
             return tool_failed("figure_render_failed", f"HTML 附图渲染失败：{message}")
         if not output_path.is_file():
             return tool_failed("figure_render_missing", "HTML 附图渲染完成但未生成 render.png。")
-        return {"status": "success", "output": {"path": str(output_path)}}
+        geometry_report = self.read_figure_geometry_report(project_id, figure_id)
+        return {
+            "status": "success",
+            "output": {
+                "path": str(output_path),
+                "geometry_path": str(geometry_path),
+                "geometry_report_path": str(geometry_report_path),
+                "geometry_report": geometry_report,
+            },
+        }
 
     @staticmethod
     def write_json(path: Path, payload: dict[str, Any]) -> None:
