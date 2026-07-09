@@ -1,4 +1,12 @@
-import { ProjectState, RenderAst, SessionEventRecord, SessionSummary } from '../../types';
+import {
+  FigureDrawioSavePayload,
+  FigureDrawioSaveResponse,
+  FigureDrawioResponse,
+  ProjectState,
+  RenderAst,
+  SessionEventRecord,
+  SessionSummary,
+} from '../../types';
 import { requestFile, requestJson } from './http';
 
 export type ApiClient = {
@@ -28,6 +36,12 @@ export type ApiClient = {
     next_session_id: string | null;
   }>;
   getSessionEvents: (project_id: string, session_id: string) => Promise<{ events: SessionEventRecord[] }>;
+  getFigureDrawio: (project_id: string, figure_id: string) => Promise<FigureDrawioResponse>;
+  saveFigureDrawio: (
+    project_id: string,
+    figure_id: string,
+    payload: FigureDrawioSavePayload,
+  ) => Promise<FigureDrawioSaveResponse>;
   downloadDocx: (project_id: string) => Promise<{ blob: Blob; filename: string | null }>;
   cancelRound: (
     project_id: string,
@@ -102,6 +116,15 @@ export const apiClient: ApiClient = {
   },
   async getSessionEvents(project_id, session_id) {
     return requestJson<{ events: SessionEventRecord[] }>(`/api/projects/${project_id}/sessions/${session_id}/events`);
+  },
+  async getFigureDrawio(project_id, figure_id) {
+    return requestJson<FigureDrawioResponse>(`/api/projects/${project_id}/figures/${figure_id}/drawio`);
+  },
+  async saveFigureDrawio(project_id, figure_id, payload) {
+    return requestJson<FigureDrawioSaveResponse>(`/api/projects/${project_id}/figures/${figure_id}/drawio`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   },
   async downloadDocx(project_id) {
     return requestFile(`/api/projects/${project_id}/export/docx/download`, {

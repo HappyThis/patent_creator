@@ -16,7 +16,6 @@ const MIN_SIDE_WIDTH = 220;
 const MAX_SIDE_WIDTH = 980;
 const MIN_CHAT_WIDTH = 420;
 const RESIZER_WIDTH = 10;
-
 function readProjectIdFromPath(): string | null {
   const match = window.location.pathname.match(/^\/projects\/([^/]+)\/?$/);
   return match ? decodeURIComponent(match[1]) : null;
@@ -33,6 +32,10 @@ function clampSideWidth(value: number) {
 }
 
 function App() {
+  return <WorkspaceApp />;
+}
+
+function WorkspaceApp() {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const previousDisclosureUpdatedAtRef = useRef<string | null>(null);
   const [projects, setProjects] = useState<ProjectState[]>([]);
@@ -64,6 +67,7 @@ function App() {
     submitMessage,
     cancelCurrentRound,
     exportDocx,
+    refreshRenderAst,
     handleSessionSelect,
     handleNewSession,
     handleSessionDelete,
@@ -256,6 +260,12 @@ function App() {
     setIsDisclosureOpen(true);
   }, [isDisclosureOpen]);
 
+  const handleFigureSaved = useCallback(() => {
+    if (selectedProjectId) {
+      void refreshRenderAst(selectedProjectId);
+    }
+  }, [refreshRenderAst, selectedProjectId]);
+
   const workspaceStyle: WorkspaceStyle = {
     '--right-pane-width': isDisclosureOpen ? `${disclosureWidth}px` : '0px',
     '--right-resizer-width': isDisclosureOpen ? '10px' : '0px',
@@ -338,6 +348,7 @@ function App() {
         {isDisclosureOpen ? (
           <div className="workspace-side-pane workspace-side-preview">
             <PreviewPanel
+              projectId={selectedProjectId}
               renderAst={renderAst}
               previewFocusTarget={previewFocusTarget}
               recentSectionIds={recentSectionIds}
@@ -346,6 +357,7 @@ function App() {
               previewRef={previewRef}
               onActiveSectionChange={setActiveSectionId}
               onExport={exportDocx}
+              onFigureSaved={handleFigureSaved}
             />
           </div>
         ) : null}

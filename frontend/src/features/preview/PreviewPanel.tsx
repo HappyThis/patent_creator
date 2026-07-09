@@ -5,6 +5,7 @@ import { DocumentStats } from './documentStats';
 import { renderPreviewNodes } from './renderPreviewNodes';
 
 type PreviewPanelProps = {
+  projectId: string | null;
   renderAst: RenderAst;
   previewFocusTarget: PreviewFocusTarget | null;
   recentSectionIds: string[];
@@ -13,9 +14,11 @@ type PreviewPanelProps = {
   previewRef: RefObject<HTMLDivElement>;
   onActiveSectionChange: (sectionId: string) => void;
   onExport: () => void;
+  onFigureSaved: () => void;
 };
 
 export function PreviewPanel({
+  projectId,
   renderAst,
   previewFocusTarget,
   recentSectionIds,
@@ -24,6 +27,7 @@ export function PreviewPanel({
   previewRef,
   onActiveSectionChange,
   onExport,
+  onFigureSaved,
 }: PreviewPanelProps) {
   const figuresById = useMemo(
     () => Object.fromEntries((renderAst.figures ?? []).map((figure) => [figure.figure_id, figure])),
@@ -121,6 +125,8 @@ export function PreviewPanel({
             recentBlockIds: recentBlockIdSet,
             sectionStatusById: stats.sectionStatusById,
             figuresById,
+            projectId,
+            onFigureSaved,
           })}
           <footer className="document-status-bar" aria-label="文档状态">
             <span>字数：{stats.characters.toLocaleString('zh-CN')}</span>

@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Any
 
+from ...domain.figures import parse_figure_ref
 from ...storage.workspace_store import WorkspaceStore
 
 logger = logging.getLogger("patent_creator.context.tool_output_content")
@@ -14,9 +15,8 @@ MAX_TOOL_OUTPUT_IMAGE_BYTES = 2_000_000
 FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 刚渲染出的截图。请只检查图形质量，不要重新评价技术方案内容，也不要为了套用固定图型而重画。
 
 请按交付级图片标准严格复盘：截图中不应保留任何肉眼可见、会降低专业度或理解效率的问题。不要用“基本还行”放过明显瑕疵。
-如果 figure_kit 工具结果包含 geometry_report，请优先处理 issues 中 severity=error 的问题，尤其是 semantic_* 结构语义问题，并结合 warning 级问题判断是否需要修正；截图用于确认整体观感和语义清晰度。
 
-硬失败条件：只要命中任一条，就必须读取 diagram.html 并调用 figure_kit.update 修正：
+硬失败条件：只要命中任一条，就必须读取当前 draw.io XML 并调用 figure_kit.update 修正：
 - 主关系不能在几秒内看出来，或画面没有清楚的阅读路径；
 - 文字有重叠、裁切、过小、贴边、过密、换行别扭或像正文段落；
 - 连接线穿过节点、文字或无关容器，或存在大范围绕线、交叉、回折、贴边；
@@ -33,7 +33,7 @@ FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 刚渲染出的截图。�
 - 布局拥挤、失衡、留白不足，或把结构、状态、异常、说明塞进同一张图导致理解困难；
 - 图中说明文字承担了主要表达，布局、边界和连接关系本身不能说明问题。
 
-修正时优先删减、重排、拆分关系、缩短连线、统一线条语义和减少文字；删除独立图例盒、长斜线和无意义大外框，跨层关系改为短折线、接口节点、局部回路或旁注。如果一张图无法同时表达多个关系，请保留最重要主关系，省略次要关系或拆成更清晰的表达。
+修正时必须先读取当前 drawio_xml，基于当前 draw.io XML 生成完整新版 drawio_xml，并带上读取时的 drawio_updated_at 调用 figure_kit.update。优先删减、重排、拆分关系、缩短连线、统一线条语义和减少文字；删除独立图例盒、长斜线和无意义大外框，跨层关系改为短折线、接口节点、局部回路或旁注。如果一张图无法同时表达多个关系，请保留最重要主关系，省略次要关系或拆成更清晰的表达。
 只有截图已经达到交付级质量，且剩余问题只是非常轻微的审美偏好时，才不要继续修图，直接推进用户任务。不要为了同一张图反复微调；除非上一轮修正后仍存在上述硬失败问题。"""
 
 
@@ -100,16 +100,14 @@ def _figure_review_message_from_tool_message(
     output = parsed.get("output")
     if not isinstance(output, dict):
         return None
-    figure = output.get("figure")
-    if not isinstance(figure, dict):
-        return None
-    figure_id = figure.get("figure_id")
+    figure_id = _figure_id_from_output(output)
     if not isinstance(figure_id, str) or not figure_id:
         return None
     figure_image = _figure_input_image(store, project_id, figure_id)
     if figure_image is None:
         return None
-    title = str(figure.get("title") or "").strip()
+    figure = output.get("figure")
+    title = str(figure.get("title") or "").strip() if isinstance(figure, dict) else ""
     review_text = FIGURE_VISUAL_REVIEW_PROMPT
     if title:
         review_text += f"\n\n当前图片：{figure_id}（{title}）"
@@ -126,6 +124,25 @@ def _figure_review_message_from_tool_message(
         "round_id": message.get("round_id"),
         "message_id": message.get("message_id"),
     }
+
+
+def _figure_id_from_output(output: dict[str, Any]) -> str | None:
+    for attachment in output.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        if attachment.get("type") != "render_image" or attachment.get("purpose") != "visual_review":
+            continue
+        figure_id = parse_figure_ref(str(attachment.get("ref") or ""))
+        if figure_id:
+            return figure_id
+    figure = output.get("figure")
+    if not isinstance(figure, dict):
+        return None
+    figure_id = figure.get("figure_id")
+    if isinstance(figure_id, str) and figure_id:
+        return figure_id
+    ref = figure.get("ref")
+    return parse_figure_ref(str(ref or ""))
 
 
 def _figure_input_image(

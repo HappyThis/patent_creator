@@ -132,7 +132,7 @@ def test_docx_export_renders_all_inline_math_as_images(tmp_path: Path) -> None:
     assert not list((tmp_path / "exports").glob("docx-assets-*"))
 
 
-def test_docx_export_uses_existing_html_figure_png(tmp_path: Path) -> None:
+def test_docx_export_uses_existing_drawio_figure_png(tmp_path: Path) -> None:
     disclosure = build_initial_disclosure("figure export")
     disclosure["sections"][-1]["blocks"] = [
         {
@@ -150,10 +150,9 @@ def test_docx_export_uses_existing_html_figure_png(tmp_path: Path) -> None:
             "label": "图1",
             "title": "系统结构示意图",
             "source": {
-                "type": "html",
-                "path": "assets/figures/fig_000001/diagram.html",
-                "width": 1500,
-                "height": 900,
+                "type": "drawio",
+                "path": "assets/figures/fig_000001/diagram.drawio",
+                "updated_at": "2026-07-09T10:00:00.000000+08:00",
             },
             "render": {
                 "type": "png",

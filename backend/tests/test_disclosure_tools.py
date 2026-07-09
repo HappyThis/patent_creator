@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from app.domain.disclosure import build_render_ast
 from app.storage.workspace_store import WorkspaceStore
 
@@ -16,101 +14,35 @@ PNG_BYTES = (
     b"\x00\x05\xfe\x02\xfeA\xd7S\x84\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
-GEOMETRY_REPORT = {
-    "version": 1,
-    "ok": False,
-    "metrics": {"elementCount": 3, "textCount": 1, "nodeCount": 1, "groupCount": 0, "connectorCount": 1},
-    "issues": [
-        {
-            "severity": "error",
-            "rule": "connector_crosses_text",
-            "elementIds": ["line_a", "label_a"],
-            "message": "连线 line_a 穿过文本「处理流」。",
-            "measurement": {"clearancePx": 0, "minClearancePx": 6},
-        },
-        {
-            "severity": "warning",
-            "rule": "connector_missing_endpoint_metadata",
-            "elementIds": ["line_a"],
-            "message": "连线 line_a 缺少 data-fig-source 或 data-fig-target。",
-        },
-        {
-            "severity": "error",
-            "rule": "semantic_orphan_business_node",
-            "category": "semantic",
-            "elementIds": ["chat_c"],
-            "message": "业务节点 Think Chat C 没有任何连接线。",
-        },
-    ],
-}
-
-
-def _sample_figure_html(text: str = "任务接收") -> str:
-    return f"""<!doctype html>
-<html>
-<head><meta charset="utf-8"><style>
-html,body{{margin:0;background:#fff;}}
-#diagram{{width:1500px;height:900px;box-sizing:border-box;padding:80px;font-family:Arial,sans-serif;color:#111;}}
-.box{{border:2px solid #111;padding:28px;display:inline-block;}}
-</style></head>
-<body><div id="diagram"><div class="box">{text}</div></div></body>
-</html>"""
-
-
-def _sample_svg_marker_html(marker_ref: str = 'marker-end="url(#arrow)"') -> str:
-    return f"""<!doctype html>
-<html>
-<head><meta charset="utf-8"><style>
-html,body{{margin:0;background:#fff;}}
-#diagram{{width:1500px;height:900px;font-family:Arial,sans-serif;}}
-</style></head>
-<body><div id="diagram">
-<svg width="1500" height="900" viewBox="0 0 1500 900" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arrow" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
-      <path d="M0,0 L12,4 L0,8 z" fill="#111" />
-    </marker>
-    <clipPath id="clip"><rect x="80" y="80" width="360" height="160" /></clipPath>
-  </defs>
-  <rect x="80" y="80" width="360" height="160" fill="#f7f7f7" stroke="#111" clip-path="url(#clip)" />
-  <text x="260" y="165" text-anchor="middle" font-size="28">输入模块</text>
-  <line x1="440" y1="160" x2="760" y2="160" stroke="#111" stroke-width="3" {marker_ref} />
-  <a href="#localTarget"><text x="610" y="135" font-size="22">处理流</text></a>
-  <rect id="localTarget" x="760" y="80" width="360" height="160" fill="#fff" stroke="#111" />
-  <text x="940" y="165" text-anchor="middle" font-size="28">处理模块</text>
-</svg>
-</div></body>
-</html>"""
-
-
 def _stub_figure_renderer(monkeypatch) -> None:
-    def render(self: WorkspaceStore, project_id: str, figure_id: str) -> dict:
-        output_path = self.figure_render_file(project_id, figure_id)
+    def render(self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict:
+        assert input_path.name == "diagram.drawio" or input_path.name.startswith(".diagram.")
         output_path.write_bytes(PNG_BYTES)
         return {"status": "success", "output": {"path": str(output_path)}}
 
-    monkeypatch.setattr(WorkspaceStore, "_render_html_figure", render)
+    monkeypatch.setattr(WorkspaceStore, "_render_drawio_file", render)
 
 
-def _stub_figure_renderer_with_geometry(monkeypatch) -> None:
-    def render(self: WorkspaceStore, project_id: str, figure_id: str) -> dict:
-        output_path = self.figure_render_file(project_id, figure_id)
-        geometry_path = self.figure_geometry_file(project_id, figure_id)
-        geometry_report_path = self.figure_geometry_report_file(project_id, figure_id)
-        output_path.write_bytes(PNG_BYTES)
-        self.write_json(geometry_path, {"version": 1, "canvas": {"width": 1500, "height": 900}})
-        self.write_json(geometry_report_path, GEOMETRY_REPORT)
-        return {
-            "status": "success",
-            "output": {
-                "path": str(output_path),
-                "geometry_path": str(geometry_path),
-                "geometry_report_path": str(geometry_report_path),
-                "geometry_report": GEOMETRY_REPORT,
-            },
-        }
-
-    monkeypatch.setattr(WorkspaceStore, "_render_html_figure", render)
+def _sample_drawio_xml(title: str = "系统结构示意图") -> str:
+    return f"""<mxfile host="embed.diagrams.net">
+  <diagram name="{title}">
+    <mxGraphModel page="1" pageWidth="1500" pageHeight="900">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="gateway" value="统一入口" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#111111;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="120" y="160" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="runtime" value="运行时" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#111111;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="420" y="160" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-gateway-runtime" value="调用" style="endArrow=block;html=1;rounded=0;strokeColor=#111111;" edge="1" parent="1" source="gateway" target="runtime">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>"""
 
 
 def test_disclosure_v3_initial_structure(tmp_path: Path) -> None:
@@ -178,7 +110,7 @@ def test_disclosure_edit_supports_formula_block(tmp_path: Path) -> None:
 def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path, monkeypatch) -> None:
     _stub_figure_renderer(monkeypatch)
     executor, project_id = make_tool_executor(tmp_path)
-    html = _sample_figure_html()
+    drawio_xml = _sample_drawio_xml()
     create = run_builtin_tool(
         executor,
         project_id,
@@ -186,7 +118,7 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
         {
             "action": "create",
             "title": "系统结构示意图",
-            "html": html,
+            "drawio_xml": drawio_xml,
         },
     )
 
@@ -196,22 +128,37 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert figure["ref"] == "figure:fig_000001"
     assert figure["markdown_ref"] == "[图1](figure:fig_000001)"
     assert figure["caption"] == "图1 系统结构示意图"
-    assert figure["source"] == {
-        "type": "html",
-        "path": "assets/figures/fig_000001/diagram.html",
-        "width": 1500,
-        "height": 900,
-    }
-    assert figure["render"]["path"] == "assets/figures/fig_000001/render.png"
-    assert figure["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
-    assert figure["html"].strip() == html
-    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001" / "figure.json").exists()
-    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001" / "diagram.html").exists()
-    assert (executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001" / "render.png").exists()
+    assert figure["drawio_updated_at"]
+    assert create["output"]["attachments"] == [
+        {"type": "render_image", "ref": "figure:fig_000001", "purpose": "visual_review"}
+    ]
+    assert "截图" in create["output"]["message"]
+    assert set(create["output"]) == {"figure", "message", "attachments"}
+    figure_dir = executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001"
+    assert (figure_dir / "figure.json").exists()
+    assert (figure_dir / "diagram.drawio").exists()
+    assert not (figure_dir / "diagram.html").exists()
+    assert not (figure_dir / "geometry.json").exists()
+    assert not (figure_dir / "geometry_report.json").exists()
+    assert (figure_dir / "render.png").read_bytes() == PNG_BYTES
+
+    stored = executor.store.get_figure(project_id, "fig_000001")
+    assert stored is not None
+    assert stored["source"]["type"] == "drawio"
+    assert stored["source"]["path"] == "assets/figures/fig_000001/diagram.drawio"
+    assert stored["render"]["path"] == "assets/figures/fig_000001/render.png"
+    assert stored["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
+
+    read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    assert read["status"] == "success"
+    assert "<mxGraphModel" in read["output"]["figure"]["drawio_xml"]
+    assert "统一入口" in read["output"]["figure"]["drawio_xml"]
+    assert read["output"]["figure"]["drawio_updated_at"] == figure["drawio_updated_at"]
 
     listed = run_builtin_tool(executor, project_id, "figure_kit", {"action": "list"})
     assert listed["status"] == "success"
     assert listed["output"]["figures"][0]["markdown_ref"] == "[图1](figure:fig_000001)"
+    assert "drawio_updated_at" in listed["output"]["figures"][0]
 
     technical_solution = section_id_by_title(executor, project_id, "技术方案")
     inserted_ref = run_builtin_tool(
@@ -234,99 +181,69 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert {item["code"] for item in checked["output"]["warnings"]} == {"figure_not_displayed_in_appendix"}
 
 
-def test_figure_kit_returns_geometry_report_and_geometry_warnings(tmp_path: Path, monkeypatch) -> None:
-    _stub_figure_renderer_with_geometry(monkeypatch)
-    executor, project_id = make_tool_executor(tmp_path)
-
-    create = run_builtin_tool(
-        executor,
-        project_id,
-        "figure_kit",
-        {
-            "action": "create",
-            "title": "几何检查示意图",
-            "html": _sample_figure_html(),
-        },
-    )
-
-    assert create["status"] == "success"
-    assert [item["code"] for item in create["output"]["warnings"]] == [
-        "geometry_connector_crosses_text",
-        "geometry_connector_missing_endpoint_metadata",
-        "semantic_orphan_business_node",
-    ]
-    figure = create["output"]["figure"]
-    assert figure["geometry"]["path"] == "assets/figures/fig_000001/geometry_report.json"
-    assert figure["geometry"]["raw_path"] == "assets/figures/fig_000001/geometry.json"
-    assert figure["geometry"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/geometry_report.json"
-    assert figure["geometry"]["raw_url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/geometry.json"
-    assert figure["geometry"]["report"] == GEOMETRY_REPORT
-
-
-def test_figure_kit_rejects_unsafe_html(tmp_path: Path) -> None:
-    executor, project_id = make_tool_executor(tmp_path)
-    create = run_builtin_tool(
-        executor,
-        project_id,
-        "figure_kit",
-        {
-            "action": "create",
-            "title": "外链附图",
-            "html": '<!doctype html><html><body><div id="diagram"><script>alert(1)</script></div></body></html>',
-        },
-    )
-
-    assert create["status"] == "failed"
-    assert create["output"]["code"] == "figure_html_embed_blocked"
-
-
-def test_figure_kit_allows_svg_internal_references(tmp_path: Path, monkeypatch) -> None:
+def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path: Path, monkeypatch) -> None:
     _stub_figure_renderer(monkeypatch)
     executor, project_id = make_tool_executor(tmp_path)
-
     create = run_builtin_tool(
         executor,
         project_id,
         "figure_kit",
+        {"action": "create", "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
+    )
+    assert create["status"] == "success"
+    figure = create["output"]["figure"]
+
+    missing_timestamp = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
         {
-            "action": "create",
-            "title": "内部引用示意图",
-            "html": _sample_svg_marker_html(),
+            "action": "update",
+            "ref": "figure:fig_000001",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )
+    assert missing_timestamp["status"] == "failed"
+    assert missing_timestamp["output"]["code"] == "drawio_read_required"
+
+    conflict = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "update",
+            "ref": "figure:fig_000001",
+            "expected_drawio_updated_at": "2000-01-01T00:00:00+00:00",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )
+    assert conflict["status"] == "failed"
+    assert conflict["output"]["code"] == "drawio_conflict"
+    assert conflict["output"]["current_drawio_updated_at"] == figure["drawio_updated_at"]
+
+    read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    next_xml = read["output"]["figure"]["drawio_xml"].replace("统一入口", "统一接入网关")
+    updated = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "update",
+            "ref": "figure:fig_000001",
+            "title": "更新后的结构示意图",
+            "expected_drawio_updated_at": read["output"]["figure"]["drawio_updated_at"],
+            "drawio_xml": next_xml,
         },
     )
 
-    assert create["status"] == "success"
-    assert 'marker-end="url(#arrow)"' in create["output"]["figure"]["html"]
-    assert 'clip-path="url(#clip)"' in create["output"]["figure"]["html"]
-    assert 'href="#localTarget"' in create["output"]["figure"]["html"]
+    assert updated["status"] == "success"
+    assert updated["output"]["figure"]["title"] == "更新后的结构示意图"
+    assert updated["output"]["figure"]["drawio_updated_at"] != figure["drawio_updated_at"]
+    reread = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    assert "统一接入网关" in reread["output"]["figure"]["drawio_xml"]
 
 
-@pytest.mark.parametrize(
-    ("html", "expected_code"),
-    [
-        (
-            '<!doctype html><html><body><div id="diagram" onclick="alert(1)">任务接收</div></body></html>',
-            "figure_html_event_handler_blocked",
-        ),
-        (
-            '<!doctype html><html><body><div id="diagram"><img src="asset.png"></div></body></html>',
-            "figure_html_external_src_blocked",
-        ),
-        (
-            '<!doctype html><html><body><div id="diagram"><a href="https://example.com">外链</a></div></body></html>',
-            "figure_html_external_href_blocked",
-        ),
-        (
-            '<!doctype html><html><body><div id="diagram" style="background:url(https://example.com/a.png)">任务接收</div></body></html>',
-            "figure_html_external_url_blocked",
-        ),
-        (
-            '<!doctype html><html><body><div id="diagram"><a href="javascript:alert(1)">执行</a></div></body></html>',
-            "figure_html_javascript_url_blocked",
-        ),
-    ],
-)
-def test_figure_kit_rejects_external_or_executable_html(tmp_path: Path, html: str, expected_code: str) -> None:
+def test_figure_kit_rejects_invalid_drawio_xml(tmp_path: Path) -> None:
     executor, project_id = make_tool_executor(tmp_path)
 
     create = run_builtin_tool(
@@ -335,13 +252,60 @@ def test_figure_kit_rejects_external_or_executable_html(tmp_path: Path, html: st
         "figure_kit",
         {
             "action": "create",
-            "title": "不安全附图",
-            "html": html,
+            "title": "无效附图",
+            "drawio_xml": "<html></html>",
         },
     )
 
     assert create["status"] == "failed"
-    assert create["output"]["code"] == expected_code
+    assert create["output"]["code"] == "drawio_xml_validation_failed"
+
+
+def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_path: Path, monkeypatch) -> None:
+    should_fail = {"value": False}
+
+    def render(self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict:
+        assert input_path.exists()
+        if should_fail["value"]:
+            return {"status": "failed", "output": {"code": "figure_render_failed", "message": "renderer failed"}}
+        output_path.write_bytes(PNG_BYTES)
+        return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_drawio_file", render)
+    executor, project_id = make_tool_executor(tmp_path)
+    create = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {"action": "create", "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
+    )
+    assert create["status"] == "success"
+    read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    original_xml = read["output"]["figure"]["drawio_xml"]
+    original_timestamp = read["output"]["figure"]["drawio_updated_at"]
+    modified_xml = original_xml.replace("统一入口", "失败更新不应落盘")
+
+    should_fail["value"] = True
+    update = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "update",
+            "ref": "figure:fig_000001",
+            "title": "失败标题",
+            "expected_drawio_updated_at": original_timestamp,
+            "drawio_xml": modified_xml,
+        },
+    )
+
+    assert update["status"] == "failed"
+    assert update["output"]["code"] == "figure_render_failed"
+    reread = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    assert reread["output"]["figure"]["title"] == "系统结构示意图"
+    assert reread["output"]["figure"]["drawio_updated_at"] == original_timestamp
+    assert reread["output"]["figure"]["drawio_xml"] == original_xml
+    assert executor.store.figure_render_file(project_id, "fig_000001").read_bytes() == PNG_BYTES
 
 
 def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
@@ -361,7 +325,6 @@ def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
 def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: Path, monkeypatch) -> None:
     _stub_figure_renderer(monkeypatch)
     executor, project_id = make_tool_executor(tmp_path)
-    html = _sample_figure_html("读取内核")
     figure = run_builtin_tool(
         executor,
         project_id,
@@ -369,7 +332,7 @@ def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: 
         {
             "action": "create",
             "title": "代理执行流程示意图",
-            "html": html,
+            "drawio_xml": _sample_drawio_xml("代理执行流程示意图"),
         },
     )["output"]["figure"]
 
@@ -409,7 +372,8 @@ def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: 
     appendix_node = next(node for node in render_ast["children"] if node["title"] == "附录")
     assert appendix_node["children"][0]["type"] == "figure"
     assert render_ast["figures"][0]["label"] == "图1"
-    assert render_ast["figures"][0]["source"]["path"] == "assets/figures/fig_000001/diagram.html"
+    assert render_ast["figures"][0]["source"]["type"] == "drawio"
+    assert render_ast["figures"][0]["source"]["path"] == "assets/figures/fig_000001/diagram.drawio"
     assert render_ast["figures"][0]["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
 
 

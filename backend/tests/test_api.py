@@ -14,6 +14,7 @@ from app.core import ApiError
 from app.core.config import Settings
 from app.schemas import ChatMessageRequest
 from app.services import AppServices
+from app.storage.workspace_store import WorkspaceStore
 
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -27,6 +28,31 @@ def section_by_title(disclosure: dict[str, Any], title: str) -> dict[str, Any]:
         if section["title"]["text"] == title:
             return section
     raise AssertionError(f"section not found: {title}")
+
+
+def _drawio_xml_for_api_test() -> str:
+    return """<mxfile host="embed.diagrams.net">
+  <diagram name="结构示意图">
+    <mxGraphModel page="1" pageWidth="1500" pageHeight="900">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="entry" value="入口" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="120" width="180" height="84" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>"""
+
+
+def _stub_drawio_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+    def render(self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict[str, Any]:
+        assert input_path.exists()
+        output_path.write_bytes(PNG_BYTES)
+        return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_drawio_file", render)
 
 
 class StubLLMClient:
@@ -354,8 +380,8 @@ async def test_project_asset_route_serves_project_png_assets_only(tmp_path: Path
     asset_path = services.store.project_dir(project.project_id) / "assets" / "figures" / "fig_000001" / "render.png"
     asset_path.parent.mkdir(parents=True)
     asset_path.write_bytes(PNG_BYTES)
-    html_path = asset_path.with_name("diagram.html")
-    html_path.write_text("<html></html>", encoding="utf-8")
+    drawio_path = asset_path.with_name("diagram.drawio")
+    drawio_path.write_text(_drawio_xml_for_api_test(), encoding="utf-8")
     app = create_app(settings, services=services)
     transport = httpx.ASGITransport(app=app)
 
@@ -365,11 +391,65 @@ async def test_project_asset_route_serves_project_png_assets_only(tmp_path: Path
         assert response.headers["content-type"] == "image/png"
         assert response.content == PNG_BYTES
 
-        html_response = await client.get(f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/diagram.html")
-        assert html_response.status_code == 404
+        drawio_response = await client.get(f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/diagram.drawio")
+        assert drawio_response.status_code == 404
 
         outside_response = await client.get(f"/api/projects/{project.project_id}/asset/%2E%2E/project.json")
         assert outside_response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_figure_drawio_api_reads_saves_and_detects_conflict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_drawio_renderer(monkeypatch)
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        git_user_name="Test User",
+        git_user_email="test@example.com",
+        openai_api_key="test-key",
+    )
+    services = AppServices(settings, llm_client=StubLLMClient())
+    project = services.store.create_project("drawio api")
+    created = services.store.create_figure(project.project_id, title="结构示意图", drawio_xml=_drawio_xml_for_api_test())
+    assert created["status"] == "success"
+    app = create_app(settings, services=services)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        read_response = await client.get(f"/api/projects/{project.project_id}/figures/fig_000001/drawio")
+        assert read_response.status_code == 200
+        figure = read_response.json()["figure"]
+        assert figure["title"] == "结构示意图"
+        assert "入口" in figure["drawio_xml"]
+        drawio_updated_at = figure["drawio_updated_at"]
+
+        next_xml = figure["drawio_xml"].replace("入口", "入口 v2")
+        save_response = await client.put(
+            f"/api/projects/{project.project_id}/figures/fig_000001/drawio",
+            json={
+                "title": "结构示意图 v2",
+                "expected_drawio_updated_at": drawio_updated_at,
+                "drawio_xml": next_xml,
+            },
+        )
+        assert save_response.status_code == 200
+        saved = save_response.json()["figure"]
+        assert saved["title"] == "结构示意图 v2"
+        assert saved["drawio_updated_at"] != drawio_updated_at
+        assert saved["render_url"] == f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/render.png"
+
+        reread_response = await client.get(f"/api/projects/{project.project_id}/figures/fig_000001/drawio")
+        assert reread_response.status_code == 200
+        assert "入口 v2" in reread_response.json()["figure"]["drawio_xml"]
+
+        conflict_response = await client.put(
+            f"/api/projects/{project.project_id}/figures/fig_000001/drawio",
+            json={
+                "title": "旧版本覆盖",
+                "expected_drawio_updated_at": drawio_updated_at,
+                "drawio_xml": next_xml,
+            },
+        )
+        assert conflict_response.status_code == 409
 
 
 @pytest.mark.anyio

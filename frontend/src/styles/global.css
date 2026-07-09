@@ -1,6 +1,7 @@
 @import "./tokens.css";
 @import "./layout.css";
 @import "./preview.css";
+@import "./figure-editor.css";
 @import "./chat-shell.css";
 @import "./chat-thread.css";
 @import "./chat-process.css";

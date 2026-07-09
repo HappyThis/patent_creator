@@ -19,7 +19,16 @@ from ..core import ApiError, now_iso, generate_id
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..domain.docx_export import DocxExportError, export_disclosure_docx
 from ..domain.document_tool_results import tool_failed
-from ..domain.figures import FIGURE_HEIGHT, FIGURE_WIDTH, build_figure_record, figure_summary, update_figure_record, validate_html_source
+from ..domain.figures import (
+    FIGURE_HEIGHT,
+    FIGURE_WIDTH,
+    build_figure_record,
+    drawio_updated_at,
+    figure_summary,
+    new_drawio_updated_at,
+    update_figure_record,
+    validate_drawio_xml,
+)
 from ..schemas import ProjectRecord, SessionEvent, SessionEventType, SessionSummary
 
 DEFAULT_DISCLOSURE_TITLE = "未命名专利交底书"
@@ -32,33 +41,6 @@ LEGACY_IGNORED_SESSION_EVENT_TYPES = frozenset(
     }
 )
 logger = logging.getLogger("patent_creator.workspace_store")
-
-
-def _geometry_warnings(report: Any) -> list[dict[str, Any]]:
-    if not isinstance(report, dict):
-        return []
-    issues = report.get("issues")
-    if not isinstance(issues, list):
-        return []
-    warnings: list[dict[str, Any]] = []
-    for issue in issues:
-        if not isinstance(issue, dict):
-            continue
-        severity = str(issue.get("severity") or "")
-        if severity not in {"error", "warning"}:
-            continue
-        rule = str(issue.get("rule") or "issue")
-        code = rule if rule.startswith("semantic_") else f"geometry_{rule}"
-        warnings.append(
-            {
-                "code": code,
-                "severity": severity,
-                "message": str(issue.get("message") or "附图检查发现问题。"),
-                "element_ids": issue.get("elementIds") or [],
-                "measurement": issue.get("measurement") or {},
-            }
-        )
-    return warnings
 
 
 class WorkspaceStore:
@@ -541,23 +523,24 @@ class WorkspaceStore:
             return None
         return self._normalize_figure(project_id, self.read_json(path))
 
-    def create_figure(self, project_id: str, *, title: str, html: str) -> dict[str, Any]:
+    def create_figure(self, project_id: str, *, title: str, drawio_xml: str) -> dict[str, Any]:
         figure_id = self.next_figure_id(project_id)
         index = int(figure_id.removeprefix("fig_"))
         figure_dir = self.figure_dir(project_id, figure_id)
-        source_path = f"assets/figures/{figure_id}/diagram.html"
+        source_path = f"assets/figures/{figure_id}/diagram.drawio"
         render_path = f"assets/figures/{figure_id}/render.png"
-        geometry_path = f"assets/figures/{figure_id}/geometry.json"
-        geometry_report_path = f"assets/figures/{figure_id}/geometry_report.json"
         asset_path = f"assets/figures/{figure_id}/figure.json"
-        validate_result = validate_html_source(html)
+        validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
         if figure_dir.exists() and not self.figure_json_file(project_id, figure_id).exists():
             shutil.rmtree(figure_dir)
         figure_dir.mkdir(parents=True, exist_ok=False)
-        self.figure_html_file(project_id, figure_id).write_text(validate_result["output"]["html"] + "\n", encoding="utf-8")
-        render_result = self._render_html_figure(project_id, figure_id)
+        self.write_text_atomic(self.figure_drawio_file(project_id, figure_id), validate_result["output"]["drawio_xml"])
+        render_result = self._render_drawio_file(
+            input_path=self.figure_drawio_file(project_id, figure_id),
+            output_path=self.figure_render_file(project_id, figure_id),
+        )
         if render_result["status"] == "failed":
             shutil.rmtree(figure_dir, ignore_errors=True)
             return render_result
@@ -567,8 +550,6 @@ class WorkspaceStore:
             title=title,
             source_path=source_path,
             render_path=render_path,
-            geometry_path=geometry_path,
-            geometry_report_path=geometry_report_path,
             asset_path=asset_path,
         )
         self.write_json_atomic(self.figure_json_file(project_id, figure_id), figure)
@@ -576,34 +557,53 @@ class WorkspaceStore:
             "status": "success",
             "output": {
                 "figure": self._normalize_figure(project_id, figure),
-                "warnings": _geometry_warnings(render_result["output"].get("geometry_report")),
             },
         }
 
-    def update_figure(self, project_id: str, figure_id: str, *, title: str | None, html: str) -> dict[str, Any]:
+    def update_figure(
+        self,
+        project_id: str,
+        figure_id: str,
+        *,
+        title: str | None,
+        drawio_xml: str,
+        expected_drawio_updated_at: str | None,
+    ) -> dict[str, Any]:
         figure_path = self.figure_json_file(project_id, figure_id)
         if not figure_path.exists():
             return {"status": "failed", "output": {"code": "figure_not_found", "message": f"figure 不存在：{figure_id}"}}
         current = self.read_json(figure_path)
-        validate_result = validate_html_source(html)
+        if not expected_drawio_updated_at:
+            return tool_failed("drawio_read_required", "修改 draw.io 图前必须先读取当前附图，并在 update 时带上 drawio_updated_at。")
+        current_drawio_updated_at = drawio_updated_at(current)
+        if expected_drawio_updated_at != current_drawio_updated_at:
+            return tool_failed(
+                "drawio_conflict",
+                "当前附图已在你读取之后被修改，请重新 read 最新 draw.io XML 后再 update。",
+                current_drawio_updated_at=current_drawio_updated_at,
+            )
+        validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
-        html_file = self.figure_html_file(project_id, figure_id)
-        previous_html = html_file.read_text(encoding="utf-8") if html_file.exists() else None
-        html_file.write_text(validate_result["output"]["html"] + "\n", encoding="utf-8")
-        render_result = self._render_html_figure(project_id, figure_id)
+        drawio_file = self.figure_drawio_file(project_id, figure_id)
+        render_file = self.figure_render_file(project_id, figure_id)
+        tmp_drawio_file = drawio_file.with_name(f".diagram.{uuid4().hex}.drawio")
+        tmp_render_file = render_file.with_name(f".render.{uuid4().hex}.png")
+        tmp_drawio_file.write_text(validate_result["output"]["drawio_xml"], encoding="utf-8")
+        render_result = self._render_drawio_file(input_path=tmp_drawio_file, output_path=tmp_render_file)
         if render_result["status"] == "failed":
-            if previous_html is not None:
-                html_file.write_text(previous_html, encoding="utf-8")
-                self._render_html_figure(project_id, figure_id)
+            tmp_drawio_file.unlink(missing_ok=True)
+            tmp_render_file.unlink(missing_ok=True)
             return render_result
-        updated = update_figure_record(current, title=title)
+        drawio_timestamp = new_drawio_updated_at()
+        tmp_drawio_file.replace(drawio_file)
+        tmp_render_file.replace(render_file)
+        updated = update_figure_record(current, title=title, drawio_timestamp=drawio_timestamp)
         self.write_json_atomic(figure_path, updated)
         return {
             "status": "success",
             "output": {
                 "figure": self._normalize_figure(project_id, updated),
-                "warnings": _geometry_warnings(render_result["output"].get("geometry_report")),
             },
         }
 
@@ -631,33 +631,21 @@ class WorkspaceStore:
     def figure_json_file(self, project_id: str, figure_id: str) -> Path:
         return self.figure_dir(project_id, figure_id) / "figure.json"
 
-    def figure_html_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figure_dir(project_id, figure_id) / "diagram.html"
+    def figure_drawio_file(self, project_id: str, figure_id: str) -> Path:
+        return self.figure_dir(project_id, figure_id) / "diagram.drawio"
 
     def figure_render_file(self, project_id: str, figure_id: str) -> Path:
         return self.figure_dir(project_id, figure_id) / "render.png"
 
-    def figure_geometry_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figure_dir(project_id, figure_id) / "geometry.json"
-
-    def figure_geometry_report_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figure_dir(project_id, figure_id) / "geometry_report.json"
-
-    def read_figure_geometry_report(self, project_id: str, figure_id: str) -> dict[str, Any] | None:
-        path = self.figure_geometry_report_file(project_id, figure_id)
+    def read_figure_drawio_xml(self, project_id: str, figure_id: str) -> str | None:
+        path = self.figure_drawio_file(project_id, figure_id)
         if not path.exists():
             return None
         try:
-            return self.read_json(path)
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("skipping invalid figure geometry report project_id=%s figure_id=%s error=%s", project_id, figure_id, exc)
+            return path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("skipping invalid figure drawio xml project_id=%s figure_id=%s error=%s", project_id, figure_id, exc)
             return None
-
-    def read_figure_html(self, project_id: str, figure_id: str) -> str | None:
-        path = self.figure_html_file(project_id, figure_id)
-        if not path.exists():
-            return None
-        return path.read_text(encoding="utf-8")
 
     def project_asset_file(self, project_id: str, asset_path: str) -> Path:
         project_root = self.project_dir(project_id).resolve()
@@ -677,24 +665,12 @@ class WorkspaceStore:
         if isinstance(render_path, str) and render_path:
             render["url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(render_path, safe='/')}"
         normalized["render"] = render
-        geometry = dict(normalized.get("geometry") or {})
-        geometry_path = geometry.get("path")
-        if isinstance(geometry_path, str) and geometry_path:
-            geometry["url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(geometry_path, safe='/')}"
-        raw_geometry_path = geometry.get("raw_path")
-        if isinstance(raw_geometry_path, str) and raw_geometry_path:
-            geometry["raw_url"] = f"/api/projects/{quote(project_id, safe='')}/asset/{quote(raw_geometry_path, safe='/')}"
-        normalized["geometry"] = geometry
         return normalized
 
-    def _render_html_figure(self, project_id: str, figure_id: str) -> dict[str, Any]:
-        input_path = self.figure_html_file(project_id, figure_id)
-        output_path = self.figure_render_file(project_id, figure_id)
-        geometry_path = self.figure_geometry_file(project_id, figure_id)
-        geometry_report_path = self.figure_geometry_report_file(project_id, figure_id)
+    def _render_drawio_file(self, *, input_path: Path, output_path: Path) -> dict[str, Any]:
         repo_root = Path(__file__).resolve().parents[3]
         frontend_root = repo_root / "frontend"
-        script_path = frontend_root / "scripts" / "render-figure-html.mjs"
+        script_path = frontend_root / "scripts" / "render-figure-drawio.mjs"
         try:
             result = subprocess.run(
                 [
@@ -704,10 +680,6 @@ class WorkspaceStore:
                     str(input_path),
                     "--output",
                     str(output_path),
-                    "--geometry-output",
-                    str(geometry_path),
-                    "--geometry-report-output",
-                    str(geometry_report_path),
                     "--width",
                     str(FIGURE_WIDTH),
                     "--height",
@@ -720,22 +692,18 @@ class WorkspaceStore:
                 timeout=45,
             )
         except OSError as exc:
-            return tool_failed("figure_render_failed", f"HTML 附图渲染器启动失败：{exc}")
+            return tool_failed("figure_render_failed", f"draw.io 附图渲染器启动失败：{exc}")
         except subprocess.TimeoutExpired:
-            return tool_failed("figure_render_timeout", "HTML 附图渲染超时。")
+            return tool_failed("figure_render_failed", "draw.io 附图渲染超时。")
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or "unknown renderer error"
-            return tool_failed("figure_render_failed", f"HTML 附图渲染失败：{message}")
+            return tool_failed("figure_render_failed", f"draw.io 附图渲染失败：{message}")
         if not output_path.is_file():
-            return tool_failed("figure_render_missing", "HTML 附图渲染完成但未生成 render.png。")
-        geometry_report = self.read_figure_geometry_report(project_id, figure_id)
+            return tool_failed("figure_render_failed", "draw.io 附图渲染完成但未生成 render.png。")
         return {
             "status": "success",
             "output": {
                 "path": str(output_path),
-                "geometry_path": str(geometry_path),
-                "geometry_report_path": str(geometry_report_path),
-                "geometry_report": geometry_report,
             },
         }
 
@@ -747,6 +715,12 @@ class WorkspaceStore:
     def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(path)
+
+    @staticmethod
+    def write_text_atomic(path: Path, payload: str) -> None:
+        tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
         tmp_path.replace(path)
 
     @staticmethod

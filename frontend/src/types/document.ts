@@ -59,6 +59,7 @@ export type FigureRenderAsset = {
   source?: {
     type: string;
     path: string;
+    updated_at?: string;
     width?: number;
     height?: number;
   };
@@ -68,6 +69,34 @@ export type FigureRenderAsset = {
     url?: string;
     width?: number;
     height?: number;
+  };
+};
+
+export type FigureDrawioSummary = {
+  figure_id: string;
+  ref: string;
+  label: string;
+  title: string;
+  markdown_ref: string;
+  caption: string;
+  drawio_updated_at: string;
+};
+
+export type FigureDrawioResponse = {
+  figure: FigureDrawioSummary & {
+    drawio_xml: string;
+  };
+};
+
+export type FigureDrawioSavePayload = {
+  expected_drawio_updated_at: string;
+  title?: string | null;
+  drawio_xml: string;
+};
+
+export type FigureDrawioSaveResponse = {
+  figure: FigureDrawioSummary & {
+    render_url?: string;
   };
 };
 

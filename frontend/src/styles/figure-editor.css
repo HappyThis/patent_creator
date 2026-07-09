@@ -1,0 +1,147 @@
+.figure-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(18, 20, 22, 0.45);
+  backdrop-filter: blur(5px);
+}
+
+.figure-editor-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1500px, 96vw);
+  height: min(940px, 94vh);
+  border: 1px solid rgba(23, 29, 36, 0.18);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+}
+
+.figure-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid rgba(23, 29, 36, 0.1);
+  background: #fbfbfa;
+}
+
+.figure-editor-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.figure-editor-title-input {
+  min-width: 160px;
+  width: min(460px, 56vw);
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  padding: 0 8px;
+  color: #151a1f;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.figure-editor-title-input:hover {
+  background: #f2f2ef;
+}
+
+.figure-editor-title-input:focus {
+  outline: none;
+  border-color: rgba(17, 24, 39, 0.18);
+  background: #ffffff;
+}
+
+.figure-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.figure-editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(23, 29, 36, 0.16);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #252b33;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.figure-editor-actions button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.figure-editor-primary {
+  border-color: #151a1f !important;
+  background: #151a1f !important;
+  color: #ffffff !important;
+}
+
+.figure-editor-secondary {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: #59626c !important;
+}
+
+.figure-editor-secondary:hover {
+  background: #f0f0ed !important;
+  color: #252b33 !important;
+}
+
+.figure-editor-error {
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(130, 37, 37, 0.16);
+  background: #fff5f4;
+  color: #8d2d24;
+  font-size: 13px;
+}
+
+.figure-editor-main {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  background: #ffffff;
+}
+
+.figure-editor-main-drawio {
+  display: block;
+}
+
+.figure-editor-drawio-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.figure-editor-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.78);
+  color: #66707a;
+  font-size: 13px;
+}

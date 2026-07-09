@@ -316,6 +316,7 @@ export function useWorkspace(projectId: string | null) {
     submitMessage,
     cancelCurrentRound,
     exportDocx,
+    refreshRenderAst,
     handleSessionSelect,
     handleNewSession,
     handleSessionDelete,

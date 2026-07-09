@@ -13,6 +13,8 @@ type RenderPreviewNodesProps = {
   recentBlockIds: ReadonlySet<string>;
   sectionStatusById: Record<string, SectionStatus>;
   figuresById: Record<string, FigureRenderAsset>;
+  projectId: string | null;
+  onFigureSaved: () => void;
   formulaNumberById?: Record<string, number>;
   parentIndexPath?: number[];
 };
@@ -23,6 +25,8 @@ export function renderPreviewNodes({
   recentBlockIds,
   sectionStatusById,
   figuresById,
+  projectId,
+  onFigureSaved,
   formulaNumberById,
   parentIndexPath = [],
 }: RenderPreviewNodesProps): JSX.Element[] {
@@ -56,6 +60,8 @@ export function renderPreviewNodes({
               recentBlockIds,
               sectionStatusById,
               figuresById,
+              projectId,
+              onFigureSaved,
               formulaNumberById: resolvedFormulaNumberById,
               parentIndexPath: indexPath,
             })}
@@ -186,7 +192,12 @@ export function renderPreviewNodes({
           data-block-id={node.id}
           data-figure-id={node.figure_id}
         >
-          <PreviewFigure figure={figure} figureId={node.figure_id} />
+          <PreviewFigure
+            figure={figure}
+            figureId={node.figure_id}
+            projectId={projectId}
+            onFigureSaved={onFigureSaved}
+          />
           <figcaption>{caption}</figcaption>
         </figure>
       );

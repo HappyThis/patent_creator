@@ -39,6 +39,17 @@ SESSION_TITLE_MAX_CHARS = 24
 SESSION_TITLE_TIMEOUT = 12.0
 
 
+def _tool_result_message(tool_call: MainAgentToolCall, result: dict[str, Any], state: RoundState) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call.tool_call_id,
+        "content": json.dumps(result, ensure_ascii=False),
+        "tool_name": tool_call.tool,
+        "round_id": state.round_id,
+        "message_id": state.message_id,
+    }
+
+
 class SupportsChatLLM(SupportsGenerateWithTools, SupportsTechnicalSolutionGeneration, Protocol):
     async def generate_text(
         self,
@@ -606,13 +617,7 @@ class ChatService:
                             },
                         )
 
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.tool_call_id,
-                            "content": json.dumps(result, ensure_ascii=False),
-                        }
-                    )
+                    messages.append(_tool_result_message(tool_call, result, state))
                 await publish_context_usage("after_tool_results", step_index=step_index)
                 await self._sleep()
 

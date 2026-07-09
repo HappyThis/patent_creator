@@ -255,15 +255,15 @@
   justify-content: center;
   width: min(100%, 720px);
   max-width: 100%;
-  min-height: 220px;
-  max-height: min(62vh, 640px);
+  aspect-ratio: 1500 / 900;
+  min-height: 0;
   margin: 0 auto;
-  padding: 18px;
-  border: 1px solid rgba(92, 82, 68, 0.12);
+  padding: 0;
+  border: 1px solid rgba(17, 24, 39, 0.1);
   border-radius: 6px;
-  background: rgba(255, 253, 248, 0.72);
+  background: #ffffff;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .preview-figure-svg-content {
@@ -277,7 +277,6 @@
   display: block;
   width: 100%;
   max-width: 100%;
-  max-height: calc(min(62vh, 640px) - 36px);
   height: auto;
   margin: 0 auto;
   object-fit: contain;
@@ -294,9 +293,28 @@
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid rgba(92, 82, 68, 0.16);
+  border: 1px solid rgba(17, 24, 39, 0.14);
   border-radius: 5px;
-  background: rgba(255, 253, 248, 0.9);
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(52, 59, 66, 0.72);
+  box-shadow: 0 8px 18px rgba(37, 31, 22, 0.08);
+  cursor: pointer;
+}
+
+.preview-figure-edit {
+  position: absolute;
+  top: 10px;
+  right: 46px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(17, 24, 39, 0.14);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.92);
   color: rgba(52, 59, 66, 0.72);
   box-shadow: 0 8px 18px rgba(37, 31, 22, 0.08);
   cursor: pointer;
@@ -304,11 +322,18 @@
 
 .preview-figure-expand:hover {
   color: #1f2933;
-  border-color: rgba(92, 82, 68, 0.28);
-  background: #fffdf8;
+  border-color: rgba(17, 24, 39, 0.24);
+  background: #ffffff;
+}
+
+.preview-figure-edit:hover {
+  color: #1f2933;
+  border-color: rgba(17, 24, 39, 0.24);
+  background: #ffffff;
 }
 
 .preview-figure-expand svg,
+.preview-figure-edit svg,
 .preview-figure-lightbox-close svg {
   width: 15px;
   height: 15px;

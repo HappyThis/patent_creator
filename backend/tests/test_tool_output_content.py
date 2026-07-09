@@ -54,7 +54,12 @@ def _figure_tool_message(
         "content": json.dumps(
             {
                 "status": "success",
-                "output": {"figure": {"figure_id": figure_id, "title": "系统结构示意图"}},
+                "output": {
+                    "figure": {"figure_id": figure_id, "ref": f"figure:{figure_id}", "title": "系统结构示意图"},
+                    "attachments": [
+                        {"type": "render_image", "ref": f"figure:{figure_id}", "purpose": "visual_review"}
+                    ],
+                },
             },
             ensure_ascii=False,
         ),
@@ -84,11 +89,9 @@ def test_hydrate_tool_output_content_adds_current_round_figure_image_after_tool_
     assert review_message["tool_output_attachment"] is True
     assert review_message["content"][0]["type"] == "input_text"
     assert FIGURE_VISUAL_REVIEW_PROMPT in review_message["content"][0]["text"]
-    assert "geometry_report" in review_message["content"][0]["text"]
-    assert "优先处理 issues 中 severity=error 的问题" in review_message["content"][0]["text"]
-    assert "semantic_* 结构语义问题" in review_message["content"][0]["text"]
     assert "硬失败条件" in review_message["content"][0]["text"]
-    assert "只要命中任一条，就必须读取 diagram.html 并调用 figure_kit.update 修正" in review_message["content"][0]["text"]
+    assert "只要命中任一条，就必须读取当前 draw.io XML 并调用 figure_kit.update 修正" in review_message["content"][0]["text"]
+    assert "带上读取时的 drawio_updated_at" in review_message["content"][0]["text"]
     assert "不要用“基本还行”放过明显瑕疵" in review_message["content"][0]["text"]
     assert "业务节点没有参与任何关系" in review_message["content"][0]["text"]
     assert "同一分组内同类节点的连接关系不一致" in review_message["content"][0]["text"]
@@ -163,7 +166,12 @@ def test_context_manager_prepares_current_round_figure_visual_review(tmp_path: P
         payload={
             "tool": "figure_kit",
             "status": "success",
-            "output": {"figure": {"figure_id": "fig_000001", "title": "系统结构示意图"}},
+            "output": {
+                "figure": {"figure_id": "fig_000001", "ref": "figure:fig_000001", "title": "系统结构示意图"},
+                "attachments": [
+                    {"type": "render_image", "ref": "figure:fig_000001", "purpose": "visual_review"}
+                ],
+            },
         },
     )
     manager = ContextManager(

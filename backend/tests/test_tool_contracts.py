@@ -69,20 +69,15 @@ def test_main_agent_registers_figure_kit() -> None:
     properties = figure["function"]["parameters"]["properties"]
     assert "markdown_ref" in description
     assert "figure block 只用于在“附录”章节展示图本体" in description
-    assert "固定 1500x900 画布" in description
-    assert "离线可渲染、结果可复现、不会执行不可信代码" in description
-    assert "geometry_report" in description
-    assert "semantic_* 结构语义错误" in description
-    assert "孤立业务节点" in description
-    assert "同组同类节点连接不一致" in description
-    assert "create/update 后模型会收到 render.png 截图用于视觉复盘" in description
-    assert "主结构必须由可检查图元组成" in description
-    assert "node、group、connector、label、port、data、decision、storage、callout" in description
-    assert "data-fig-source、data-fig-target" in description
-    assert 'data-fig-role="label"' in description
-    assert 'data-fig-kind="note/annotation/legend/constraint"' in description
-    assert "不要为了轻微审美差异反复微调" in description
-    assert 'marker-end="url(#arrow)"' in description
+    assert "drawio_updated_at" in description
+    assert "render_image attachment" in description
+    assert "修改图前必须 read" in description
+    assert "expected_drawio_updated_at" in properties
+    assert "draw.io XML" in description
+    assert "diagram.drawio" in description
+    assert "mxGeometry" in description
+    assert "系统不会自动排版、避障或改线" in description
+    assert "create/update 后会随工具结果附加截图供视觉复盘" in description
     assert "简约黑白技术示意图" in description
     assert "不要用大外框包住整张主画面" in description
     assert "排版优先表达主关系" in description
@@ -106,18 +101,11 @@ def test_main_agent_registers_figure_kit() -> None:
     assert "若同时存在结构关系、状态链、异常恢复或控制路径" in description
     assert "不要通过增加线条、图例或说明文字来解释已经混乱的图" in description
     assert "如果需要靠长标题、图例或说明卡才能解释关系" in description
-    assert 'id="diagram"' in properties["html"]["description"]
-    assert "可离线、可复现、无执行风险" in properties["html"]["description"]
-    assert 'marker-end="url(#arrow)"' in properties["html"]["description"]
-    assert "data-fig-role、data-fig-kind、data-fig-id" in properties["html"]["description"]
-    assert "data-fig-source 和 data-fig-target" in properties["html"]["description"]
-    assert "monochrome technical schematic" in properties["html"]["description"]
-    assert "不是产品页面、海报、正文摘要或固定模板图" in properties["html"]["description"]
-    assert "先确定主表达意图和主关系" in properties["html"]["description"]
-    assert "形状、布局、连接线和文字都必须服务语义" in properties["html"]["description"]
-    assert "每条箭头/连线有明确起点、终点、方向和含义" in properties["html"]["description"]
-    assert "默认不要添加专利附图编号" in properties["html"]["description"]
-    assert set(properties) == {"action", "ref", "title", "html"}
+    assert "完整 draw.io XML" in properties["drawio_xml"]["description"]
+    assert "mxGraphModel" in properties["drawio_xml"]["description"]
+    assert "diagram.drawio" in properties["drawio_xml"]["description"]
+    assert "最近一次 read 返回的 drawio_updated_at" in properties["expected_drawio_updated_at"]["description"]
+    assert set(properties) == {"action", "ref", "title", "drawio_xml", "expected_drawio_updated_at"}
 
 
 def test_tool_schemas_inline_local_definitions_for_responses_api() -> None:

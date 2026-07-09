@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ...domain.disclosure import section_title_text
-from ...domain.figures import FIGURE_LINK_PATTERN, figure_ref, figure_summary, parse_figure_ref
+from ...domain.figures import FIGURE_LINK_PATTERN, figure_attachment, figure_ref, figure_summary, parse_figure_ref
 from ...domain.document_tool_results import tool_failed
 from ...storage.workspace_store import WorkspaceStore
 from ..metadata import agent_tool
@@ -18,24 +18,18 @@ class FigureKitArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["create", "read", "update", "delete", "list", "check"] = Field(
-        description="操作类型。create 新建 HTML 附图；read 读取 diagram.html；update 覆盖 HTML 并重新截图；delete 删除附图；list 列出可引用格式；check 检查正文引用和附录展示。"
+        description="操作类型。create 新建 draw.io 附图；read 读取当前 draw.io XML；update 覆盖 draw.io XML 并重新导出图片；delete 删除附图；list 列出可引用格式；check 检查正文引用和附录展示。"
     )
     ref: str | None = Field(default=None, description="read/update/delete 使用，格式为 figure:fig_000001。")
     title: str | None = Field(default=None, description="create/update 使用，附图标题，例如 系统结构示意图。")
-    html: str | None = Field(
+    drawio_xml: str | None = Field(
         default=None,
         description=(
-            "create/update 使用，完整 diagram.html 源码。必须是纯 HTML/CSS，包含 id=\"diagram\" 的固定画布根节点；"
-            "画布尺寸固定为 1500x900，不要引用外部资源、脚本、iframe 或事件处理器，保证图片可离线、可复现、无执行风险；"
-            "允许 SVG 内部定义引用，例如 marker-end=\"url(#arrow)\"、clip-path=\"url(#clip)\" 或 href=\"#localId\"；"
-            "主结构必须使用可检查图元标记：data-fig-role、data-fig-kind、data-fig-id，连接线还应声明 data-fig-source 和 data-fig-target；"
-            "工具会基于这些标记返回几何与结构语义检查结果，可能指出孤立业务节点、同组同类节点连接不一致等问题；"
-            "图片应是简约黑白技术示意图（monochrome technical schematic），用于表达技术结构和关系，"
-            "而不是产品页面、海报、正文摘要或固定模板图；先确定主表达意图和主关系，再选择合适的视觉组织方式；"
-            "形状、布局、连接线和文字都必须服务语义：形状区分对象类型，布局给出稳定阅读路径，"
-            "每条箭头/连线有明确起点、终点、方向和含义，文字短且可读；默认不要添加专利附图编号。"
+            "create/update 使用，完整 draw.io XML，建议使用 <mxfile><diagram><mxGraphModel>...</mxGraphModel></diagram></mxfile>。"
+            "源文件会保存为 diagram.drawio，并通过官方 draw.io embed 导出 render.png。"
         ),
     )
+    expected_drawio_updated_at: str | None = Field(default=None, description="update 使用，必须填写最近一次 read 返回的 drawio_updated_at。")
 
 
 @agent_tool(args_model=FigureKitArguments)
@@ -44,21 +38,19 @@ def figure_kit(
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """创建和维护用于解释技术方案的简约黑白结构示意图，工具会保存 diagram.html 并同步截图为 render.png。
+    """创建和维护用于解释技术方案的可编辑黑白结构示意图，工具会保存 diagram.drawio 并同步导出 render.png。
 
     Returns:
-        list 返回 figures，每项包含 ref、markdown_ref、caption；read/create/update 返回 figure 元数据、html 源码和 geometry_report；create/update 后模型会收到 render.png 截图用于视觉复盘；check 返回 errors/warnings；失败返回 failed 和 code/message。
+        list 返回 figures，每项包含 ref、markdown_ref、caption、drawio_updated_at；read 返回 drawio_xml 和 drawio_updated_at；create/update 返回精简 figure 元数据、复盘说明和 render_image attachment，随后模型会收到 render.png 截图用于视觉复盘；check 返回 errors/warnings；失败返回 failed 和 code/message。
 
     Rules:
         - create 只用于用户明确要求新增一张图；用户说“重试/重新生成/替换/修改当前图/修改图1”时，必须 list 或 read 定位现有图，再用 update 覆盖原图，不能 create 新图。
         - 正文引用图时使用 list/create/read 返回的 markdown_ref，例如 [图1](figure:fig_000001)，不要手写或猜测图号。
         - figure block 只用于在“附录”章节展示图本体；非附录章节只能使用 Markdown 链接引用图。
-        - 修改图前先 read，基于返回的 html 生成完整新版 diagram.html，再 update。
-        - create/update 必须提交完整 HTML 文档，包含 <!doctype html> 或 <html>，并包含 id="diagram" 的根节点。
-        - HTML 附图固定 1500x900 画布；不要让内容依赖滚动、动画、外链字体、外部图片或脚本，保证离线可渲染、结果可复现、不会执行不可信代码。
-        - 主结构必须由可检查图元组成：node、group、connector、label、port、data、decision、storage、callout。所有主要图元必须带 data-fig-role 和稳定 data-fig-id；连接线必须带 data-fig-source、data-fig-target，并用 data-fig-kind 标明 main-flow、data-flow、control-flow、auxiliary、feedback 或 dependency 等语义。线旁标签使用 data-fig-role="label" 和 data-fig-for="<connector id>" 绑定到对应连接线；若某个图元只是旁注、图例、约束说明或非业务节点，请使用 callout 或 data-fig-kind="note/annotation/legend/constraint" 等语义，避免被误判为孤立业务节点。
-        - create/update 后请查看随工具结果提供的截图和 geometry_report，检查主关系、布局、文字、线条、箭头和形状语义；若 geometry_report.issues 中存在 severity=error，尤其是 semantic_* 结构语义错误，或存在明显影响理解的问题，例如业务节点孤立、同组同类节点连接不一致、线穿过节点、长虚线跨区、箭头起止点不清、形状语义混乱、文字过密或主路径不清，必须 read 后 update 修正；不要为了轻微审美差异反复微调。
-        - 可以使用 SVG 内部 defs 引用来画箭头、裁剪和局部效果，例如 marker-end="url(#arrow)"、clip-path="url(#clip)"、href="#localId"；这些必须引用当前 HTML 内已经定义的 id，不能引用外部 URL。
+        - 修改图前必须 read，基于返回的 drawio_xml 生成完整新版 draw.io XML，再 update；update 必须带 read 返回的 drawio_updated_at，否则会被拒绝。
+        - create/update 必须提交完整 drawio_xml，不要提交片段、增量 patch、Mermaid 或 HTML。推荐根节点使用 mxfile，页面宽高使用 1500x900。
+        - 你可以使用 draw.io/mxGraph 支持的节点、边、分组、泳道、数据库、文件夹、圆角、折线、标签等能力表达结构；不要提交旧的结构化 JSON。
+        - 排版由你在 draw.io XML 的 mxGeometry、mxPoint、style 中明确控制；系统不会自动排版、避障或改线。
         - 只有当图能显著降低理解成本时才创建图：适合表达模块关系、数据流向、控制关系、处理阶段、状态变化、层级边界、输入输出和关键反馈闭环；不适合把长段文字换成图。
         - 默认生成帮助理解结构的简约黑白技术示意图，而不是产品页面、海报、仪表盘或正式专利标号图。
         - 视觉样式应是简约黑白 technical schematic：白底，黑色或深灰线条，少量浅灰填充，细边框，简洁箭头；边界框只在确实表达具体、局部、可命名的系统、层级、责任或约束边界时使用，不要用大外框包住整张主画面。
@@ -76,12 +68,13 @@ def figure_kit(
         - 默认不要在节点角落添加 101/102/201 这类专利附图编号；只有用户明确要求“附图标记/编号/正式专利附图”时才添加。
         - 复杂度预算必须克制：单图只承载一个主关系和少量辅助关系，辅助关系最多 2 类，线条视觉语义最多 3 类；虚线只代表一种稳定含义且必须可从线旁标签或上下文看出。
         - 单张图建议 6-12 个关键元素，同时控制连接线数量、文字密度和语义层数；若同时存在结构关系、状态链、异常恢复或控制路径，优先拆图或省略次要关系；不要把完整调用链、日志流、工具调用明细、异常和解释全部塞进一张图，也不要通过增加线条、图例或说明文字来解释已经混乱的图。如果需要靠长标题、图例或说明卡才能解释关系，应优先删减、重排、局部化或拆图。
+        - create/update 后会随工具结果附加截图供视觉复盘，请检查布局、文字、线条、箭头、形状语义和整体可读性；若明显影响理解或专业度，请 read 后 update。
         - check 用于提交前或批量编辑后检查 figure 引用、图号文本和 figure block 位置是否一致。
 
     Examples:
         - 列出附图: {"action":"list"}
-        - 创建附图: {"action":"create","title":"系统结构示意图","html":"<!doctype html><html><body><div id=\\"diagram\\">...</div></body></html>"}
-        - 读取附图源码: {"action":"read","ref":"figure:fig_000001"}
+        - 创建附图: {"action":"create","title":"系统结构示意图","drawio_xml":"<mxfile><diagram name='系统结构示意图'><mxGraphModel page='1' pageWidth='1500' pageHeight='900'><root><mxCell id='0'/><mxCell id='1' parent='0'/></root></mxGraphModel></diagram></mxfile>"}
+        - 读取附图 draw.io XML: {"action":"read","ref":"figure:fig_000001"}
         - 检查一致性: {"action":"check"}
     """
     parsed = _validate_figure_arguments(arguments)
@@ -96,16 +89,16 @@ def figure_kit(
 
     if action == "create":
         title = str(arguments.get("title") or "").strip()
-        html = str(arguments.get("html") or "").strip()
+        drawio_xml = arguments.get("drawio_xml")
         if not title:
             return tool_failed("figure_title_required", "figure_kit.create 需要非空 title。")
-        if not html:
-            return tool_failed("figure_html_required", "figure_kit.create 需要非空 html。")
-        result = store.create_figure(project_id, title=title, html=html)
+        if drawio_xml is None:
+            return tool_failed("drawio_xml_required", "figure_kit.create 需要非空 drawio_xml。")
+        result = store.create_figure(project_id, title=title, drawio_xml=drawio_xml)
         if result.get("status") == "failed":
             return result
         figure = result["output"]["figure"]
-        return {"status": "success", "output": {"figure": _full_figure_payload(store, project_id, figure), "warnings": result["output"].get("warnings", [])}}
+        return _figure_change_success(figure)
 
     figure_id = _figure_id_from_arguments(arguments)
     if figure_id is None:
@@ -118,18 +111,21 @@ def figure_kit(
         return {"status": "success", "output": {"figure": _full_figure_payload(store, project_id, figure)}}
 
     if action == "update":
-        html = str(arguments.get("html") or "").strip()
-        if not html:
-            return tool_failed("figure_html_required", "figure_kit.update 需要非空 html。")
+        drawio_xml = arguments.get("drawio_xml")
+        if drawio_xml is None:
+            return tool_failed("drawio_xml_required", "figure_kit.update 需要非空 drawio_xml。")
         title_value = arguments.get("title")
         update_title = str(title_value).strip() if title_value is not None else None
-        result = store.update_figure(project_id, figure_id, title=update_title, html=html)
+        result = store.update_figure(
+            project_id,
+            figure_id,
+            title=update_title,
+            drawio_xml=drawio_xml,
+            expected_drawio_updated_at=arguments.get("expected_drawio_updated_at"),
+        )
         if result.get("status") == "failed":
             return result
-        return {
-            "status": "success",
-            "output": {"figure": _full_figure_payload(store, project_id, result["output"]["figure"]), "warnings": result["output"].get("warnings", [])},
-        }
+        return _figure_change_success(result["output"]["figure"])
 
     if action == "delete":
         usages = _figure_usages(store.get_disclosure(project_id), figure_id)
@@ -226,17 +222,23 @@ def _figure_id_from_arguments(arguments: dict[str, Any]) -> str | None:
 
 
 def _full_figure_payload(store: WorkspaceStore, project_id: str, figure: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(figure)
-    payload.update(figure_summary(figure))
-    html = store.read_figure_html(project_id, str(figure.get("figure_id") or ""))
-    if html is not None:
-        payload["html"] = html
-    geometry_report = store.read_figure_geometry_report(project_id, str(figure.get("figure_id") or ""))
-    if geometry_report is not None:
-        geometry = dict(payload.get("geometry") or {})
-        geometry["report"] = geometry_report
-        payload["geometry"] = geometry
+    payload = figure_summary(figure)
+    drawio_xml = store.read_figure_drawio_xml(project_id, str(figure.get("figure_id") or ""))
+    if drawio_xml is not None:
+        payload["drawio_xml"] = drawio_xml
     return payload
+
+
+def _figure_change_success(figure: dict[str, Any]) -> dict[str, Any]:
+    payload = figure_summary(figure)
+    return {
+        "status": "success",
+        "output": {
+            "figure": payload,
+            "message": "已生成当前图片，并随本次工具结果附加截图供你查看。请基于图片附件复盘布局、文字、线条、箭头、形状语义和整体可读性；如存在明显影响理解或专业度的问题，请读取并修改该图，尽可能保持交付级图片质量。",
+            "attachments": [figure_attachment(figure)],
+        },
+    }
 
 
 def _appendix_section(disclosure: dict[str, Any]) -> dict[str, Any] | None:
