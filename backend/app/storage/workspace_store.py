@@ -8,14 +8,17 @@ import shutil
 import subprocess
 import stat
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, BinaryIO, Iterator
 from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ValidationError
+from PIL import Image, UnidentifiedImageError
 
 from ..core import ApiError, now_iso, generate_id
+from ..drawio_config import DEFAULT_DRAWIO_EMBED_URL, normalize_drawio_embed_url
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
 from ..domain.docx_export import DocxExportError, export_disclosure_docx
 from ..domain.document_tool_results import tool_failed
@@ -44,12 +47,25 @@ logger = logging.getLogger("patent_creator.workspace_store")
 
 
 class WorkspaceStore:
-    def __init__(self, root_dir: Path, git_user_name: str, git_user_email: str) -> None:
+    def __init__(
+        self,
+        root_dir: Path,
+        git_user_name: str,
+        git_user_email: str,
+        drawio_embed_url: str = DEFAULT_DRAWIO_EMBED_URL,
+        drawio_allow_nonlocal: bool = False,
+    ) -> None:
         self.root_dir = root_dir
         self.git_user_name = git_user_name
         self.git_user_email = git_user_email
+        self.drawio_embed_url = normalize_drawio_embed_url(
+            drawio_embed_url,
+            allow_nonlocal=drawio_allow_nonlocal,
+        )
         self.projects_dir = self.root_dir / "projects"
         self._session_event_lock = threading.Lock()
+        self._figure_locks_guard = threading.Lock()
+        self._figure_project_locks: dict[str, threading.RLock] = {}
         self.projects_dir.mkdir(parents=True, exist_ok=True)
 
     def create_project(self, project_name: str, disclosure_title: str | None = None) -> ProjectRecord:
@@ -523,42 +539,65 @@ class WorkspaceStore:
             return None
         return self._normalize_figure(project_id, self.read_json(path))
 
+    def get_figure_with_drawio(self, project_id: str, figure_id: str) -> tuple[dict[str, Any], str] | None:
+        with self._figure_project_lock(project_id):
+            path = self.figure_json_file(project_id, figure_id)
+            if not path.exists():
+                return None
+            figure = self.read_json(path)
+            drawio_file = self._figure_asset_file_from_record(
+                project_id,
+                figure_id,
+                figure,
+                section="source",
+                fallback_name="diagram.drawio",
+            )
+            try:
+                drawio_xml = drawio_file.read_text(encoding="utf-8")
+            except OSError:
+                return None
+            return self._normalize_figure(project_id, figure), drawio_xml
+
     def create_figure(self, project_id: str, *, title: str, drawio_xml: str) -> dict[str, Any]:
-        figure_id = self.next_figure_id(project_id)
-        index = int(figure_id.removeprefix("fig_"))
-        figure_dir = self.figure_dir(project_id, figure_id)
-        source_path = f"assets/figures/{figure_id}/diagram.drawio"
-        render_path = f"assets/figures/{figure_id}/render.png"
-        asset_path = f"assets/figures/{figure_id}/figure.json"
         validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
-        if figure_dir.exists() and not self.figure_json_file(project_id, figure_id).exists():
-            shutil.rmtree(figure_dir)
-        figure_dir.mkdir(parents=True, exist_ok=False)
-        self.write_text_atomic(self.figure_drawio_file(project_id, figure_id), validate_result["output"]["drawio_xml"])
-        render_result = self._render_drawio_file(
-            input_path=self.figure_drawio_file(project_id, figure_id),
-            output_path=self.figure_render_file(project_id, figure_id),
-        )
-        if render_result["status"] == "failed":
-            shutil.rmtree(figure_dir, ignore_errors=True)
-            return render_result
-        figure = build_figure_record(
-            figure_id=figure_id,
-            index=index,
-            title=title,
-            source_path=source_path,
-            render_path=render_path,
-            asset_path=asset_path,
-        )
-        self.write_json_atomic(self.figure_json_file(project_id, figure_id), figure)
-        return {
-            "status": "success",
-            "output": {
-                "figure": self._normalize_figure(project_id, figure),
-            },
-        }
+        with self._figure_project_lock(project_id):
+            figure_id = self.next_figure_id(project_id)
+            index = int(figure_id.removeprefix("fig_"))
+            figure_dir = self.figure_dir(project_id, figure_id)
+            asset_path = f"assets/figures/{figure_id}/figure.json"
+            if figure_dir.exists() and not self.figure_json_file(project_id, figure_id).exists():
+                shutil.rmtree(figure_dir)
+            figure_dir.mkdir(parents=True, exist_ok=False)
+            revision = self._new_figure_revision(project_id, figure_id)
+            try:
+                self.write_text_atomic(revision["drawio_file"], validate_result["output"]["drawio_xml"])
+                render_result = self._render_drawio_file(
+                    input_path=revision["drawio_file"],
+                    output_path=revision["render_file"],
+                )
+                if render_result["status"] == "failed":
+                    shutil.rmtree(figure_dir, ignore_errors=True)
+                    return render_result
+                figure = build_figure_record(
+                    figure_id=figure_id,
+                    index=index,
+                    title=title,
+                    source_path=revision["source_path"],
+                    render_path=revision["render_path"],
+                    asset_path=asset_path,
+                )
+                self.write_json_atomic(self.figure_json_file(project_id, figure_id), figure)
+            except OSError as exc:
+                shutil.rmtree(figure_dir, ignore_errors=True)
+                return tool_failed("figure_storage_failed", f"附图保存失败：{exc}")
+            return {
+                "status": "success",
+                "output": {
+                    "figure": self._normalize_figure(project_id, figure),
+                },
+            }
 
     def update_figure(
         self,
@@ -569,50 +608,65 @@ class WorkspaceStore:
         drawio_xml: str,
         expected_drawio_updated_at: str | None,
     ) -> dict[str, Any]:
-        figure_path = self.figure_json_file(project_id, figure_id)
-        if not figure_path.exists():
-            return {"status": "failed", "output": {"code": "figure_not_found", "message": f"figure 不存在：{figure_id}"}}
-        current = self.read_json(figure_path)
         if not expected_drawio_updated_at:
             return tool_failed("drawio_read_required", "修改 draw.io 图前必须先读取当前附图，并在 update 时带上 drawio_updated_at。")
-        current_drawio_updated_at = drawio_updated_at(current)
-        if expected_drawio_updated_at != current_drawio_updated_at:
-            return tool_failed(
-                "drawio_conflict",
-                "当前附图已在你读取之后被修改，请重新 read 最新 draw.io XML 后再 update。",
-                current_drawio_updated_at=current_drawio_updated_at,
-            )
         validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
-        drawio_file = self.figure_drawio_file(project_id, figure_id)
-        render_file = self.figure_render_file(project_id, figure_id)
-        tmp_drawio_file = drawio_file.with_name(f".diagram.{uuid4().hex}.drawio")
-        tmp_render_file = render_file.with_name(f".render.{uuid4().hex}.png")
-        tmp_drawio_file.write_text(validate_result["output"]["drawio_xml"], encoding="utf-8")
-        render_result = self._render_drawio_file(input_path=tmp_drawio_file, output_path=tmp_render_file)
-        if render_result["status"] == "failed":
-            tmp_drawio_file.unlink(missing_ok=True)
-            tmp_render_file.unlink(missing_ok=True)
-            return render_result
-        drawio_timestamp = new_drawio_updated_at()
-        tmp_drawio_file.replace(drawio_file)
-        tmp_render_file.replace(render_file)
-        updated = update_figure_record(current, title=title, drawio_timestamp=drawio_timestamp)
-        self.write_json_atomic(figure_path, updated)
-        return {
-            "status": "success",
-            "output": {
-                "figure": self._normalize_figure(project_id, updated),
-            },
-        }
+        with self._figure_project_lock(project_id):
+            figure_path = self.figure_json_file(project_id, figure_id)
+            if not figure_path.exists():
+                return {"status": "failed", "output": {"code": "figure_not_found", "message": f"figure 不存在：{figure_id}"}}
+            current = self.read_json(figure_path)
+            self._cleanup_unreferenced_figure_revisions(project_id, figure_id, current)
+            current_drawio_updated_at = drawio_updated_at(current)
+            if expected_drawio_updated_at != current_drawio_updated_at:
+                return tool_failed(
+                    "drawio_conflict",
+                    "当前附图已在你读取之后被修改，请重新 read 最新 draw.io XML 后再 update。",
+                    current_drawio_updated_at=current_drawio_updated_at,
+                )
+
+            revision = self._new_figure_revision(project_id, figure_id)
+            revision_dir = revision["drawio_file"].parent
+            try:
+                self.write_text_atomic(revision["drawio_file"], validate_result["output"]["drawio_xml"])
+                render_result = self._render_drawio_file(
+                    input_path=revision["drawio_file"],
+                    output_path=revision["render_file"],
+                )
+                if render_result["status"] == "failed":
+                    shutil.rmtree(revision_dir, ignore_errors=True)
+                    return render_result
+                drawio_timestamp = new_drawio_updated_at()
+                updated = update_figure_record(
+                    current,
+                    title=title,
+                    drawio_timestamp=drawio_timestamp,
+                    source_path=revision["source_path"],
+                    render_path=revision["render_path"],
+                )
+                self.write_json_atomic(figure_path, updated)
+            except OSError as exc:
+                shutil.rmtree(revision_dir, ignore_errors=True)
+                return tool_failed("figure_storage_failed", f"附图保存失败：{exc}")
+
+            self._remove_superseded_figure_assets(project_id, figure_id, current, updated)
+            self._cleanup_unreferenced_figure_revisions(project_id, figure_id, updated)
+            return {
+                "status": "success",
+                "output": {
+                    "figure": self._normalize_figure(project_id, updated),
+                },
+            }
 
     def delete_figure(self, project_id: str, figure_id: str) -> bool:
-        path = self.figure_dir(project_id, figure_id)
-        if not path.exists():
-            return False
-        shutil.rmtree(path)
-        return True
+        with self._figure_project_lock(project_id):
+            path = self.figure_dir(project_id, figure_id)
+            if not path.exists():
+                return False
+            shutil.rmtree(path)
+            return True
 
     def next_figure_id(self, project_id: str) -> str:
         max_value = 0
@@ -632,20 +686,24 @@ class WorkspaceStore:
         return self.figure_dir(project_id, figure_id) / "figure.json"
 
     def figure_drawio_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figure_dir(project_id, figure_id) / "diagram.drawio"
+        return self._current_figure_asset_file(
+            project_id,
+            figure_id,
+            section="source",
+            fallback_name="diagram.drawio",
+        )
 
     def figure_render_file(self, project_id: str, figure_id: str) -> Path:
-        return self.figure_dir(project_id, figure_id) / "render.png"
+        return self._current_figure_asset_file(
+            project_id,
+            figure_id,
+            section="render",
+            fallback_name="render.png",
+        )
 
     def read_figure_drawio_xml(self, project_id: str, figure_id: str) -> str | None:
-        path = self.figure_drawio_file(project_id, figure_id)
-        if not path.exists():
-            return None
-        try:
-            return path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.warning("skipping invalid figure drawio xml project_id=%s figure_id=%s error=%s", project_id, figure_id, exc)
-            return None
+        snapshot = self.get_figure_with_drawio(project_id, figure_id)
+        return snapshot[1] if snapshot is not None else None
 
     def project_asset_file(self, project_id: str, asset_path: str) -> Path:
         project_root = self.project_dir(project_id).resolve()
@@ -657,6 +715,140 @@ class WorkspaceStore:
 
     def figure_summaries(self, project_id: str) -> list[dict[str, Any]]:
         return [figure_summary(figure) for figure in self.list_figures(project_id)]
+
+    def _new_figure_revision(self, project_id: str, figure_id: str) -> dict[str, Any]:
+        revision_id = f"rev_{uuid4().hex}"
+        relative_dir = Path("assets") / "figures" / figure_id / ".revisions" / revision_id
+        revision_dir = self.project_dir(project_id) / relative_dir
+        revision_dir.mkdir(parents=True, exist_ok=False)
+        return {
+            "drawio_file": revision_dir / "diagram.drawio",
+            "render_file": revision_dir / "render.png",
+            "source_path": (relative_dir / "diagram.drawio").as_posix(),
+            "render_path": (relative_dir / "render.png").as_posix(),
+        }
+
+    def _current_figure_asset_file(
+        self,
+        project_id: str,
+        figure_id: str,
+        *,
+        section: str,
+        fallback_name: str,
+    ) -> Path:
+        figure_dir = self.figure_dir(project_id, figure_id)
+        figure_path = figure_dir / "figure.json"
+        if figure_path.exists():
+            try:
+                figure = self.read_json(figure_path)
+                return self._figure_asset_file_from_record(
+                    project_id,
+                    figure_id,
+                    figure,
+                    section=section,
+                    fallback_name=fallback_name,
+                )
+            except (OSError, json.JSONDecodeError):
+                pass
+        return figure_dir / fallback_name
+
+    def _figure_asset_file_from_record(
+        self,
+        project_id: str,
+        figure_id: str,
+        figure: dict[str, Any],
+        *,
+        section: str,
+        fallback_name: str,
+    ) -> Path:
+        figure_dir = self.figure_dir(project_id, figure_id)
+        asset = figure.get(section)
+        relative_path = asset.get("path") if isinstance(asset, dict) else None
+        if isinstance(relative_path, str) and relative_path:
+            resolved = (self.project_dir(project_id) / relative_path).resolve()
+            if resolved.is_relative_to(figure_dir.resolve()):
+                return resolved
+        return figure_dir / fallback_name
+
+    def _remove_superseded_figure_assets(
+        self,
+        project_id: str,
+        figure_id: str,
+        previous: dict[str, Any],
+        current: dict[str, Any],
+    ) -> None:
+        figure_dir = self.figure_dir(project_id, figure_id).resolve()
+        current_paths = {
+            str(section.get("path"))
+            for section in (current.get("source"), current.get("render"))
+            if isinstance(section, dict) and section.get("path")
+        }
+        previous_paths = {
+            str(section.get("path"))
+            for section in (previous.get("source"), previous.get("render"))
+            if isinstance(section, dict) and section.get("path")
+        }
+        parent_dirs: set[Path] = set()
+        for relative_path in previous_paths - current_paths:
+            resolved = (self.project_dir(project_id) / relative_path).resolve()
+            if not resolved.is_relative_to(figure_dir):
+                continue
+            try:
+                resolved.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning(
+                    "failed to clean superseded figure asset project_id=%s figure_id=%s path=%s error=%s",
+                    project_id,
+                    figure_id,
+                    resolved,
+                    exc,
+                )
+                continue
+            parent = resolved.parent
+            while parent != figure_dir:
+                parent_dirs.add(parent)
+                parent = parent.parent
+        for parent in sorted(parent_dirs, key=lambda path: len(path.parts), reverse=True):
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
+
+    def _cleanup_unreferenced_figure_revisions(
+        self,
+        project_id: str,
+        figure_id: str,
+        current: dict[str, Any],
+    ) -> None:
+        revisions_dir = self.figure_dir(project_id, figure_id) / ".revisions"
+        if not revisions_dir.is_dir():
+            return
+        keep_dirs: set[Path] = set()
+        for section in (current.get("source"), current.get("render")):
+            relative_path = section.get("path") if isinstance(section, dict) else None
+            if not isinstance(relative_path, str) or not relative_path:
+                continue
+            resolved = (self.project_dir(project_id) / relative_path).resolve()
+            if resolved.is_relative_to(revisions_dir.resolve()):
+                keep_dirs.add(resolved.parent)
+        for revision_dir in revisions_dir.glob("rev_*"):
+            if revision_dir.resolve() not in keep_dirs:
+                shutil.rmtree(revision_dir, ignore_errors=True)
+
+    @contextmanager
+    def _figure_project_lock(self, project_id: str) -> Iterator[None]:
+        validated_project_id = _validated_storage_id(project_id, "project_id")
+        with self._figure_locks_guard:
+            thread_lock = self._figure_project_locks.setdefault(validated_project_id, threading.RLock())
+        with thread_lock:
+            lock_path = self.project_dir(project_id) / "runtime" / "figures.lock"
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with lock_path.open("a+b") as lock_file:
+                _lock_file(lock_file)
+                try:
+                    yield
+                finally:
+                    _unlock_file(lock_file)
 
     def _normalize_figure(self, project_id: str, figure: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(figure)
@@ -684,12 +876,14 @@ class WorkspaceStore:
                     str(FIGURE_WIDTH),
                     "--height",
                     str(FIGURE_HEIGHT),
+                    "--drawio-url",
+                    self.drawio_embed_url,
                 ],
                 cwd=frontend_root,
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=45,
+                timeout=60,
             )
         except OSError as exc:
             return tool_failed("figure_render_failed", f"draw.io 附图渲染器启动失败：{exc}")
@@ -700,6 +894,14 @@ class WorkspaceStore:
             return tool_failed("figure_render_failed", f"draw.io 附图渲染失败：{message}")
         if not output_path.is_file():
             return tool_failed("figure_render_failed", "draw.io 附图渲染完成但未生成 render.png。")
+        dimensions = _png_dimensions(output_path)
+        if dimensions != (FIGURE_WIDTH, FIGURE_HEIGHT):
+            output_path.unlink(missing_ok=True)
+            actual = f"{dimensions[0]}x{dimensions[1]}" if dimensions else "invalid PNG"
+            return tool_failed(
+                "figure_render_failed",
+                f"draw.io 附图尺寸必须为 {FIGURE_WIDTH}x{FIGURE_HEIGHT}，实际为 {actual}。",
+            )
         return {
             "status": "success",
             "output": {
@@ -714,14 +916,20 @@ class WorkspaceStore:
     @staticmethod
     def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp_path.replace(path)
+        try:
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            tmp_path.replace(path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     @staticmethod
     def write_text_atomic(path: Path, payload: str) -> None:
         tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        tmp_path.write_text(payload, encoding="utf-8")
-        tmp_path.replace(path)
+        try:
+            tmp_path.write_text(payload, encoding="utf-8")
+            tmp_path.replace(path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     @staticmethod
     def read_json(path: Path) -> dict[str, Any]:
@@ -737,6 +945,48 @@ class WorkspaceStore:
         ]
         for command in commands:
             subprocess.run(command, cwd=workspace, capture_output=True, text=True, check=False)
+
+
+def _lock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _png_dimensions(path: Path) -> tuple[int, int] | None:
+    try:
+        with Image.open(path) as image:
+            if image.format != "PNG":
+                return None
+            dimensions = image.size
+            image.verify()
+            return dimensions
+    except (OSError, SyntaxError, UnidentifiedImageError):
+        return None
 
 
 def _make_writable_and_retry(function: Any, path: str, _exc_info: Any) -> None:

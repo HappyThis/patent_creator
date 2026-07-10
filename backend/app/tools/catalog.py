@@ -209,6 +209,8 @@ def _file_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> st
 
 def _figure_started(arguments: dict[str, Any]) -> str:
     action = arguments.get("action")
+    if action == "rules":
+        return "开始读取附图规则"
     if action == "check":
         return "开始检查附图"
     if action == "list":
@@ -220,6 +222,8 @@ def _figure_started(arguments: dict[str, Any]) -> str:
 
 def _figure_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
     action = arguments.get("action")
+    if action == "rules":
+        return "附图规则已读取"
     if action == "check":
         return "附图检查已完成"
     if action == "list":

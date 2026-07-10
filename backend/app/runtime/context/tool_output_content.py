@@ -5,13 +5,12 @@ import json
 import logging
 from typing import Any
 
-from ...domain.figures import parse_figure_ref
+from ...domain.figures import MODEL_REVIEW_IMAGE_MAX_BYTES, drawio_updated_at, parse_figure_ref
 from ...storage.workspace_store import WorkspaceStore
 
 logger = logging.getLogger("patent_creator.context.tool_output_content")
 
 MAX_TOOL_OUTPUT_IMAGE_ATTACHMENTS_PER_REQUEST = 8
-MAX_TOOL_OUTPUT_IMAGE_BYTES = 2_000_000
 FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 刚渲染出的截图。请只检查图形质量，不要重新评价技术方案内容，也不要为了套用固定图型而重画。
 
 请按交付级图片标准严格复盘：截图中不应保留任何肉眼可见、会降低专业度或理解效率的问题。不要用“基本还行”放过明显瑕疵。
@@ -70,6 +69,14 @@ def hydrate_tool_output_content(
                 _flush_pending_reviews(hydrated, pending_reviews)
             continue
         if attached_images >= max_image_attachments:
+            if _has_visual_review_attachment(message):
+                pending_reviews.append(
+                    _figure_review_unavailable_message(
+                        message,
+                        "本轮待复盘图片超过附件数量上限，当前图片没有附加；不要声称已经查看该图。",
+                    )
+                )
+                changed = True
             if not _next_message_is_tool(messages, index):
                 _flush_pending_reviews(hydrated, pending_reviews)
             continue
@@ -103,9 +110,20 @@ def _figure_review_message_from_tool_message(
     figure_id = _figure_id_from_output(output)
     if not isinstance(figure_id, str) or not figure_id:
         return None
+    expected_updated_at = _figure_attachment_updated_at(output, figure_id)
+    if expected_updated_at:
+        current = store.get_figure(project_id, figure_id)
+        if current is None or drawio_updated_at(current) != expected_updated_at:
+            return _figure_review_unavailable_message(
+                message,
+                f"图片 {figure_id} 已在本次工具结果之后发生变化，未附加旧版本截图；不要声称已经查看该版本。",
+            )
     figure_image = _figure_input_image(store, project_id, figure_id)
     if figure_image is None:
-        return None
+        return _figure_review_unavailable_message(
+            message,
+            f"图片 {figure_id} 的视觉复盘附件读取失败；不要声称已经查看该图。",
+        )
     figure = output.get("figure")
     title = str(figure.get("title") or "").strip() if isinstance(figure, dict) else ""
     review_text = FIGURE_VISUAL_REVIEW_PROMPT
@@ -135,14 +153,34 @@ def _figure_id_from_output(output: dict[str, Any]) -> str | None:
         figure_id = parse_figure_ref(str(attachment.get("ref") or ""))
         if figure_id:
             return figure_id
-    figure = output.get("figure")
-    if not isinstance(figure, dict):
-        return None
-    figure_id = figure.get("figure_id")
-    if isinstance(figure_id, str) and figure_id:
-        return figure_id
-    ref = figure.get("ref")
-    return parse_figure_ref(str(ref or ""))
+    return None
+
+
+def _figure_attachment_updated_at(output: dict[str, Any], figure_id: str) -> str:
+    for attachment in output.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        if parse_figure_ref(str(attachment.get("ref") or "")) != figure_id:
+            continue
+        return str(attachment.get("drawio_updated_at") or "")
+    return ""
+
+
+def _has_visual_review_attachment(message: dict[str, Any]) -> bool:
+    parsed = _parse_tool_content(message.get("content"))
+    output = parsed.get("output") if isinstance(parsed, dict) else None
+    return isinstance(output, dict) and _figure_id_from_output(output) is not None
+
+
+def _figure_review_unavailable_message(message: dict[str, Any], text: str) -> dict[str, Any]:
+    return {
+        "role": "user",
+        "content": [{"type": "input_text", "text": text}],
+        "tool_output_attachment": True,
+        "tool_name": "figure_kit",
+        "round_id": message.get("round_id"),
+        "message_id": message.get("message_id"),
+    }
 
 
 def _figure_input_image(
@@ -161,13 +199,13 @@ def _figure_input_image(
             exc,
         )
         return None
-    if size <= 0 or size > MAX_TOOL_OUTPUT_IMAGE_BYTES:
+    if size <= 0 or size > MODEL_REVIEW_IMAGE_MAX_BYTES:
         logger.info(
             "figure render image skipped project_id=%s figure_id=%s size=%s max_size=%s",
             project_id,
             figure_id,
             size,
-            MAX_TOOL_OUTPUT_IMAGE_BYTES,
+            MODEL_REVIEW_IMAGE_MAX_BYTES,
         )
         return None
     try:

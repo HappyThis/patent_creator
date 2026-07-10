@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from app.core import config
 from app.core.config import Settings
 
@@ -18,6 +20,10 @@ def test_settings_defaults_use_openai_responses_route(tmp_path: Path) -> None:
     assert settings.llm_max_retries == 5
     assert settings.llm_retry_delay_seconds == 5.0
     assert settings.openai_sdk_max_retries == 0
+    assert settings.drawio_embed_url.startswith("http://127.0.0.1:8081/?")
+    assert "offline=1" in settings.drawio_embed_url
+    assert "lang=zh" in settings.drawio_embed_url
+    assert settings.drawio_allow_nonlocal is False
 
 
 def test_importing_config_has_no_app_creation_logging_side_effect() -> None:
@@ -53,6 +59,8 @@ def test_settings_from_env_falls_back_to_openai_responses_route(
         "OPENAI_WEB_SEARCH_ENABLED",
         "OPENAI_WEB_SEARCH_CONTEXT_SIZE",
         "PATENT_CREATOR_DATA_DIR",
+        "PATENT_CREATOR_DRAWIO_EMBED_URL",
+        "PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PATENT_CREATOR_DATA_DIR", str(tmp_path))
@@ -94,6 +102,8 @@ def test_settings_from_env_treats_empty_values_as_default(
         "PATENT_CREATOR_LOG_LEVEL",
         "PATENT_CREATOR_LOG_BACKUP_DAYS",
         "PATENT_CREATOR_LOG_LLM_PAYLOAD",
+        "PATENT_CREATOR_DRAWIO_EMBED_URL",
+        "PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO",
     ):
         monkeypatch.setenv(name, "")
 
@@ -121,6 +131,26 @@ def test_settings_from_env_treats_empty_values_as_default(
     assert settings.log_level == "INFO"
     assert settings.log_backup_days == 30
     assert settings.log_llm_payload is False
+    assert settings.drawio_embed_url.startswith("http://127.0.0.1:8081/?")
+    assert "offline=1" in settings.drawio_embed_url
+    assert "lang=zh" in settings.drawio_embed_url
+    assert settings.drawio_allow_nonlocal is False
+
+
+def test_settings_require_explicit_opt_in_for_nonlocal_drawio(monkeypatch) -> None:
+    monkeypatch.setattr(config, "_load_repo_env", lambda: None)
+    monkeypatch.setenv("PATENT_CREATOR_DRAWIO_EMBED_URL", "https://embed.diagrams.net/")
+    monkeypatch.delenv("PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO", raising=False)
+
+    with pytest.raises(ValueError, match="PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO"):
+        Settings.from_env()
+
+    monkeypatch.setenv("PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO", "true")
+    settings = Settings.from_env()
+
+    assert settings.drawio_embed_url.startswith("https://embed.diagrams.net/")
+    assert "offline=1" in settings.drawio_embed_url
+    assert "lang=zh" in settings.drawio_embed_url
 
 
 def test_settings_from_env_expands_user_paths(monkeypatch) -> None:

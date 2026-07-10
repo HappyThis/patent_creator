@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass
 from typing import Any
@@ -37,10 +38,11 @@ class ExecutorEngine:
             declaration = get_tool_declaration(tool_name)
         except KeyError:
             return tool_failed("unsupported_tool", f"不支持的工具：{tool_name}")
-        if runtime_context is not None and "context" in inspect.signature(declaration.function).parameters:
-            result = declaration.function(self.store, project_id, arguments, context=runtime_context)
+        kwargs = {"context": runtime_context} if runtime_context is not None and "context" in inspect.signature(declaration.function).parameters else {}
+        if tool_name == "figure_kit":
+            result = await asyncio.to_thread(declaration.function, self.store, project_id, arguments, **kwargs)
         else:
-            result = declaration.function(self.store, project_id, arguments)
+            result = declaration.function(self.store, project_id, arguments, **kwargs)
         if inspect.isawaitable(result):
             return await result
         return result

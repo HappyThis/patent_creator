@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../../services/api/client';
+import { ApiRequestError } from '../../services/api/http';
 
 type FigureDrawioEditorModalProps = {
   projectId: string;
@@ -14,10 +15,6 @@ type PendingXmlRequest = {
   timer: number;
 };
 
-const DRAWIO_EMBED_URL =
-  'https://embed.diagrams.net/?embed=1&proto=json&spin=1&ui=min&libraries=1&noExitBtn=1&noSaveBtn=1&saveAndExit=0';
-const DRAWIO_ORIGIN = new URL(DRAWIO_EMBED_URL).origin;
-
 export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved }: FigureDrawioEditorModalProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const latestXmlRef = useRef('');
@@ -26,24 +23,24 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
   const [title, setTitle] = useState('');
   const [drawioXml, setDrawioXml] = useState('');
   const [drawioUpdatedAt, setDrawioUpdatedAt] = useState('');
+  const [drawioEmbedUrl, setDrawioEmbedUrl] = useState('');
+  const [drawioOrigin, setDrawioOrigin] = useState('');
   const [loading, setLoading] = useState(true);
   const [iframeReady, setIframeReady] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
 
   const postToDrawio = useCallback((message: Record<string, unknown>) => {
     const target = frameRef.current?.contentWindow;
-    if (!target) {
+    if (!target || !drawioOrigin) {
       return;
     }
-    target.postMessage(JSON.stringify(message), DRAWIO_ORIGIN);
-  }, []);
+    target.postMessage(JSON.stringify(message), drawioOrigin);
+  }, [drawioOrigin]);
 
-  const loadIntoEditor = useCallback(() => {
-    if (!latestXmlRef.current) {
-      return;
-    }
+  const postLoad = useCallback((xml: string, nextTitle: string) => {
     postToDrawio({
       action: 'load',
       autosave: 1,
@@ -51,22 +48,36 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
       noExitBtn: 1,
       noSaveBtn: 1,
       saveAndExit: '0',
-      title: title || '未命名附图',
-      xml: latestXmlRef.current,
+      title: nextTitle || '未命名附图',
+      xml,
     });
-  }, [postToDrawio, title]);
+  }, [postToDrawio]);
+
+  const loadIntoEditor = useCallback(() => {
+    if (!latestXmlRef.current) {
+      return;
+    }
+    postLoad(latestXmlRef.current, title);
+  }, [postLoad, title]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    apiClient
-      .getFigureDrawio(projectId, figureId)
-      .then((response) => {
+    setConflict(false);
+    setIframeReady(false);
+    Promise.all([apiClient.getRuntimeConfig(), apiClient.getFigureDrawio(projectId, figureId)])
+      .then(([config, response]) => {
         if (cancelled) {
           return;
         }
+        const embedUrl = config.drawio_embed_url;
+        if (!embedUrl) {
+          throw new Error('后端未配置 Draw.io 服务。');
+        }
         const figure = response.figure;
+        setDrawioEmbedUrl(embedUrl);
+        setDrawioOrigin(new URL(embedUrl).origin);
         latestXmlRef.current = figure.drawio_xml;
         loadedIntoEditorRef.current = false;
         setDrawioXml(figure.drawio_xml);
@@ -99,7 +110,7 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
-      if (event.origin !== DRAWIO_ORIGIN || event.source !== frameRef.current?.contentWindow || !event.data) {
+      if (!drawioOrigin || event.origin !== drawioOrigin || event.source !== frameRef.current?.contentWindow || !event.data) {
         return;
       }
       let message: Record<string, unknown>;
@@ -157,7 +168,17 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [drawioOrigin]);
+
+  useEffect(() => {
+    if (!drawioEmbedUrl || iframeReady) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setError('Draw.io 编辑器连接超时，请确认本地 Draw.io 服务已经启动。');
+    }, 15000);
+    return () => window.clearTimeout(timer);
+  }, [drawioEmbedUrl, iframeReady]);
 
   useEffect(() => {
     return () => {
@@ -210,15 +231,47 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
         expected_drawio_updated_at: drawioUpdatedAt,
       });
       setDrawioUpdatedAt(response.figure.drawio_updated_at);
+      setConflict(false);
       setDirty(false);
       onSaved();
       onClose();
     } catch (err: unknown) {
+      if (err instanceof ApiRequestError && err.code === 'drawio_conflict') {
+        setConflict(true);
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
   }, [drawioUpdatedAt, figureId, onClose, onSaved, projectId, requestCurrentXml, title]);
+
+  const handleReloadLatest = useCallback(async () => {
+    if (!window.confirm('加载最新版本会放弃当前未保存的修改，确定继续吗？')) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient.getFigureDrawio(projectId, figureId);
+      const figure = response.figure;
+      latestXmlRef.current = figure.drawio_xml;
+      setDrawioXml(figure.drawio_xml);
+      setTitle(figure.title);
+      setDrawioUpdatedAt(figure.drawio_updated_at);
+      setDirty(false);
+      setConflict(false);
+      if (iframeReady) {
+        loadedIntoEditorRef.current = true;
+        postLoad(figure.drawio_xml, figure.title);
+      } else {
+        loadedIntoEditorRef.current = false;
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [figureId, iframeReady, postLoad, projectId]);
 
   return (
     <div className="figure-editor-backdrop" role="dialog" aria-modal="true" aria-label="编辑附图">
@@ -245,14 +298,27 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
             </button>
           </div>
         </div>
-        {error ? <div className="figure-editor-error">{error}</div> : null}
+        {error ? (
+          <div className="figure-editor-error">
+            <span>{error}</span>
+            {conflict ? (
+              <button type="button" onClick={handleReloadLatest} disabled={loading || saving}>
+                加载最新版本
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="figure-editor-main figure-editor-main-drawio">
-          <iframe
-            ref={frameRef}
-            className="figure-editor-drawio-frame"
-            title="draw.io 附图编辑器"
-            src={DRAWIO_EMBED_URL}
-          />
+          {drawioEmbedUrl ? (
+            <iframe
+              ref={frameRef}
+              className="figure-editor-drawio-frame"
+              title="draw.io 附图编辑器"
+              src={drawioEmbedUrl}
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+              onError={() => setError('Draw.io 编辑器加载失败，请检查服务地址和运行状态。')}
+            />
+          ) : null}
           {loading ? <div className="figure-editor-loading">正在加载 draw.io 附图...</div> : null}
         </div>
       </div>

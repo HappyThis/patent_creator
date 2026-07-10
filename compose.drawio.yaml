@@ -1,0 +1,6 @@
+services:
+  drawio:
+    image: jgraph/drawio:30.2.4
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"

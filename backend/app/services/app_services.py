@@ -11,7 +11,13 @@ from .event_bus import SessionEventBus
 class AppServices:
     def __init__(self, settings: Settings, llm_client: SupportsChatLLM | None = None) -> None:
         self.settings = settings
-        self.store = WorkspaceStore(settings.data_dir, settings.git_user_name, settings.git_user_email)
+        self.store = WorkspaceStore(
+            settings.data_dir,
+            settings.git_user_name,
+            settings.git_user_email,
+            drawio_embed_url=settings.drawio_embed_url,
+            drawio_allow_nonlocal=settings.drawio_allow_nonlocal,
+        )
         self.context_manager = ContextManager(self.store, settings)
         self.llm_client: SupportsChatLLM = llm_client or OpenAIResponsesClient(settings)
         self.executor = ExecutorEngine(self.store)

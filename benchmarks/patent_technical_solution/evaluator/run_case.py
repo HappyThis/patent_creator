@@ -18,29 +18,9 @@ DEFAULT_REFINEMENT_INSTRUCTION = (
     "请继续充实交底书中的“技术方案”章节。只允许编辑“技术方案”章节；"
     "正文应聚焦解决方法、必要技术特征、协同机理和技术效果，不要写成验证计划或实施任务清单。"
 )
-MODES = ("solution", "figure", "combined")
-RUNNER_FILES = {
-    "solution": "runner.md",
-    "figure": "figure_runner.md",
-    "combined": "combined_runner.md",
-}
-JUDGE_FILES = {
-    "solution": "judge.md",
-    "figure": "figure_judge.md",
-    "combined": "combined_judge.md",
-}
-REFINEMENT_INSTRUCTIONS = {
-    "solution": DEFAULT_REFINEMENT_INSTRUCTION,
-    "figure": (
-        "请继续完善本 case 的附图表达。仍需基于探索环境中的技术事实；"
-        "如果尚未生成附图，请使用 figure_kit 生成能帮助理解技术机制的图；"
-        "如果已生成附图，请优先读取并更新已有图，而不是新增无实质信息的图。"
-    ),
-    "combined": (
-        "请继续完善“技术方案”章节及其附图表达。正文应保持技术方案深度，"
-        "附图应帮助理解关键结构、流程、状态、边界或数据流，并确保正文与附图一致。"
-    ),
-}
+RUNNER_FILE = "runner.md"
+JUDGE_FILE = "judge.md"
+SKIPPED_STATUS = "skipped_no_solution_artifact"
 if str(EVALUATOR_DIR) not in sys.path:
     sys.path.insert(0, str(EVALUATOR_DIR))
 
@@ -59,7 +39,6 @@ def main() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one patent technical solution benchmark case.")
     parser.add_argument("--case", required=True, help="Case id, e.g. 001.")
-    parser.add_argument("--mode", choices=MODES, default="solution", help="Benchmark mode.")
     parser.add_argument("--run-id", default=None, help="Run id. Defaults to timestamp + case id.")
     parser.add_argument("--runs-dir", default=str(BENCHMARK_DIR / "runs"), help="Directory for run artifacts.")
     parser.add_argument("--skip-judge", action="store_true", help="Only run the subject agent and extract artifact.")
@@ -77,7 +56,6 @@ def parse_args() -> argparse.Namespace:
 
 async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     case_id = str(args.case).zfill(3)
-    mode = str(args.mode)
     case_dir = BENCHMARK_DIR / "cases" / case_id
     if not case_dir.exists():
         raise SystemExit(f"case 不存在：{case_id}")
@@ -87,7 +65,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         if args.max_refinement_rounds is not None
         else DEFAULT_MAX_REFINEMENT_ROUNDS
     )
-    refinement_instruction = REFINEMENT_INSTRUCTIONS[mode]
+    refinement_instruction = DEFAULT_REFINEMENT_INSTRUCTION
 
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S") + f"-{case_id}"
     run_dir = Path(args.runs_dir).resolve() / run_id
@@ -101,7 +79,6 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     case_run_dir.mkdir(parents=True, exist_ok=True)
     run_config = {
         "case_id": case_id,
-        "mode": mode,
         "skip_judge": bool(args.skip_judge),
         "skip_subject": bool(args.skip_subject),
         "round_timeout_seconds": args.round_timeout,
@@ -127,7 +104,6 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         progress("prepare", "exploration environment prepared", prepared_environment=str(prepared_environment))
         progress("subject", "subject agent started", max_refinement_rounds=max_refinements)
         technical_solution_md, subject_status, diagnostics = await run_subject_agent(
-            mode=mode,
             case_id=case_id,
             prepared_environment=prepared_environment,
             request_md=request_md,
@@ -138,16 +114,12 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             progress=progress,
         )
         write_artifact(artifact_path, technical_solution_md)
-        figure_manifest = write_figure_manifest(case_run_dir)
-        diagnostics["figure_manifest"] = figure_manifest
         progress(
             "artifact",
             "evaluated artifact written",
             artifact_path=str(artifact_path),
             subject_status=subject_status,
             artifact_extracted=has_effective_solution(technical_solution_md),
-            mode_output_extracted=diagnostics.get("mode_output_extracted"),
-            figure_artifact_count=diagnostics.get("figure_artifact_count"),
         )
     else:
         progress(
@@ -158,13 +130,9 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         prepare_exploration_environment(case_dir, prepared_environment)
         technical_solution_md = artifact_path.read_text(encoding="utf-8") if artifact_path.exists() else ""
         subject_status, diagnostics = resolve_reused_subject_state(
-            mode,
             technical_solution_md,
-            subject_dir,
             read_existing_diagnostics(case_run_dir),
         )
-        figure_manifest = write_figure_manifest(case_run_dir)
-        diagnostics["figure_manifest"] = figure_manifest
         progress(
             "subject",
             "reused existing evaluated artifact",
@@ -177,7 +145,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         "run_id": run_id,
         "prepared_environment": str(prepared_environment),
         "agent_visible_text_inputs": [
-            RUNNER_FILES[mode],
+            RUNNER_FILE,
             "exploration environment absolute path line",
             "request.md",
         ],
@@ -192,14 +160,14 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_json(case_run_dir / "diagnostics.json", diagnostics)
 
-    if subject_status == "round_failed" or not diagnostics.get("mode_output_extracted"):
+    if subject_status == "round_failed" or not diagnostics.get("artifact_extracted"):
         result = {"status": subject_status, **manifest, "diagnostics": diagnostics}
         write_result(case_run_dir, result)
         progress("result", "case ended before judge", status=subject_status, result_path=str(case_run_dir / "result.json"))
         return result
 
     if args.skip_judge:
-        result_status = "artifact_extracted" if diagnostics.get("mode_output_extracted") else subject_status
+        result_status = "artifact_extracted" if diagnostics.get("artifact_extracted") else subject_status
         result = {"status": result_status, **manifest, "diagnostics": diagnostics}
         write_result(case_run_dir, result)
         progress("result", "case ended with judge skipped", status=result_status, result_path=str(case_run_dir / "result.json"))
@@ -207,14 +175,11 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
 
     try:
         progress("judge", "judge started", timeout_seconds=args.judge_timeout)
-        judge_working_dir = prepared_environment if mode == "solution" else case_run_dir
         judge_result = run_codex_judge(
-            mode=mode,
-            working_dir=judge_working_dir,
-            case_run_dir=case_run_dir if mode != "solution" else None,
+            working_dir=prepared_environment,
             request_md=request_md,
             evaluated_artifact_md=technical_solution_md,
-            judge_md=(BENCHMARK_DIR / JUDGE_FILES[mode]).read_text(encoding="utf-8"),
+            judge_md=(BENCHMARK_DIR / JUDGE_FILE).read_text(encoding="utf-8"),
             rubric_md=(case_dir / "rubric.md").read_text(encoding="utf-8"),
             reference_solution_md=(case_dir / "reference_solution.md").read_text(encoding="utf-8"),
             output_dir=judge_dir,
@@ -246,7 +211,6 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
 
 async def run_subject_agent(
     *,
-    mode: str,
     case_id: str,
     prepared_environment: Path,
     request_md: str,
@@ -281,7 +245,7 @@ async def run_subject_agent(
     progress("subject", "benchmark project created", project_id=project.project_id)
 
     session_id: str | None = None
-    runner_md = (BENCHMARK_DIR / RUNNER_FILES[mode]).read_text(encoding="utf-8")
+    runner_md = (BENCHMARK_DIR / RUNNER_FILE).read_text(encoding="utf-8")
     initial_message = "\n\n".join(
         [
             runner_md,
@@ -292,7 +256,7 @@ async def run_subject_agent(
 
     messages = [initial_message, *([refinement_instruction] * max_refinements)]
     technical_solution_md = ""
-    status = skipped_status(mode)
+    status = SKIPPED_STATUS
     rounds_run = 0
 
     for index, message in enumerate(messages):
@@ -320,16 +284,12 @@ async def run_subject_agent(
             write_artifact(artifact_after_round, technical_solution_md)
             dump_session_events(services, project.project_id, session_id, subject_dir / "session_events.jsonl")
             technical_solution_extracted = has_effective_solution(technical_solution_md)
-            figure_artifact_count = count_figure_artifacts(subject_dir)
-            mode_output_extracted = has_mode_output(mode, technical_solution_md, subject_dir)
             progress(
                 "subject_round",
                 "round timed out",
                 round=rounds_run,
                 timeout_seconds=round_timeout,
                 artifact_extracted=technical_solution_extracted,
-                mode_output_extracted=mode_output_extracted,
-                figure_artifact_count=figure_artifact_count,
                 artifact_path=str(artifact_after_round),
                 error=str(exc),
             )
@@ -344,18 +304,14 @@ async def run_subject_agent(
         dump_session_events(services, project.project_id, session_id, subject_dir / "session_events.jsonl")
         events = services.store.read_session_events(project.project_id, session_id)
         technical_solution_extracted = has_effective_solution(technical_solution_md)
-        figure_artifact_count = count_figure_artifacts(subject_dir)
-        mode_output_extracted = has_mode_output(mode, technical_solution_md, subject_dir)
         progress(
             "subject_round",
             "round completed",
             round=rounds_run,
             artifact_extracted=technical_solution_extracted,
-            mode_output_extracted=mode_output_extracted,
-            figure_artifact_count=figure_artifact_count,
             artifact_path=str(subject_dir / f"technical_solution_after_round_{index + 1}.md"),
         )
-        if mode_output_extracted:
+        if technical_solution_extracted:
             status = "completed" if index == 0 else "completed_after_refinement"
             break
         if round_failed(events, response.round_id):
@@ -369,12 +325,9 @@ async def run_subject_agent(
     events = services.store.read_session_events(project.project_id, session_id) if session_id else []
     diagnostics = build_diagnostics(
         events,
-        mode=mode,
         subject_status=status,
         rounds_run=rounds_run,
         artifact_extracted=has_effective_solution(technical_solution_md),
-        mode_output_extracted=has_mode_output(mode, technical_solution_md, subject_dir),
-        figure_artifact_count=count_figure_artifacts(subject_dir),
     )
     return technical_solution_md, status, diagnostics
 
@@ -434,80 +387,12 @@ def mark_project_idle(services: Any, project_id: str) -> None:
     services.store.save_project(project)
 
 
-def skipped_status(mode: str) -> str:
-    if mode == "solution":
-        return "skipped_no_solution_artifact"
-    return "skipped_no_mode_artifact"
-
-
-def has_mode_output(mode: str, technical_solution_md: str, subject_dir: Path) -> bool:
-    has_solution = has_effective_solution(technical_solution_md)
-    has_figures = count_figure_artifacts(subject_dir) > 0
-    if mode == "solution":
-        return has_solution
-    if mode == "figure":
-        return has_figures
-    if mode == "combined":
-        return has_solution and has_figures
-    raise ValueError(f"unknown benchmark mode: {mode}")
-
-
-def count_figure_artifacts(subject_dir: Path) -> int:
-    return len(collect_figure_artifacts(subject_dir))
-
-
-def collect_figure_artifacts(subject_dir: Path) -> list[dict[str, Any]]:
-    projects_dir = subject_dir / "data" / "projects"
-    if not projects_dir.exists():
-        return []
-    artifacts: list[dict[str, Any]] = []
-    for figure_json in sorted(projects_dir.glob("*/assets/figures/fig_*/figure.json")):
-        figure_dir = figure_json.parent
-        diagram_html = figure_dir / "diagram.html"
-        render_png = figure_dir / "render.png"
-        if not diagram_html.exists() or not render_png.exists():
-            continue
-        project_dir = figure_json.parents[3]
-        item: dict[str, Any] = {
-            "project_id": project_dir.name,
-            "figure_id": figure_dir.name,
-            "figure_json": str(figure_json.relative_to(subject_dir)),
-            "diagram_html": str(diagram_html.relative_to(subject_dir)),
-            "render_png": str(render_png.relative_to(subject_dir)),
-        }
-        try:
-            metadata = json.loads(figure_json.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            metadata = {}
-        if isinstance(metadata, dict):
-            item["title"] = metadata.get("title") or ""
-            item["caption"] = f"{metadata.get('label') or ''} {metadata.get('title') or ''}".strip()
-        artifacts.append(item)
-    return artifacts
-
-
-def write_figure_manifest(case_run_dir: Path) -> dict[str, Any]:
-    subject_dir = case_run_dir / "subject"
-    figures = collect_figure_artifacts(subject_dir)
-    manifest = {
-        "schema_version": 1,
-        "figure_count": len(figures),
-        "figures": figures,
-        "search_root": "subject/data/projects/*/assets/figures/",
-    }
-    write_json(case_run_dir / "figure_manifest.json", manifest)
-    return manifest
-
-
 def build_diagnostics(
     events: list[Any],
     *,
-    mode: str,
     subject_status: str,
     rounds_run: int,
     artifact_extracted: bool,
-    mode_output_extracted: bool,
-    figure_artifact_count: int,
     judge_failed: bool = False,
 ) -> dict[str, Any]:
     round_failed_flag = any(
@@ -517,14 +402,10 @@ def build_diagnostics(
     )
     return {
         "subject_status": subject_status,
-        "mode": mode,
         "rounds_run": rounds_run,
         "refinement_attempts": max(0, rounds_run - 1),
         "artifact_extracted": artifact_extracted,
-        "mode_output_extracted": mode_output_extracted,
-        "figure_artifact_count": figure_artifact_count,
         "skipped_no_solution_artifact": subject_status == "skipped_no_solution_artifact",
-        "skipped_no_mode_artifact": subject_status == "skipped_no_mode_artifact",
         "round_failed": subject_status == "round_failed" or round_failed_flag,
         "judge_failed": judge_failed,
     }
@@ -553,58 +434,43 @@ def read_existing_diagnostics(case_run_dir: Path) -> dict[str, Any] | None:
 
 
 def resolve_reused_subject_state(
-    mode: str,
     technical_solution_md: str,
-    subject_dir: Path,
     existing_diagnostics: dict[str, Any] | None,
 ) -> tuple[str, dict[str, Any]]:
     artifact_extracted = has_effective_solution(technical_solution_md)
-    mode_output_extracted = has_mode_output(mode, technical_solution_md, subject_dir)
-    fallback_status = "completed" if mode_output_extracted else skipped_status(mode)
+    fallback_status = "completed" if artifact_extracted else SKIPPED_STATUS
     if existing_diagnostics:
         diagnostics = normalize_content_diagnostics(
             existing_diagnostics,
-            mode=mode,
-            subject_dir=subject_dir,
             technical_solution_md=technical_solution_md,
             fallback_status=fallback_status,
         )
         return str(diagnostics["subject_status"]), diagnostics
     return fallback_status, build_diagnostics(
         [],
-        mode=mode,
         subject_status=fallback_status,
         rounds_run=0,
         artifact_extracted=artifact_extracted,
-        mode_output_extracted=mode_output_extracted,
-        figure_artifact_count=count_figure_artifacts(subject_dir),
     )
 
 
 def normalize_content_diagnostics(
     diagnostics: dict[str, Any],
     *,
-    mode: str,
-    subject_dir: Path,
     technical_solution_md: str,
     fallback_status: str,
 ) -> dict[str, Any]:
     subject_status = str(diagnostics.get("subject_status") or fallback_status)
     rounds_run = int(diagnostics.get("rounds_run") or 0)
     artifact_extracted = has_effective_solution(technical_solution_md)
-    mode_output_extracted = has_mode_output(mode, technical_solution_md, subject_dir)
-    if mode_output_extracted and subject_status == "round_failed":
+    if artifact_extracted and subject_status == "round_failed":
         subject_status = fallback_status
     return {
         "subject_status": subject_status,
-        "mode": mode,
         "rounds_run": rounds_run,
         "refinement_attempts": max(0, rounds_run - 1),
         "artifact_extracted": artifact_extracted,
-        "mode_output_extracted": mode_output_extracted,
-        "figure_artifact_count": count_figure_artifacts(subject_dir),
         "skipped_no_solution_artifact": subject_status == "skipped_no_solution_artifact",
-        "skipped_no_mode_artifact": subject_status == "skipped_no_mode_artifact",
         "round_failed": subject_status == "round_failed" or bool(diagnostics.get("round_failed")),
         "judge_failed": bool(diagnostics.get("judge_failed")),
     }

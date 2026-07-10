@@ -1,0 +1,19 @@
+<mxfile host="patent-creator-smoke">
+  <diagram name="Renderer smoke test">
+    <mxGraphModel page="1" pageWidth="1500" pageHeight="900" grid="1" gridSize="10">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="source" value="Source" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#111111;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="300" y="380" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="target" value="Target" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#111111;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="900" y="380" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="flow" value="flow" style="endArrow=block;html=1;rounded=0;strokeColor=#111111;" edge="1" parent="1" source="source" target="target">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

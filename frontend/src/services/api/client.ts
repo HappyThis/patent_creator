@@ -10,6 +10,7 @@ import {
 import { requestFile, requestJson } from './http';
 
 export type ApiClient = {
+  getRuntimeConfig: () => Promise<{ drawio_embed_url: string }>;
   listProjects: () => Promise<{ projects: ProjectState[] }>;
   createProject: (payload: { project_name: string; disclosure_title?: string | null }) => Promise<ProjectState>;
   renameProject: (project_id: string, payload: { project_name: string }) => Promise<ProjectState>;
@@ -58,6 +59,9 @@ export type ApiClient = {
 };
 
 export const apiClient: ApiClient = {
+  async getRuntimeConfig() {
+    return requestJson<{ drawio_embed_url: string }>('/api/runtime-config');
+  },
   async listProjects() {
     return requestJson<{ projects: ProjectState[] }>('/api/projects');
   },

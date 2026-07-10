@@ -51,7 +51,6 @@ def main() -> None:
             "cases": normalized_case_ids,
             "repeats": args.repeats,
             "workers": args.workers,
-            "mode": args.mode,
             "round_timeout_seconds": args.round_timeout,
             "judge_timeout_seconds": args.judge_timeout,
             "skip_judge": bool(args.skip_judge),
@@ -122,8 +121,6 @@ def run_one_job(job: dict[str, Any], *, args: argparse.Namespace, runs_dir: Path
         str(args.round_timeout),
         "--judge-timeout",
         str(args.judge_timeout),
-        "--mode",
-        str(args.mode),
     ]
     if args.skip_judge:
         command.append("--skip-judge")
@@ -249,7 +246,7 @@ def aggregate_results(results: list[dict[str, Any]], *, case_ids: list[str]) -> 
         artifact_successes = [
             item
             for item in parsed
-            if mode_output_extracted(item)
+            if artifact_extracted(item)
             and item.get("subject_status") in {"completed", "completed_after_refinement"}
         ]
         status_counts = count_statuses(parsed)
@@ -271,31 +268,15 @@ def aggregate_results(results: list[dict[str, Any]], *, case_ids: list[str]) -> 
             "failure_statuses": failure_statuses,
             "top_weaknesses": top_text_items(scored, "weaknesses"),
             "top_missing_key_mechanisms": top_text_items(scored, "missing_key_mechanisms"),
-            "top_missing_visual_mechanisms": top_text_items(scored, "missing_visual_mechanisms"),
-            "top_figure_issues": top_text_items(scored, "figure_issues"),
-            "top_shape_issues": top_text_items(scored, "shape_issues"),
-            "top_layout_issues": top_text_items(scored, "layout_issues"),
-            "top_connector_issues": top_text_items(scored, "connector_issues"),
-            "top_text_issues": top_text_items(scored, "text_issues"),
-            "top_score_caps_applied": top_text_items(scored, "score_caps_applied"),
-            "solution_scores": numeric_judge_values(scored, "solution_score"),
-            "figure_scores": numeric_judge_values(scored, "figure_score"),
-            "integration_scores": numeric_judge_values(scored, "integration_score"),
-            "shape_scores": numeric_nested_judge_values(scored, "visual_quality_scores", "shape_score"),
-            "layout_scores": numeric_nested_judge_values(scored, "visual_quality_scores", "layout_score"),
-            "connector_scores": numeric_nested_judge_values(scored, "visual_quality_scores", "connector_score"),
-            "text_scores": numeric_nested_judge_values(scored, "visual_quality_scores", "text_score"),
         }
         rows.append(row)
     return rows
 
 
-def mode_output_extracted(result: dict[str, Any]) -> bool:
+def artifact_extracted(result: dict[str, Any]) -> bool:
     diagnostics = result.get("diagnostics")
     if not isinstance(diagnostics, dict):
         return False
-    if "mode_output_extracted" in diagnostics:
-        return diagnostics.get("mode_output_extracted") is True
     return diagnostics.get("artifact_extracted") is True
 
 
@@ -318,27 +299,6 @@ def top_text_items(scored: list[dict[str, Any]], key: str, *, limit: int = 5) ->
             if text:
                 counts[text] = counts.get(text, 0) + 1
     return [text for text, _count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[:limit]]
-
-
-def numeric_judge_values(scored: list[dict[str, Any]], key: str) -> list[float]:
-    values: list[float] = []
-    for item in scored:
-        value = item.get("judge", {}).get(key)
-        if isinstance(value, int | float):
-            values.append(float(value))
-    return values
-
-
-def numeric_nested_judge_values(scored: list[dict[str, Any]], parent_key: str, key: str) -> list[float]:
-    values: list[float] = []
-    for item in scored:
-        parent = item.get("judge", {}).get(parent_key)
-        if not isinstance(parent, dict):
-            continue
-        value = parent.get(key)
-        if isinstance(value, int | float):
-            values.append(float(value))
-    return values
 
 
 def render_report(
@@ -386,8 +346,7 @@ def render_report(
         )
     if run_config:
         lines.append(
-            "- 运行参数：mode=`{mode}`，workers=`{workers}`，round_timeout=`{round_timeout}`，judge_timeout=`{judge_timeout}`，skip_judge=`{skip_judge}`".format(
-                mode=run_config.get("mode", "solution"),
+            "- 运行参数：workers=`{workers}`，round_timeout=`{round_timeout}`，judge_timeout=`{judge_timeout}`，skip_judge=`{skip_judge}`".format(
                 workers=run_config.get("workers", "-"),
                 round_timeout=run_config.get("round_timeout_seconds", "-"),
                 judge_timeout=run_config.get("judge_timeout_seconds", "-"),
@@ -441,54 +400,6 @@ def render_report(
             lines.append("- 主要缺失机制：")
             for item in row["top_missing_key_mechanisms"][:3]:
                 lines.append(f"  - {item}")
-        if row["top_missing_visual_mechanisms"]:
-            lines.append("- 主要缺失视觉机制：")
-            for item in row["top_missing_visual_mechanisms"][:3]:
-                lines.append(f"  - {item}")
-        if row["top_figure_issues"]:
-            lines.append("- 主要附图问题：")
-            for item in row["top_figure_issues"][:3]:
-                lines.append(f"  - {item}")
-        if row["top_shape_issues"]:
-            lines.append("- 主要形状问题：")
-            for item in row["top_shape_issues"][:3]:
-                lines.append(f"  - {item}")
-        if row["top_layout_issues"]:
-            lines.append("- 主要布局问题：")
-            for item in row["top_layout_issues"][:3]:
-                lines.append(f"  - {item}")
-        if row["top_connector_issues"]:
-            lines.append("- 主要连接/箭头问题：")
-            for item in row["top_connector_issues"][:3]:
-                lines.append(f"  - {item}")
-        if row["top_text_issues"]:
-            lines.append("- 主要文字问题：")
-            for item in row["top_text_issues"][:3]:
-                lines.append(f"  - {item}")
-        if row["top_score_caps_applied"]:
-            lines.append("- 适用封顶规则：")
-            for item in row["top_score_caps_applied"][:3]:
-                lines.append(f"  - {item}")
-        subscore_lines = []
-        if row["solution_scores"]:
-            subscore_lines.append(f"solution={format_optional_number(mean(row['solution_scores']))}")
-        if row["figure_scores"]:
-            subscore_lines.append(f"figure={format_optional_number(mean(row['figure_scores']))}")
-        if row["integration_scores"]:
-            subscore_lines.append(f"integration={format_optional_number(mean(row['integration_scores']))}")
-        if subscore_lines:
-            lines.append(f"- 子分平均：{', '.join(subscore_lines)}")
-        visual_score_lines = []
-        if row["shape_scores"]:
-            visual_score_lines.append(f"shape={format_optional_number(mean(row['shape_scores']))}")
-        if row["layout_scores"]:
-            visual_score_lines.append(f"layout={format_optional_number(mean(row['layout_scores']))}")
-        if row["connector_scores"]:
-            visual_score_lines.append(f"connector={format_optional_number(mean(row['connector_scores']))}")
-        if row["text_scores"]:
-            visual_score_lines.append(f"text={format_optional_number(mean(row['text_scores']))}")
-        if visual_score_lines:
-            lines.append(f"- 视觉子分平均：{', '.join(visual_score_lines)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -516,7 +427,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--round-timeout", type=int, default=1800)
     parser.add_argument("--judge-timeout", type=int, default=1800)
-    parser.add_argument("--mode", choices=("solution", "figure", "combined"), default="solution")
     parser.add_argument("--workers", type=int, default=1, help="Number of cases to run concurrently.")
     parser.add_argument("--skip-judge", action="store_true")
     args = parser.parse_args()

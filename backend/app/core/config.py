@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..drawio_config import DEFAULT_DRAWIO_EMBED_URL, normalize_drawio_embed_url
+
 
 @dataclass(slots=True)
 class Settings:
@@ -32,6 +34,14 @@ class Settings:
     log_level: str = "INFO"
     log_backup_days: int = 30
     log_llm_payload: bool = False
+    drawio_embed_url: str = DEFAULT_DRAWIO_EMBED_URL
+    drawio_allow_nonlocal: bool = False
+
+    def __post_init__(self) -> None:
+        self.drawio_embed_url = normalize_drawio_embed_url(
+            self.drawio_embed_url,
+            allow_nonlocal=self.drawio_allow_nonlocal,
+        )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -39,6 +49,11 @@ class Settings:
         repo_dir = Path(__file__).resolve().parents[3]
         data_dir = Path(_env_or("PATENT_CREATOR_DATA_DIR", str(Path.home() / ".patent_creator"))).expanduser()
         log_dir = Path(_env_or("PATENT_CREATOR_LOG_DIR", str(repo_dir / "logs"))).expanduser()
+        drawio_allow_nonlocal = _parse_bool_env(os.getenv("PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO"), False)
+        drawio_embed_url = normalize_drawio_embed_url(
+            _env_or("PATENT_CREATOR_DRAWIO_EMBED_URL", DEFAULT_DRAWIO_EMBED_URL),
+            allow_nonlocal=drawio_allow_nonlocal,
+        )
         return cls(
             data_dir=data_dir,
             git_user_name=_env_or("PATENT_CREATOR_GIT_USER_NAME", "Patent Creator"),
@@ -77,6 +92,8 @@ class Settings:
             log_level=_env_or("PATENT_CREATOR_LOG_LEVEL", "INFO"),
             log_backup_days=_parse_int_env(os.getenv("PATENT_CREATOR_LOG_BACKUP_DAYS"), 30),
             log_llm_payload=_parse_bool_env(os.getenv("PATENT_CREATOR_LOG_LLM_PAYLOAD"), False),
+            drawio_embed_url=drawio_embed_url,
+            drawio_allow_nonlocal=drawio_allow_nonlocal,
         )
 
 

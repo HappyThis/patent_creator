@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -58,19 +59,18 @@ def create_document_router(services: AppServices) -> APIRouter:
 
     @router.get("/figures/{figure_id}/drawio")
     async def get_figure_drawio(project_id: str, figure_id: str) -> dict:
-        figure = services.store.get_figure(project_id, figure_id)
-        if figure is None:
-            raise ApiError(404, "figure_not_found", f"figure 不存在：{figure_id}")
-        drawio_xml = services.store.read_figure_drawio_xml(project_id, figure_id)
-        if drawio_xml is None:
-            raise ApiError(404, "figure_drawio_not_found", f"figure draw.io XML 不存在：{figure_id}")
+        snapshot = await asyncio.to_thread(services.store.get_figure_with_drawio, project_id, figure_id)
+        if snapshot is None:
+            raise ApiError(404, "figure_not_found", f"figure 或 draw.io XML 不存在：{figure_id}")
+        figure, drawio_xml = snapshot
         payload = figure_summary(figure)
         payload["drawio_xml"] = drawio_xml
         return {"figure": payload}
 
     @router.put("/figures/{figure_id}/drawio")
     async def save_figure_drawio(project_id: str, figure_id: str, payload: FigureDrawioSaveRequest) -> dict:
-        result = services.store.update_figure(
+        result = await asyncio.to_thread(
+            services.store.update_figure,
             project_id,
             figure_id,
             title=payload.title.strip() if payload.title is not None else None,
@@ -98,6 +98,12 @@ def _raise_figure_drawio_error(output: dict[str, Any]) -> None:
         raise ApiError(404, code, message)
     if code == "drawio_conflict":
         raise ApiError(409, code, message)
-    if code in {"drawio_xml_validation_failed", "drawio_read_required", "drawio_xml_required"}:
+    if code in {
+        "drawio_xml_validation_failed",
+        "drawio_canvas_invalid",
+        "drawio_canvas_overflow",
+        "drawio_read_required",
+        "drawio_xml_required",
+    }:
         raise ApiError(422, code, message)
     raise ApiError(500, code, message)

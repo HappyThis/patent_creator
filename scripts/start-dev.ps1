@@ -265,6 +265,130 @@ function Sync-Frontend {
     return $NpmCommand
 }
 
+function Test-BundledDrawioUrl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Url
+    )
+
+    try {
+        $Uri = [System.Uri] $Url
+    }
+    catch {
+        return $false
+    }
+
+    return (
+        $Uri.Scheme -eq "http" -and
+        ($Uri.Host -eq "127.0.0.1" -or $Uri.Host -eq "localhost") -and
+        $Uri.Port -eq 8081
+    )
+}
+
+function Test-DrawioReady {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Url
+    )
+
+    try {
+        $Response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 2 -UseBasicParsing
+        return $Response.StatusCode -lt 400
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-DockerDaemon {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DockerPath
+    )
+
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $StartInfo.FileName = $DockerPath
+    $StartInfo.Arguments = "info"
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.CreateNoWindow = $true
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    $Process = [System.Diagnostics.Process]::new()
+    $Process.StartInfo = $StartInfo
+
+    try {
+        if (-not $Process.Start()) {
+            return $false
+        }
+
+        if (-not $Process.WaitForExit(8000)) {
+            $Process.Kill()
+            $Process.WaitForExit()
+            return $false
+        }
+
+        return $Process.ExitCode -eq 0
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $Process.Dispose()
+    }
+}
+
+function Start-Drawio {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $EmbedUrl,
+
+        [Parameter(Mandatory = $true)]
+        [string] $ComposeFile
+    )
+
+    $LocalUrl = "http://127.0.0.1:8081/"
+    if (-not (Test-BundledDrawioUrl -Url $EmbedUrl)) {
+        Write-Host "Using externally managed Draw.io: $EmbedUrl"
+        return
+    }
+
+    if (Test-DrawioReady -Url $LocalUrl) {
+        Write-Host "Draw.io is already running on $LocalUrl"
+        return
+    }
+
+    $Docker = Get-DevCommand -Names @("docker.exe", "docker")
+    if ($null -eq $Docker) {
+        throw "Docker is required to start the local Draw.io service. Install and start Docker Desktop, then run this script again."
+    }
+
+    & $Docker.Source compose version *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker Compose v2 is required to start the local Draw.io service."
+    }
+
+    if (-not (Test-DockerDaemon -DockerPath $Docker.Source)) {
+        throw "Docker is installed, but the Docker daemon is not running. Start Docker Desktop, then run this script again."
+    }
+
+    Write-Host "Starting local Draw.io on $LocalUrl"
+    & $Docker.Source compose -f $ComposeFile up -d | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to start the local Draw.io service."
+    }
+
+    for ($Attempt = 1; $Attempt -le 60; $Attempt++) {
+        if (Test-DrawioReady -Url $LocalUrl) {
+            Write-Host "Draw.io is ready."
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    & $Docker.Source compose -f $ComposeFile ps | Out-Host
+    throw "Draw.io did not become ready within 60 seconds."
+}
+
 Import-DotEnv -Path (Join-Path $RepoRoot ".env")
 
 $BackendHost = Get-EnvOrDefault -Name "BACKEND_HOST" -Default "127.0.0.1"
@@ -272,7 +396,9 @@ $BackendPort = Get-EnvOrDefault -Name "BACKEND_PORT" -Default "8000"
 $FrontendHost = Get-EnvOrDefault -Name "FRONTEND_HOST" -Default "127.0.0.1"
 $FrontendPort = Get-EnvOrDefault -Name "FRONTEND_PORT" -Default "5173"
 $ViteApiBaseUrl = Get-EnvOrDefault -Name "VITE_API_BASE_URL" -Default "http://${BackendHost}:${BackendPort}"
+$DrawioEmbedUrl = Get-EnvOrDefault -Name "PATENT_CREATOR_DRAWIO_EMBED_URL" -Default "http://127.0.0.1:8081/"
 [Environment]::SetEnvironmentVariable("VITE_API_BASE_URL", $ViteApiBaseUrl, "Process")
+[Environment]::SetEnvironmentVariable("PATENT_CREATOR_DRAWIO_EMBED_URL", $DrawioEmbedUrl, "Process")
 
 if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("PATENT_CREATOR_CORS_ALLOW_ORIGINS", "Process"))) {
     $CorsAllowOrigins = "http://${FrontendHost}:${FrontendPort},http://localhost:${FrontendPort}"
@@ -288,6 +414,7 @@ if (-not (Test-Path -LiteralPath $BackendPython)) {
 
 $BackendCommand = $BackendPython
 $BackendArguments = @("-m", "uvicorn", "app.api.app:app", "--reload", "--host", $BackendHost, "--port", $BackendPort)
+Start-Drawio -EmbedUrl $DrawioEmbedUrl -ComposeFile (Join-Path $RepoRoot "compose.drawio.yaml")
 $NpmCommand = Sync-Frontend -Directory $FrontendDir
 
 Assert-PortAvailable -Name "BACKEND" -HostName $BackendHost -Port ([int] $BackendPort)
@@ -317,6 +444,9 @@ try {
     Write-Host "Patent Creator dev stack is starting..."
     Write-Host "Frontend: http://${FrontendHost}:${FrontendPort}"
     Write-Host "Backend:  http://${BackendHost}:${BackendPort}"
+    if (Test-BundledDrawioUrl -Url $DrawioEmbedUrl) {
+        Write-Host "Draw.io:  http://127.0.0.1:8081/"
+    }
     Write-Host "Press Ctrl+C to stop both processes."
     Write-Host ""
 

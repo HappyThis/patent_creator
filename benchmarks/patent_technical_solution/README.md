@@ -12,6 +12,10 @@ The benchmark does not reward implementation paths, validation plans, interface
 catalogs, or delivery checklists unless they are themselves part of the
 technical means being disclosed.
 
+This benchmark has a single evaluation target: the generated `技术方案` section.
+It does not score figure-only output, combined text+figure output, or visual
+quality of rendered images.
+
 Current cases are software-project cases: the evaluator clones the repository
 described by `snapshot.json` at the frozen commit and materializes it under
 `prepared_environment/project_snapshot/`. The subject agent must explore that

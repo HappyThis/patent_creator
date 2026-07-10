@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const DEFAULT_DRAWIO_URL = 'https://embed.diagrams.net/?embed=1&proto=json&spin=1&ui=min&libraries=0&noExitBtn=1&noSaveBtn=1';
+const DEFAULT_DRAWIO_URL = 'http://127.0.0.1:8081/?offline=1&https=0&embed=1&proto=json&spin=1&ui=min&libraries=1&noExitBtn=1&noSaveBtn=1&saveAndExit=0';
 
 function parseArgs(argv) {
   const args = {};
@@ -19,6 +19,7 @@ function parseArgs(argv) {
 }
 
 async function exportPng({ xml, width, height, drawioUrl }) {
+  const drawioOrigin = new URL(drawioUrl).origin;
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({
@@ -26,6 +27,14 @@ async function exportPng({ xml, width, height, drawioUrl }) {
         width: Math.max(1200, width),
         height: Math.max(760, height),
       },
+    });
+    await page.route('**/*', async (route) => {
+      const requestUrl = route.request().url();
+      if (isAllowedResourceUrl(requestUrl, drawioOrigin)) {
+        await route.continue();
+      } else {
+        await route.abort('blockedbyclient');
+      }
     });
     await page.setContent(
       `<!doctype html>
@@ -35,6 +44,7 @@ async function exportPng({ xml, width, height, drawioUrl }) {
       id="drawio-frame"
       title="draw.io renderer"
       src="${escapeHtml(drawioUrl)}"
+      sandbox="allow-scripts allow-same-origin allow-forms"
       style="position:fixed;inset:0;width:100vw;height:100vh;border:0"
     ></iframe>
   </body>
@@ -43,7 +53,7 @@ async function exportPng({ xml, width, height, drawioUrl }) {
     );
 
     return await page.evaluate(
-      ({ xml, width, height }) =>
+      ({ xml, width, height, drawioOrigin }) =>
         new Promise((resolve, reject) => {
           const iframe = document.getElementById('drawio-frame');
           if (!(iframe instanceof HTMLIFrameElement) || iframe.contentWindow == null) {
@@ -62,11 +72,11 @@ async function exportPng({ xml, width, height, drawioUrl }) {
           }
 
           function post(message) {
-            iframe.contentWindow.postMessage(JSON.stringify(message), '*');
+            iframe.contentWindow.postMessage(JSON.stringify(message), drawioOrigin);
           }
 
           function handleMessage(event) {
-            if (event.source !== iframe.contentWindow || !event.data) {
+            if (event.origin !== drawioOrigin || event.source !== iframe.contentWindow || !event.data) {
               return;
             }
             let message;
@@ -123,10 +133,21 @@ async function exportPng({ xml, width, height, drawioUrl }) {
 
           window.addEventListener('message', handleMessage);
         }),
-      { xml, width, height },
+      { xml, width, height, drawioOrigin },
     );
   } finally {
     await browser.close();
+  }
+}
+
+function isAllowedResourceUrl(value, drawioOrigin) {
+  if (value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('about:')) {
+    return true;
+  }
+  try {
+    return new URL(value).origin === drawioOrigin;
+  } catch {
+    return false;
   }
 }
 
@@ -145,7 +166,7 @@ async function main() {
   const width = Number(args.width || 1500);
   const height = Number(args.height || 900);
   const drawioUrl = args['drawio-url'] || process.env.DRAWIO_EMBED_URL || DEFAULT_DRAWIO_URL;
-  if (!inputPath || !outputPath || !Number.isFinite(width) || !Number.isFinite(height)) {
+  if (!inputPath || !outputPath || !Number.isFinite(width) || !Number.isFinite(height) || !/^https?:\/\//i.test(drawioUrl)) {
     throw new Error('Usage: node render-figure-drawio.mjs --input diagram.drawio --output render.png --width 1500 --height 900');
   }
   const xml = await fs.readFile(inputPath, 'utf-8');

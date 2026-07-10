@@ -41,7 +41,7 @@ OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=gpt-5.5
 ```
 
-启动前后端：
+先启动 Docker Desktop，再启动本地开发环境：
 
 ```bash
 ./scripts/start-dev.sh
@@ -59,6 +59,24 @@ Windows PowerShell：
 http://127.0.0.1:5173
 ```
 
+附图编辑与导出默认使用本机自托管 Draw.io：
+
+```text
+PATENT_CREATOR_DRAWIO_EMBED_URL=http://127.0.0.1:8081/
+```
+
+启动脚本会通过 `compose.drawio.yaml` 自动拉起并等待 Draw.io；首次启动会下载镜像，后续启动会直接复用容器。脚本退出后 Draw.io 容器仍会保留，可按需停止：
+
+```bash
+docker compose -f compose.drawio.yaml down
+```
+
+系统会自动补充 `offline=1`、`embed=1` 和 `proto=json` 等参数。配置为其他地址时，启动脚本会跳过本地容器；非本机 Draw.io 地址默认拒绝，确需使用受信任的内网或公网服务时，必须显式设置：
+
+```text
+PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO=true
+```
+
 运行数据默认保存在：
 
 ```text
@@ -72,7 +90,7 @@ http://127.0.0.1:5173
 - Agent 过程记录：展示工具调用、上下文压缩、内容增强和文本输出等过程。
 - 交底书预览：右侧预览当前交底书正文，便于持续检查。
 - 章节级编辑：Agent 可以围绕章节写入、补充、替换和重排内容。
-- 公式与附图：支持块级公式、行内公式、Mermaid 附图和正文引用。
+- 公式与附图：支持块级公式、行内公式、Draw.io 可编辑附图和正文引用。
 - DOCX 导出：从当前交底书状态导出 Word 文档，而不是从聊天记录拼接文本。
 - Benchmark 反馈：用固定案例、重复运行和评估结果反推写作链路质量。
 
@@ -95,7 +113,7 @@ Benchmark 用来衡量 Agent 是否能从代码、资料或描述中形成稳定
 ## 技术栈
 
 - Backend：Python 3.11+、FastAPI、OpenAI SDK、python-docx。
-- Frontend：React、Vite、TypeScript、KaTeX、Mermaid。
+- Frontend：React、Vite、TypeScript、KaTeX、Draw.io。
 - Dev workflow：`scripts/start-dev.sh` 和 `scripts/start-dev.ps1` 一键启动本地开发环境。
 
 ## 开源许可

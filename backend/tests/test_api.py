@@ -415,6 +415,10 @@ async def test_figure_drawio_api_reads_saves_and_detects_conflict(tmp_path: Path
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        config_response = await client.get("/api/runtime-config")
+        assert config_response.status_code == 200
+        assert config_response.json()["drawio_embed_url"] == settings.drawio_embed_url
+
         read_response = await client.get(f"/api/projects/{project.project_id}/figures/fig_000001/drawio")
         assert read_response.status_code == 200
         figure = read_response.json()["figure"]
@@ -435,7 +439,10 @@ async def test_figure_drawio_api_reads_saves_and_detects_conflict(tmp_path: Path
         saved = save_response.json()["figure"]
         assert saved["title"] == "结构示意图 v2"
         assert saved["drawio_updated_at"] != drawio_updated_at
-        assert saved["render_url"] == f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/render.png"
+        assert saved["render_url"].startswith(
+            f"/api/projects/{project.project_id}/asset/assets/figures/fig_000001/.revisions/rev_"
+        )
+        assert saved["render_url"].endswith("/render.png")
 
         reread_response = await client.get(f"/api/projects/{project.project_id}/figures/fig_000001/drawio")
         assert reread_response.status_code == 200

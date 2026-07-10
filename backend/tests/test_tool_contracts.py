@@ -68,44 +68,22 @@ def test_main_agent_registers_figure_kit() -> None:
     description = figure["function"]["description"]
     properties = figure["function"]["parameters"]["properties"]
     assert "markdown_ref" in description
-    assert "figure block 只用于在“附录”章节展示图本体" in description
+    assert "figure block 只用于附录展示图本体" in description
     assert "drawio_updated_at" in description
     assert "render_image attachment" in description
-    assert "修改图前必须 read" in description
+    assert "首次绘图先调用 rules" in description
+    assert "update 前还必须 read" in description
     assert "expected_drawio_updated_at" in properties
+    assert "rules_version" in properties
     assert "draw.io XML" in description
-    assert "diagram.drawio" in description
-    assert "mxGeometry" in description
-    assert "系统不会自动排版、避障或改线" in description
-    assert "create/update 后会随工具结果附加截图供视觉复盘" in description
-    assert "简约黑白技术示意图" in description
-    assert "不要用大外框包住整张主画面" in description
-    assert "排版优先表达主关系" in description
-    assert "形状必须有稳定语义" in description
-    assert "不要先套固定图型" in description
-    assert "每条线应有清楚起点、终点、方向和含义" in description
-    assert "必要时加线旁短标签" in description
-    assert "虚线应少用" in description
-    assert "不要用无标签长虚线跨多个分区" in description
-    assert "图不是正文摘要" in description
-    assert "边界样式不能与连接线语义冲突" in description
-    assert "分组标题必须贴近它约束的内容" in description
-    assert "不要在底部或角落生成独立线型示例、图例盒或说明卡" in description
-    assert "不要使用跨越主画面的长斜线" in description
-    assert "默认不要在节点角落添加 101/102/201" in description
-    assert "单图只承载一个主关系和少量辅助关系" in description
-    assert "辅助关系最多 2 类" in description
-    assert "线条视觉语义最多 3 类" in description
-    assert "虚线只代表一种稳定含义" in description
-    assert "控制连接线数量、文字密度和语义层数" in description
-    assert "若同时存在结构关系、状态链、异常恢复或控制路径" in description
-    assert "不要通过增加线条、图例或说明文字来解释已经混乱的图" in description
-    assert "如果需要靠长标题、图例或说明卡才能解释关系" in description
+    assert "不要用大外框包住整张主画面" not in description
+    assert "虚线应少用" not in description
+    assert len(description) < 1000
     assert "完整 draw.io XML" in properties["drawio_xml"]["description"]
     assert "mxGraphModel" in properties["drawio_xml"]["description"]
-    assert "diagram.drawio" in properties["drawio_xml"]["description"]
+    assert "1500x900" in properties["drawio_xml"]["description"]
     assert "最近一次 read 返回的 drawio_updated_at" in properties["expected_drawio_updated_at"]["description"]
-    assert set(properties) == {"action", "ref", "title", "drawio_xml", "expected_drawio_updated_at"}
+    assert set(properties) == {"action", "ref", "title", "drawio_xml", "expected_drawio_updated_at", "rules_version"}
 
 
 def test_tool_schemas_inline_local_definitions_for_responses_api() -> None:

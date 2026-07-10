@@ -110,11 +110,31 @@
 }
 
 .figure-editor-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 16px;
   border-bottom: 1px solid rgba(130, 37, 37, 0.16);
   background: #fff5f4;
   color: #8d2d24;
   font-size: 13px;
+}
+
+.figure-editor-error button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid rgba(141, 45, 36, 0.35);
+  border-radius: 4px;
+  background: #ffffff;
+  color: #7f2821;
+  cursor: pointer;
+}
+
+.figure-editor-error button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .figure-editor-main {

@@ -64,6 +64,10 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/runtime-config")
+    async def runtime_config() -> dict[str, str]:
+        return {"drawio_embed_url": active_settings.drawio_embed_url}
+
     app.include_router(create_project_router(active_services))
     app.include_router(create_document_router(active_services))
     app.include_router(create_chat_router(active_services))

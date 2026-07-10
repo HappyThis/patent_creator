@@ -112,11 +112,28 @@ def test_hydrate_tool_output_content_skips_old_round_and_missing_image(tmp_path:
     messages = [_figure_tool_message(round_id="round_old")]
 
     assert hydrate_tool_output_content(store, project_id, messages, round_id="round_new") is messages
-    missing_image_messages = [_figure_tool_message(figure_id="fig_missing")]
-    assert (
-        hydrate_tool_output_content(store, project_id, missing_image_messages, round_id="round_1")
-        == missing_image_messages
+    missing_image_messages = [_figure_tool_message(figure_id="fig_999999")]
+    hydrated = hydrate_tool_output_content(store, project_id, missing_image_messages, round_id="round_1")
+    assert [message["role"] for message in hydrated] == ["tool", "user"]
+    assert "附件读取失败" in hydrated[1]["content"][0]["text"]
+    assert "不要声称已经查看" in hydrated[1]["content"][0]["text"]
+
+
+def test_hydrate_tool_output_content_reports_attachment_limit(tmp_path: Path) -> None:
+    store, project_id = _store_with_project(tmp_path)
+    _write_render_png(store, project_id, "fig_000001")
+    messages = [_figure_tool_message()]
+
+    hydrated = hydrate_tool_output_content(
+        store,
+        project_id,
+        messages,
+        round_id="round_1",
+        max_image_attachments=0,
     )
+
+    assert [message["role"] for message in hydrated] == ["tool", "user"]
+    assert "超过附件数量上限" in hydrated[1]["content"][0]["text"]
 
 
 def test_context_manager_prepares_current_round_figure_visual_review(tmp_path: Path) -> None:

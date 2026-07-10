@@ -4,27 +4,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function apiErrorMessage(payload: unknown): string | null {
-  if (!isRecord(payload) || !isRecord(payload.error)) {
-    return null;
+type ApiErrorDetails = {
+  code: string | null;
+  message: string;
+};
+
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+
+  constructor(details: ApiErrorDetails, status: number) {
+    super(details.message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = details.code;
   }
-  return typeof payload.error.message === 'string' ? payload.error.message : null;
 }
 
-export async function readApiErrorMessage(response: Response): Promise<string> {
-  let message = `Request failed with status ${response.status}`;
+function apiErrorDetails(payload: unknown): { code: string | null; message: string | null } {
+  if (!isRecord(payload) || !isRecord(payload.error)) {
+    return { code: null, message: null };
+  }
+  return {
+    code: typeof payload.error.code === 'string' ? payload.error.code : null,
+    message: typeof payload.error.message === 'string' ? payload.error.message : null,
+  };
+}
+
+export async function readApiError(response: Response): Promise<ApiErrorDetails> {
+  const fallback = `Request failed with status ${response.status}`;
 
   try {
     const payload: unknown = await response.json();
-    const parsedMessage = apiErrorMessage(payload);
-    if (parsedMessage) {
-      message = parsedMessage;
-    }
+    const parsed = apiErrorDetails(payload);
+    return { code: parsed.code, message: parsed.message || fallback };
   } catch {
-    // Keep the status-based fallback when the backend does not return JSON.
+    return { code: null, message: fallback };
   }
+}
 
-  return message;
+export async function readApiErrorMessage(response: Response): Promise<string> {
+  return (await readApiError(response)).message;
 }
 
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -39,7 +59,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   });
 
   if (!response.ok) {
-    throw new Error(await readApiErrorMessage(response));
+    throw new ApiRequestError(await readApiError(response), response.status);
   }
 
   return (await response.json()) as T;

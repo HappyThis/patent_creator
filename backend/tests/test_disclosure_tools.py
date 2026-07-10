@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from app.domain.disclosure import build_render_ast
+from app.domain.figures import MODEL_REVIEW_IMAGE_MAX_BYTES
 from app.storage.workspace_store import WorkspaceStore
+from app.tools.builtin.figure import FIGURE_RULES_VERSION
 
 from helpers import make_tool_executor, run_builtin_tool, section_id_by_title
 
@@ -117,6 +121,7 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
         "figure_kit",
         {
             "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
             "title": "系统结构示意图",
             "drawio_xml": drawio_xml,
         },
@@ -130,24 +135,31 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert figure["caption"] == "图1 系统结构示意图"
     assert figure["drawio_updated_at"]
     assert create["output"]["attachments"] == [
-        {"type": "render_image", "ref": "figure:fig_000001", "purpose": "visual_review"}
+        {
+            "type": "render_image",
+            "ref": "figure:fig_000001",
+            "purpose": "visual_review",
+            "drawio_updated_at": figure["drawio_updated_at"],
+        }
     ]
     assert "截图" in create["output"]["message"]
     assert set(create["output"]) == {"figure", "message", "attachments"}
     figure_dir = executor.store.project_dir(project_id) / "assets" / "figures" / "fig_000001"
     assert (figure_dir / "figure.json").exists()
-    assert (figure_dir / "diagram.drawio").exists()
+    assert executor.store.figure_drawio_file(project_id, "fig_000001").exists()
     assert not (figure_dir / "diagram.html").exists()
     assert not (figure_dir / "geometry.json").exists()
     assert not (figure_dir / "geometry_report.json").exists()
-    assert (figure_dir / "render.png").read_bytes() == PNG_BYTES
+    assert executor.store.figure_render_file(project_id, "fig_000001").read_bytes() == PNG_BYTES
 
     stored = executor.store.get_figure(project_id, "fig_000001")
     assert stored is not None
     assert stored["source"]["type"] == "drawio"
-    assert stored["source"]["path"] == "assets/figures/fig_000001/diagram.drawio"
-    assert stored["render"]["path"] == "assets/figures/fig_000001/render.png"
-    assert stored["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
+    assert stored["source"]["path"].startswith("assets/figures/fig_000001/.revisions/rev_")
+    assert stored["source"]["path"].endswith("/diagram.drawio")
+    assert stored["render"]["path"].startswith("assets/figures/fig_000001/.revisions/rev_")
+    assert stored["render"]["path"].endswith("/render.png")
+    assert stored["render"]["url"] == f"/api/projects/{project_id}/asset/{stored['render']['path']}"
 
     read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
     assert read["status"] == "success"
@@ -188,7 +200,7 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         executor,
         project_id,
         "figure_kit",
-        {"action": "create", "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
+        {"action": "create", "rules_version": FIGURE_RULES_VERSION, "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
     )
     assert create["status"] == "success"
     figure = create["output"]["figure"]
@@ -199,6 +211,7 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         "figure_kit",
         {
             "action": "update",
+            "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "drawio_xml": _sample_drawio_xml(),
         },
@@ -212,6 +225,7 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         "figure_kit",
         {
             "action": "update",
+            "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "expected_drawio_updated_at": "2000-01-01T00:00:00+00:00",
             "drawio_xml": _sample_drawio_xml(),
@@ -229,6 +243,7 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         "figure_kit",
         {
             "action": "update",
+            "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "title": "更新后的结构示意图",
             "expected_drawio_updated_at": read["output"]["figure"]["drawio_updated_at"],
@@ -252,6 +267,7 @@ def test_figure_kit_rejects_invalid_drawio_xml(tmp_path: Path) -> None:
         "figure_kit",
         {
             "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
             "title": "无效附图",
             "drawio_xml": "<html></html>",
         },
@@ -259,6 +275,83 @@ def test_figure_kit_rejects_invalid_drawio_xml(tmp_path: Path) -> None:
 
     assert create["status"] == "failed"
     assert create["output"]["code"] == "drawio_xml_validation_failed"
+
+
+def test_figure_kit_requires_rules_and_returns_rules_on_demand(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
+    executor, project_id = make_tool_executor(tmp_path)
+
+    rules = run_builtin_tool(executor, project_id, "figure_kit", {"action": "rules"})
+    missing_rules = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {"action": "create", "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
+    )
+
+    assert rules["status"] == "success"
+    assert rules["output"]["rules_version"] == FIGURE_RULES_VERSION
+    assert len(rules["output"]["rules"]) >= 20
+    assert any("大外框" in item for item in rules["output"]["rules"])
+    assert missing_rules["status"] == "failed"
+    assert missing_rules["output"]["code"] == "figure_rules_required"
+
+
+def test_figure_kit_reports_when_visual_attachment_is_too_large(tmp_path: Path, monkeypatch) -> None:
+    def render(self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict:
+        output_path.write_bytes(b"x" * (MODEL_REVIEW_IMAGE_MAX_BYTES + 1))
+        return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_drawio_file", render)
+    executor, project_id = make_tool_executor(tmp_path)
+    result = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "系统结构示意图",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )
+
+    assert result["status"] == "success"
+    assert result["output"]["attachments"] == []
+    assert "视觉复盘附件未附加" in result["output"]["message"]
+    assert "不要声称已经看过截图" in result["output"]["message"]
+
+
+def test_figure_kit_rejects_wrong_canvas_and_overflow(tmp_path: Path) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    wrong_canvas = _sample_drawio_xml().replace('pageWidth="1500"', 'pageWidth="1200"')
+    overflow = _sample_drawio_xml().replace('x="420"', 'x="1400"')
+
+    wrong_canvas_result = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "错误页面",
+            "drawio_xml": wrong_canvas,
+        },
+    )
+    overflow_result = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "节点越界",
+            "drawio_xml": overflow,
+        },
+    )
+
+    assert wrong_canvas_result["output"]["code"] == "drawio_canvas_invalid"
+    assert overflow_result["output"]["code"] == "drawio_canvas_overflow"
 
 
 def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_path: Path, monkeypatch) -> None:
@@ -277,7 +370,7 @@ def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_pa
         executor,
         project_id,
         "figure_kit",
-        {"action": "create", "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
+        {"action": "create", "rules_version": FIGURE_RULES_VERSION, "title": "系统结构示意图", "drawio_xml": _sample_drawio_xml()},
     )
     assert create["status"] == "success"
     read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
@@ -292,6 +385,7 @@ def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_pa
         "figure_kit",
         {
             "action": "update",
+            "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "title": "失败标题",
             "expected_drawio_updated_at": original_timestamp,
@@ -306,6 +400,93 @@ def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_pa
     assert reread["output"]["figure"]["drawio_updated_at"] == original_timestamp
     assert reread["output"]["figure"]["drawio_xml"] == original_xml
     assert executor.store.figure_render_file(project_id, "fig_000001").read_bytes() == PNG_BYTES
+
+
+def test_concurrent_figure_updates_allow_only_one_timestamp_winner(tmp_path: Path, monkeypatch) -> None:
+    first_render_started = threading.Event()
+    allow_first_render = threading.Event()
+
+    def render(self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict:
+        if "更新 A" in input_path.read_text(encoding="utf-8"):
+            first_render_started.set()
+            assert allow_first_render.wait(timeout=5)
+        output_path.write_bytes(PNG_BYTES)
+        return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_drawio_file", render)
+    executor, project_id = make_tool_executor(tmp_path)
+    created = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "系统结构示意图",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )["output"]["figure"]
+
+    def update(title: str) -> dict:
+        return executor.store.update_figure(
+            project_id,
+            "fig_000001",
+            title=title,
+            drawio_xml=_sample_drawio_xml().replace("统一入口", title),
+            expected_drawio_updated_at=created["drawio_updated_at"],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(update, "更新 A")
+        assert first_render_started.wait(timeout=5)
+        second = pool.submit(update, "更新 B")
+        allow_first_render.set()
+        results = [first.result(timeout=5), second.result(timeout=5)]
+
+    assert sorted(result["status"] for result in results) == ["failed", "success"]
+    failed = next(result for result in results if result["status"] == "failed")
+    assert failed["output"]["code"] == "drawio_conflict"
+
+
+def test_figure_metadata_failure_keeps_previous_revision(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
+    executor, project_id = make_tool_executor(tmp_path)
+    created = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "系统结构示意图",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )["output"]["figure"]
+    old_drawio_file = executor.store.figure_drawio_file(project_id, "fig_000001")
+    old_render_file = executor.store.figure_render_file(project_id, "fig_000001")
+    old_xml = old_drawio_file.read_text(encoding="utf-8")
+    old_render = old_render_file.read_bytes()
+
+    def fail_metadata_write(path: Path, payload: dict) -> None:
+        raise OSError("metadata unavailable")
+
+    monkeypatch.setattr(executor.store, "write_json_atomic", fail_metadata_write)
+    result = executor.store.update_figure(
+        project_id,
+        "fig_000001",
+        title="不应提交",
+        drawio_xml=_sample_drawio_xml().replace("统一入口", "不应提交"),
+        expected_drawio_updated_at=created["drawio_updated_at"],
+    )
+
+    assert result["status"] == "failed"
+    assert result["output"]["code"] == "figure_storage_failed"
+    assert executor.store.get_figure(project_id, "fig_000001")["title"] == "系统结构示意图"
+    assert executor.store.figure_drawio_file(project_id, "fig_000001") == old_drawio_file
+    assert old_drawio_file.read_text(encoding="utf-8") == old_xml
+    assert old_render_file.read_bytes() == old_render
+    revision_dirs = list((executor.store.figure_dir(project_id, "fig_000001") / ".revisions").glob("rev_*"))
+    assert revision_dirs == [old_drawio_file.parent]
 
 
 def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
@@ -331,6 +512,7 @@ def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: 
         "figure_kit",
         {
             "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
             "title": "代理执行流程示意图",
             "drawio_xml": _sample_drawio_xml("代理执行流程示意图"),
         },
@@ -373,8 +555,10 @@ def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: 
     assert appendix_node["children"][0]["type"] == "figure"
     assert render_ast["figures"][0]["label"] == "图1"
     assert render_ast["figures"][0]["source"]["type"] == "drawio"
-    assert render_ast["figures"][0]["source"]["path"] == "assets/figures/fig_000001/diagram.drawio"
-    assert render_ast["figures"][0]["render"]["url"] == f"/api/projects/{project_id}/asset/assets/figures/fig_000001/render.png"
+    assert render_ast["figures"][0]["source"]["path"].startswith("assets/figures/fig_000001/.revisions/rev_")
+    assert render_ast["figures"][0]["render"]["url"].startswith(
+        f"/api/projects/{project_id}/asset/assets/figures/fig_000001/.revisions/rev_"
+    )
 
 
 def test_disclosure_outline_search_and_read_section(tmp_path: Path) -> None:
