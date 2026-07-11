@@ -598,7 +598,7 @@ class ChatService:
                     if (
                         tool_call.tool == "figure_kit"
                         and result.get("status") == "success"
-                        and tool_call.arguments.get("action") in {"create", "update", "delete"}
+                        and tool_call.arguments.get("action") in {"create", "write", "edit", "delete"}
                     ):
                         changed_payload = {
                             **changed_payload,

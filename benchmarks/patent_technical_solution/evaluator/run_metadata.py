@@ -1,49 +1,56 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
-from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.11+ in supported environments
+    tomllib = None  # type: ignore[assignment]
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = Path(__file__).resolve().parents[3]
 
 
-def build_run_manifest(
-    *,
-    run_id: str,
-    run_kind: str,
-    run_config: dict[str, Any],
-    case_ids: list[str],
-) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "run_id": run_id,
-        "run_kind": run_kind,
-        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "benchmark_git": git_metadata(BENCHMARK_DIR),
-        "model_config": capture_model_config(),
-        "run_config": compact_dict(run_config),
-        "case_ids": case_ids,
-    }
-
-
 def capture_model_config() -> dict[str, Any]:
     load_repo_env()
     api_key = os.getenv("OPENAI_API_KEY")
+    base_url = _env_str("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    codex_config = read_codex_config()
+    codex_bin = resolve_codex_bin()
     return {
-        "schema_version": 1,
-        "subject": {
+        "agent": {
             "api": "responses",
+            "provider": _env_str("BENCHMARK_AGENT_PROVIDER", infer_provider(base_url)),
             "model": _env_str("OPENAI_MODEL", "gpt-5.5"),
-            "base_url": _env_str("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            "base_url": base_url,
             "reasoning_effort": _env_str("OPENAI_REASONING_EFFORT", "high").strip().lower(),
             "max_output_tokens": _env_int("OPENAI_MAX_OUTPUT_TOKENS", 8192),
             "web_search_enabled": _env_bool("OPENAI_WEB_SEARCH_ENABLED", True),
             "web_search_context_size": _env_str("OPENAI_WEB_SEARCH_CONTEXT_SIZE", "low").strip().lower(),
             "api_key_configured": bool(api_key),
             "api_key_env_var": "OPENAI_API_KEY" if api_key else None,
+        },
+        "judge": {
+            "provider": _env_optional("BENCHMARK_JUDGE_PROVIDER")
+            or _toml_string(codex_config, "model_provider")
+            or "openai",
+            "model": _env_optional("BENCHMARK_JUDGE_MODEL") or _toml_string(codex_config, "model"),
+            "reasoning_effort": (
+                _env_optional("BENCHMARK_JUDGE_REASONING_EFFORT")
+                or _toml_string(codex_config, "model_reasoning_effort")
+                or "high"
+            ).strip().lower(),
+            "service_tier": _env_optional("BENCHMARK_JUDGE_SERVICE_TIER")
+            or _toml_string(codex_config, "service_tier"),
+            "codex_bin": codex_bin,
+            "sdk_version": package_version("openai-codex"),
+            "source": "benchmark_env_or_codex_config",
         },
         "runtime": {
             "llm_timeout": _env_float("PATENT_CREATOR_LLM_TIMEOUT", 45.0),
@@ -69,9 +76,81 @@ def load_repo_env() -> None:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        value = value.strip()
+        value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def read_codex_config() -> dict[str, Any]:
+    if tomllib is None:
+        return {}
+    codex_home = Path(os.getenv("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    config_path = codex_home / "config.toml"
+    if not config_path.exists():
+        return {}
+    try:
+        value = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def infer_provider(base_url: str) -> str:
+    hostname = (urlparse(base_url).hostname or "").lower()
+    if hostname in {"api.openai.com", "openai.com"}:
+        return "openai"
+    return "openai-compatible"
+
+
+def resolve_codex_bin() -> str | None:
+    explicit = _env_optional("BENCHMARK_CODEX_BIN")
+    candidates = [
+        explicit,
+        shutil.which("codex"),
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        str(Path.home() / ".codex" / "plugins" / ".plugin-appserver" / "codex"),
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = str(Path(candidate).expanduser())
+        if path in seen:
+            continue
+        seen.add(path)
+        if codex_binary_version(path) is not None:
+            return path
+    return None
+
+
+def codex_binary_version(path: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [path, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def package_version(name: str) -> str | None:
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def _toml_string(config: dict[str, Any], key: str) -> str | None:
+    value = config.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def git_metadata(cwd: Path) -> dict[str, Any]:
@@ -107,6 +186,13 @@ def _env_str(name: str, default: str) -> str:
     if value is None or value.strip() == "":
         return default
     return value
+
+
+def _env_optional(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return value.strip()
 
 
 def _env_int(name: str, default: int) -> int:

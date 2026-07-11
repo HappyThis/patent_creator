@@ -37,7 +37,7 @@ def test_resolve_codex_bin_keeps_explicit_path() -> None:
     assert codex_judge.resolve_codex_bin("/opt/codex/bin/codex") == "/opt/codex/bin/codex"
 
 
-def test_latest_solution_run_skips_historical_figure_mode(tmp_path: Path, monkeypatch) -> None:
+def test_latest_run_for_case_only_accepts_v2_execution(tmp_path: Path, monkeypatch) -> None:
     spec = importlib.util.spec_from_file_location("patent_technical_solution_bench_test", PATENT_BENCH_PATH)
     assert spec is not None and spec.loader is not None
     bench = importlib.util.module_from_spec(spec)
@@ -45,19 +45,20 @@ def test_latest_solution_run_skips_historical_figure_mode(tmp_path: Path, monkey
     benchmark_dir = tmp_path / "benchmark"
     runs_dir = benchmark_dir / "runs"
 
-    def write_run(run_id: str, mode: str, mtime: int) -> None:
-        case_dir = runs_dir / run_id / "cases" / "001"
-        case_dir.mkdir(parents=True)
-        artifact = case_dir / "evaluated_artifact.md"
-        artifact.write_text("## 技术方案\n", encoding="utf-8")
-        (case_dir / "input_manifest.json").write_text(
-            json.dumps({"run_config": {"mode": mode}}),
-            encoding="utf-8",
-        )
-        os.utime(artifact, (mtime, mtime))
+    old_case_dir = runs_dir / "historical-run" / "cases" / "001"
+    old_case_dir.mkdir(parents=True)
+    old_artifact = old_case_dir / "evaluated_artifact.md"
+    old_artifact.write_text("## 技术方案\n", encoding="utf-8")
+    os.utime(old_artifact, (200, 200))
 
-    write_run("solution-run", "solution", 100)
-    write_run("newer-figure-run", "figure", 200)
+    v2_case_dir = runs_dir / "v2-run" / "cases" / "001"
+    v2_case_dir.mkdir(parents=True)
+    execution = v2_case_dir / "execution.json"
+    execution.write_text(
+        json.dumps({"schema_version": "patent-technical-solution-execution-v2"}),
+        encoding="utf-8",
+    )
+    os.utime(execution, (100, 100))
     monkeypatch.setattr(bench, "BENCHMARK_DIR", benchmark_dir)
 
-    assert bench.latest_run_id_for_case("001") == "solution-run"
+    assert bench.latest_run_id_for_case("001") == "v2-run"

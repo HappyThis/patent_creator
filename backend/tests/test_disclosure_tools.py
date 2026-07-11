@@ -193,7 +193,7 @@ def test_figure_kit_creates_listable_figure_and_checks_references(tmp_path: Path
     assert {item["code"] for item in checked["output"]["warnings"]} == {"figure_not_displayed_in_appendix"}
 
 
-def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path: Path, monkeypatch) -> None:
+def test_figure_kit_write_requires_read_timestamp_and_detects_conflict(tmp_path: Path, monkeypatch) -> None:
     _stub_figure_renderer(monkeypatch)
     executor, project_id = make_tool_executor(tmp_path)
     create = run_builtin_tool(
@@ -210,7 +210,7 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         project_id,
         "figure_kit",
         {
-            "action": "update",
+            "action": "write",
             "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "drawio_xml": _sample_drawio_xml(),
@@ -224,7 +224,7 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         project_id,
         "figure_kit",
         {
-            "action": "update",
+            "action": "write",
             "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "expected_drawio_updated_at": "2000-01-01T00:00:00+00:00",
@@ -237,12 +237,12 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
 
     read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
     next_xml = read["output"]["figure"]["drawio_xml"].replace("统一入口", "统一接入网关")
-    updated = run_builtin_tool(
+    written = run_builtin_tool(
         executor,
         project_id,
         "figure_kit",
         {
-            "action": "update",
+            "action": "write",
             "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "title": "更新后的结构示意图",
@@ -251,11 +251,127 @@ def test_figure_kit_update_requires_read_timestamp_and_detects_conflict(tmp_path
         },
     )
 
-    assert updated["status"] == "success"
-    assert updated["output"]["figure"]["title"] == "更新后的结构示意图"
-    assert updated["output"]["figure"]["drawio_updated_at"] != figure["drawio_updated_at"]
+    assert written["status"] == "success"
+    assert written["output"]["figure"]["title"] == "更新后的结构示意图"
+    assert written["output"]["figure"]["drawio_updated_at"] != figure["drawio_updated_at"]
     reread = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
     assert "统一接入网关" in reread["output"]["figure"]["drawio_xml"]
+
+
+def test_figure_kit_edit_requires_timestamp_and_applies_unique_replacements(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
+    executor, project_id = make_tool_executor(tmp_path)
+    created = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "系统结构示意图",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )["output"]["figure"]
+
+    missing_timestamp = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "edit",
+            "rules_version": FIGURE_RULES_VERSION,
+            "ref": "figure:fig_000001",
+            "edits": [{"old_text": "统一入口", "new_text": "统一接入网关"}],
+        },
+    )
+    assert missing_timestamp["status"] == "failed"
+    assert missing_timestamp["output"]["code"] == "drawio_read_required"
+
+    read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    edited = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "edit",
+            "rules_version": FIGURE_RULES_VERSION,
+            "ref": "figure:fig_000001",
+            "title": "局部编辑后的结构示意图",
+            "expected_drawio_updated_at": read["output"]["figure"]["drawio_updated_at"],
+            "edits": [
+                {"old_text": 'value="统一入口"', "new_text": 'value="统一接入网关"'},
+                {"old_text": 'x="420" y="160"', "new_text": 'x="460" y="160"'},
+            ],
+        },
+    )
+
+    assert edited["status"] == "success"
+    assert edited["output"]["figure"]["title"] == "局部编辑后的结构示意图"
+    assert edited["output"]["figure"]["drawio_updated_at"] != created["drawio_updated_at"]
+    assert edited["output"]["attachments"][0]["purpose"] == "visual_review"
+    reread = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    assert 'value="统一接入网关"' in reread["output"]["figure"]["drawio_xml"]
+    assert 'x="460" y="160"' in reread["output"]["figure"]["drawio_xml"]
+
+
+def test_figure_kit_edit_requires_every_target_to_be_unique_and_is_atomic(tmp_path: Path, monkeypatch) -> None:
+    _stub_figure_renderer(monkeypatch)
+    executor, project_id = make_tool_executor(tmp_path)
+    run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "create",
+            "rules_version": FIGURE_RULES_VERSION,
+            "title": "系统结构示意图",
+            "drawio_xml": _sample_drawio_xml(),
+        },
+    )
+    read = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    original = read["output"]["figure"]
+    original_revision = executor.store.figure_drawio_file(project_id, "fig_000001").parent
+
+    missing = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "edit",
+            "rules_version": FIGURE_RULES_VERSION,
+            "ref": "figure:fig_000001",
+            "expected_drawio_updated_at": original["drawio_updated_at"],
+            "edits": [
+                {"old_text": "统一入口", "new_text": "不应落盘"},
+                {"old_text": "不存在的目标", "new_text": "失败"},
+            ],
+        },
+    )
+    assert missing["status"] == "failed"
+    assert missing["output"]["code"] == "figure_edit_target_not_found"
+    assert missing["output"]["edit_index"] == 1
+
+    not_unique = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "edit",
+            "rules_version": FIGURE_RULES_VERSION,
+            "ref": "figure:fig_000001",
+            "expected_drawio_updated_at": original["drawio_updated_at"],
+            "edits": [{"old_text": 'parent="1"', "new_text": 'parent="2"'}],
+        },
+    )
+    assert not_unique["status"] == "failed"
+    assert not_unique["output"]["code"] == "figure_edit_target_not_unique"
+    assert not_unique["output"]["match_count"] > 1
+
+    reread = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
+    assert reread["output"]["figure"]["drawio_updated_at"] == original["drawio_updated_at"]
+    assert reread["output"]["figure"]["drawio_xml"] == original["drawio_xml"]
+    revision_dirs = list((executor.store.figure_dir(project_id, "fig_000001") / ".revisions").glob("rev_*"))
+    assert revision_dirs == [original_revision]
 
 
 def test_figure_kit_rejects_invalid_drawio_xml(tmp_path: Path) -> None:
@@ -291,8 +407,10 @@ def test_figure_kit_requires_rules_and_returns_rules_on_demand(tmp_path: Path, m
 
     assert rules["status"] == "success"
     assert rules["output"]["rules_version"] == FIGURE_RULES_VERSION
-    assert len(rules["output"]["rules"]) >= 20
-    assert any("大外框" in item for item in rules["output"]["rules"])
+    assert 8 <= len(rules["output"]["rules"]) <= 15
+    assert any("局部修改用 edit" in item for item in rules["output"]["rules"])
+    assert any("轻微审美偏好留给人工调整" in item for item in rules["output"]["rules"])
+    assert not any("禁止用大外框" in item for item in rules["output"]["rules"])
     assert missing_rules["status"] == "failed"
     assert missing_rules["output"]["code"] == "figure_rules_required"
 
@@ -354,7 +472,7 @@ def test_figure_kit_rejects_wrong_canvas_and_overflow(tmp_path: Path) -> None:
     assert overflow_result["output"]["code"] == "drawio_canvas_overflow"
 
 
-def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_path: Path, monkeypatch) -> None:
+def test_figure_write_render_failure_leaves_current_drawio_xml_unchanged(tmp_path: Path, monkeypatch) -> None:
     should_fail = {"value": False}
 
     def render(self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict:
@@ -379,12 +497,12 @@ def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_pa
     modified_xml = original_xml.replace("统一入口", "失败更新不应落盘")
 
     should_fail["value"] = True
-    update = run_builtin_tool(
+    write = run_builtin_tool(
         executor,
         project_id,
         "figure_kit",
         {
-            "action": "update",
+            "action": "write",
             "rules_version": FIGURE_RULES_VERSION,
             "ref": "figure:fig_000001",
             "title": "失败标题",
@@ -393,8 +511,8 @@ def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_pa
         },
     )
 
-    assert update["status"] == "failed"
-    assert update["output"]["code"] == "figure_render_failed"
+    assert write["status"] == "failed"
+    assert write["output"]["code"] == "figure_render_failed"
     reread = run_builtin_tool(executor, project_id, "figure_kit", {"action": "read", "ref": "figure:fig_000001"})
     assert reread["output"]["figure"]["title"] == "系统结构示意图"
     assert reread["output"]["figure"]["drawio_updated_at"] == original_timestamp
@@ -402,7 +520,7 @@ def test_figure_update_render_failure_leaves_current_drawio_xml_unchanged(tmp_pa
     assert executor.store.figure_render_file(project_id, "fig_000001").read_bytes() == PNG_BYTES
 
 
-def test_concurrent_figure_updates_allow_only_one_timestamp_winner(tmp_path: Path, monkeypatch) -> None:
+def test_concurrent_figure_writes_allow_only_one_timestamp_winner(tmp_path: Path, monkeypatch) -> None:
     first_render_started = threading.Event()
     allow_first_render = threading.Event()
 
@@ -427,8 +545,8 @@ def test_concurrent_figure_updates_allow_only_one_timestamp_winner(tmp_path: Pat
         },
     )["output"]["figure"]
 
-    def update(title: str) -> dict:
-        return executor.store.update_figure(
+    def write(title: str) -> dict:
+        return executor.store.write_figure(
             project_id,
             "fig_000001",
             title=title,
@@ -437,9 +555,9 @@ def test_concurrent_figure_updates_allow_only_one_timestamp_winner(tmp_path: Pat
         )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(update, "更新 A")
+        first = pool.submit(write, "更新 A")
         assert first_render_started.wait(timeout=5)
-        second = pool.submit(update, "更新 B")
+        second = pool.submit(write, "更新 B")
         allow_first_render.set()
         results = [first.result(timeout=5), second.result(timeout=5)]
 
@@ -471,7 +589,7 @@ def test_figure_metadata_failure_keeps_previous_revision(tmp_path: Path, monkeyp
         raise OSError("metadata unavailable")
 
     monkeypatch.setattr(executor.store, "write_json_atomic", fail_metadata_write)
-    result = executor.store.update_figure(
+    result = executor.store.write_figure(
         project_id,
         "fig_000001",
         title="不应提交",
@@ -494,6 +612,19 @@ def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
 
     extra_field = run_builtin_tool(executor, project_id, "figure_kit", {"action": "list", "unused": True})
     invalid_action = run_builtin_tool(executor, project_id, "figure_kit", {"action": "rename"})
+    removed_update = run_builtin_tool(executor, project_id, "figure_kit", {"action": "update"})
+    replace_all = run_builtin_tool(
+        executor,
+        project_id,
+        "figure_kit",
+        {
+            "action": "edit",
+            "ref": "figure:fig_000001",
+            "rules_version": FIGURE_RULES_VERSION,
+            "expected_drawio_updated_at": "timestamp",
+            "edits": [{"old_text": "x", "new_text": "y", "replace_all": True}],
+        },
+    )
 
     assert extra_field["status"] == "failed"
     assert extra_field["output"]["code"] == "invalid_tool_arguments"
@@ -501,6 +632,11 @@ def test_figure_kit_rejects_arguments_outside_schema(tmp_path: Path) -> None:
     assert invalid_action["status"] == "failed"
     assert invalid_action["output"]["code"] == "invalid_tool_arguments"
     assert "action" in invalid_action["output"]["message"]
+    assert removed_update["status"] == "failed"
+    assert removed_update["output"]["code"] == "invalid_tool_arguments"
+    assert replace_all["status"] == "failed"
+    assert replace_all["output"]["code"] == "invalid_tool_arguments"
+    assert "replace_all" in replace_all["output"]["message"]
 
 
 def test_figure_block_only_allowed_in_appendix_and_renders_with_asset(tmp_path: Path, monkeypatch) -> None:

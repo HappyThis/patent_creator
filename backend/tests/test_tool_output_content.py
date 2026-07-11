@@ -89,15 +89,15 @@ def test_hydrate_tool_output_content_adds_current_round_figure_image_after_tool_
     assert review_message["tool_output_attachment"] is True
     assert review_message["content"][0]["type"] == "input_text"
     assert FIGURE_VISUAL_REVIEW_PROMPT in review_message["content"][0]["text"]
-    assert "硬失败条件" in review_message["content"][0]["text"]
-    assert "只要命中任一条，就必须读取当前 draw.io XML 并调用 figure_kit.update 修正" in review_message["content"][0]["text"]
-    assert "带上读取时的 drawio_updated_at" in review_message["content"][0]["text"]
-    assert "不要用“基本还行”放过明显瑕疵" in review_message["content"][0]["text"]
-    assert "业务节点没有参与任何关系" in review_message["content"][0]["text"]
-    assert "同一分组内同类节点的连接关系不一致" in review_message["content"][0]["text"]
-    assert "大外框包住整张主画面" in review_message["content"][0]["text"]
-    assert "独立线型示例、图例盒或说明卡" in review_message["content"][0]["text"]
-    assert "跨越主画面的长斜线" in review_message["content"][0]["text"]
+    assert "影响理解或使用的客观问题" in review_message["content"][0]["text"]
+    assert "轻微间距差异、细小不对称和纯审美偏好" in review_message["content"][0]["text"]
+    assert "不要以自动达到视觉完美为目标" in review_message["content"][0]["text"]
+    assert "figure_kit.edit" in review_message["content"][0]["text"]
+    assert "figure_kit.write" in review_message["content"][0]["text"]
+    assert "old_text 在当前 XML 中唯一匹配" in review_message["content"][0]["text"]
+    assert "drawio_updated_at 和当前 rules_version" in review_message["content"][0]["text"]
+    assert "硬失败条件" not in review_message["content"][0]["text"]
+    assert "大外框包住整张主画面" not in review_message["content"][0]["text"]
     assert "fig_000001" in review_message["content"][0]["text"]
     assert review_message["content"][1] == {
         "type": "input_image",

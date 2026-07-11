@@ -215,7 +215,7 @@ def _figure_started(arguments: dict[str, Any]) -> str:
         return "开始检查附图"
     if action == "list":
         return "开始读取附图列表"
-    if action in {"create", "update"}:
+    if action in {"create", "write", "edit"}:
         return "开始生成附图"
     return "开始处理附图"
 
@@ -228,7 +228,7 @@ def _figure_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
         return "附图检查已完成"
     if action == "list":
         return "附图列表已读取"
-    if action in {"create", "update"}:
+    if action in {"create", "write", "edit"}:
         return "附图已更新"
     return "附图处理已完成"
 

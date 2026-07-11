@@ -98,7 +98,7 @@ def build_figure_record(
     }
 
 
-def update_figure_record(
+def write_figure_record(
     figure: dict[str, Any],
     *,
     title: str | None,

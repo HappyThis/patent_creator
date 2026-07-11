@@ -70,7 +70,7 @@ def create_document_router(services: AppServices) -> APIRouter:
     @router.put("/figures/{figure_id}/drawio")
     async def save_figure_drawio(project_id: str, figure_id: str, payload: FigureDrawioSaveRequest) -> dict:
         result = await asyncio.to_thread(
-            services.store.update_figure,
+            services.store.write_figure,
             project_id,
             figure_id,
             title=payload.title.strip() if payload.title is not None else None,

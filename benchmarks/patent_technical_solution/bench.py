@@ -71,7 +71,7 @@ def main() -> None:
         if args.skip_judge:
             command.append("--skip-judge")
         if args.cases:
-            command.extend(["--cases", *[normalize_case(case_id) for case_id in args.cases]])
+            command.extend([normalize_case(case_id) for case_id in args.cases])
     else:
         raise SystemExit(f"unknown command: {args.command}")
 
@@ -88,7 +88,7 @@ def parse_args() -> argparse.Namespace:
 
     subparsers.add_parser("list", help="List benchmark cases.")
 
-    status = subparsers.add_parser("status", help="Show latest progress for a run or case.")
+    status = subparsers.add_parser("status", help="Show execution state for a run or case.")
     status.add_argument("run_id", nargs="?", help="Run id. Defaults to latest run directory.")
     status.add_argument("--case", help="Optional case id.")
 
@@ -100,9 +100,9 @@ def parse_args() -> argparse.Namespace:
     add_case_arg(subject)
     add_common_run_args(subject, judge=False)
 
-    judge = subparsers.add_parser("judge", help="Reuse an evaluated artifact and run judge.")
+    judge = subparsers.add_parser("judge", help="Judge an existing subject workspace.")
     add_case_arg(judge)
-    judge.add_argument("--run-id", help="Existing run id. Defaults to latest run containing this case artifact.")
+    judge.add_argument("--run-id", help="Existing run id. Defaults to latest single run containing this case.")
     judge.add_argument("--judge-timeout", type=int, default=DEFAULT_TIMEOUT)
     judge.add_argument("--dry-run", action="store_true")
 
@@ -197,21 +197,28 @@ def show_status(*, run_id: str | None, case_id: str | None) -> None:
     run_dir = BENCHMARK_DIR / "runs" / run_id if run_id else latest_run_dir()
     if run_dir is None:
         raise SystemExit("No runs found.")
-    progress_files = sorted(run_dir.glob("**/progress.json"))
+    execution_files = sorted(run_dir.glob("**/execution.json"))
     if case_id:
         normalized = normalize_case(case_id)
-        progress_files = [path for path in progress_files if f"/cases/{normalized}/" in str(path)]
-    if not progress_files:
-        print(f"No progress files under {run_dir}")
+        execution_files = [path for path in execution_files if normalized in path.parts]
+    if not execution_files:
+        print(f"No execution.json files under {run_dir}")
         return
-    for path in progress_files:
+    for path in execution_files:
         payload = read_json(path)
         rel = path.relative_to(BENCHMARK_DIR)
-        suffix = f" score={payload['total_score']}" if payload.get("total_score") is not None else ""
+        conclusion = payload.get("conclusion")
+        score = None
+        if isinstance(conclusion, dict) and isinstance(conclusion.get("path"), str):
+            result_path = path.parent / conclusion["path"]
+            if result_path.exists():
+                score = read_json(result_path).get("total_score")
+        suffix = f" score={score}" if score is not None else ""
         print(
-            f"{rel}: phase={payload.get('phase', '-')} "
-            f"elapsed={payload.get('elapsed_seconds', '-')}s "
-            f"message={payload.get('message', '-')}{suffix}"
+            f"{rel}: status={payload.get('status', '-')} "
+            f"duration_ms={payload.get('duration_ms', '-')} "
+            f"agent={payload.get('agent', {}).get('model', '-')} "
+            f"judge={payload.get('judge', {}).get('model', '-')}{suffix}"
         )
 
 
@@ -219,29 +226,22 @@ def latest_run_dir() -> Path | None:
     runs_dir = BENCHMARK_DIR / "runs"
     if not runs_dir.exists():
         return None
-    candidates = [path for path in runs_dir.iterdir() if path.is_dir()]
+    candidates = [path for path in runs_dir.iterdir() if path.is_dir() and (path / "run.json").exists()]
     return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
 
 
 def latest_run_id_for_case(case_id: str) -> str:
     runs_dir = BENCHMARK_DIR / "runs"
-    artifacts = sorted(
-        runs_dir.glob(f"**/cases/{case_id}/evaluated_artifact.md"),
+    executions = sorted(
+        runs_dir.glob(f"*/cases/{case_id}/execution.json"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    for artifact in artifacts:
-        manifest_path = artifact.parent / "input_manifest.json"
-        if manifest_path.exists():
-            try:
-                manifest = read_json(manifest_path)
-            except Exception:
-                continue
-            historical_mode = str(manifest.get("run_config", {}).get("mode") or "solution")
-            if historical_mode != "solution":
-                continue
-        return str(artifact.parents[2].relative_to(runs_dir))
-    raise SystemExit(f"No solution evaluated_artifact.md found for case {case_id}. Run subject first.")
+    for execution in executions:
+        payload = read_json(execution)
+        if payload.get("schema_version") == "patent-technical-solution-execution-v2":
+            return execution.parents[2].relative_to(runs_dir).as_posix()
+    raise SystemExit(f"No reusable v2 subject found for case {case_id}. Run subject first.")
 
 
 def read_json(path: Path) -> dict:

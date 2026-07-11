@@ -72,9 +72,10 @@ def test_main_agent_registers_figure_kit() -> None:
     assert "drawio_updated_at" in description
     assert "render_image attachment" in description
     assert "首次绘图先调用 rules" in description
-    assert "update 前还必须 read" in description
+    assert "write/edit 前还必须 read" in description
     assert "expected_drawio_updated_at" in properties
     assert "rules_version" in properties
+    assert "edits" in properties
     assert "draw.io XML" in description
     assert "不要用大外框包住整张主画面" not in description
     assert "虚线应少用" not in description
@@ -83,7 +84,10 @@ def test_main_agent_registers_figure_kit() -> None:
     assert "mxGraphModel" in properties["drawio_xml"]["description"]
     assert "1500x900" in properties["drawio_xml"]["description"]
     assert "最近一次 read 返回的 drawio_updated_at" in properties["expected_drawio_updated_at"]["description"]
-    assert set(properties) == {"action", "ref", "title", "drawio_xml", "expected_drawio_updated_at", "rules_version"}
+    assert properties["action"]["enum"] == ["rules", "create", "read", "write", "edit", "delete", "list", "check"]
+    assert "update" not in properties["action"]["enum"]
+    assert "恰好出现一次" in properties["edits"]["description"]
+    assert set(properties) == {"action", "ref", "title", "drawio_xml", "edits", "expected_drawio_updated_at", "rules_version"}
 
 
 def test_tool_schemas_inline_local_definitions_for_responses_api() -> None:

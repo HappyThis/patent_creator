@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ...domain.disclosure import section_title_text
 from ...domain.figures import (
+    DRAWIO_XML_MAX_CHARS,
     FIGURE_LINK_PATTERN,
     MODEL_REVIEW_IMAGE_MAX_BYTES,
     figure_attachment,
@@ -19,51 +20,61 @@ from ...storage.workspace_store import WorkspaceStore
 from ..metadata import agent_tool
 
 APPENDIX_TITLE = "附录"
-FIGURE_RULES_VERSION = "figure-kit-drawio-v1"
+FIGURE_RULES_VERSION = "figure-kit-drawio-v2"
+MAX_FIGURE_EDITS = 20
 FIGURE_RULES = (
-    "create 只用于用户明确要求新增一张图；重试、重新生成、替换或修改现有图时，先 list/read 定位，再用 update。",
+    "create 只用于用户明确要求新增一张图；修改现有图时先 list/read 定位，局部修改用 edit，整体重构或大范围调整用 write。",
     "正文只使用工具返回的 markdown_ref 引用图；figure block 只在附录展示图本体。",
-    "update 前必须 read，并携带读取到的 drawio_updated_at；提交完整新版 XML，不提交 patch。",
-    "create/update 只接受完整、未压缩的 draw.io XML；根节点使用 mxfile，且只包含一个 diagram 和一个 mxGraphModel。",
-    "页面固定为 1500x900；所有节点和连线拐点必须位于页面内，系统不自动排版、避障或改线。",
+    "write/edit 前必须 read 并携带读取到的 drawio_updated_at；write 提交完整新版 XML，edit 提交从当前 XML 复制的唯一 old_text 与对应 new_text。",
+    "create/write 只接受完整、未压缩、单 diagram 的 draw.io XML；页面固定为 1500x900，所有节点和连线拐点必须位于页面内；edit 完成后同样执行完整校验。",
+    "系统不自动排版、避障、改线或美化；Agent 和人类都直接修改同一份 draw.io XML。",
     "图只用于显著降低理解成本，优先表达模块关系、数据流、控制关系、处理阶段、状态变化、边界、输入输出或反馈闭环。",
-    "默认采用简约黑白技术示意图：白底、黑色或深灰线条、少量浅灰填充、细边框和简洁箭头。",
-    "先确定主链路、核心分组或关键对照，再通过对齐、留白和稳定间距组织；连线应短、少交叉、少回折且不穿过节点。",
-    "形状必须有稳定语义：处理模块用矩形、判断用菱形、数据对象用字段框、系统边界用分组框、约束用轻量旁注。",
-    "不要套固定图型；图的组织方式必须服务于当前技术关系。",
-    "每条连接线必须有明确起点、终点、方向和含义；实线、虚线、反馈线等差异必须具有稳定语义，必要时使用短标签。",
-    "虚线应少用且只表达一种含义；禁止无标签长虚线跨区、长斜线、穿越多个区域或穿过节点文字的线。",
-    "文本使用短语，辅助说明不超过 1-2 行；禁止小字号密集文字、长句、段落和说明书式正文。",
-    "图不是正文摘要；优先画结构、边界、流向、状态和约束，长说明留在正文。",
-    "边界框只表达具体、局部、可命名的系统、层级、责任或约束边界；禁止用大外框包住整张主画面。",
-    "边界样式不能与连接线语义冲突；分组标题应贴近其内容，线条不得穿过边界标题区。",
-    "禁止独立线型示例、图例盒或说明卡；优先在线旁直接标注关系。",
-    "避免彩色卡片、渐变、阴影、重圆角、装饰图标、背景纹理、页面式标题栏和营销插画。",
+    "默认采用简约黑白技术示意图；除非用户另有要求，避免渐变、重阴影、装饰图标、背景纹理和营销式视觉元素。",
+    "形状、连线、边界和必要图例可按技术关系自由选择，但同一张图中的视觉语义必须稳定，不强制固定图型或形状映射。",
+    "先建立清楚的主关系或阅读路径，再通过对齐、留白和稳定间距组织；连线应尽量短、少交叉，并避免穿过节点或文字。",
+    "文本使用短语，复杂度按表达需要决定；当一张图已难以理解时删减次要关系或拆图，不要用长段说明弥补结构混乱。",
     "默认不添加 101/102/201 等专利附图编号，除非用户明确要求正式附图标记。",
-    "单图只承载一个主关系和最多两类辅助关系，线条视觉语义最多三类；建议保留 6-12 个关键元素。",
-    "结构、状态、异常恢复或控制路径同时过多时，应删减次要关系或拆图，不要靠图例和说明文字补救混乱。",
-    "create/update 成功后检查随结果返回的截图；若布局、文字、线条、箭头、形状语义或可读性有明显问题，read 后 update。",
-    "check 用于提交前或批量编辑后检查正文引用、图号文本和附录 figure block 是否一致。",
+    "create/write/edit 成功后检查随结果返回的截图；只修复影响理解或使用的客观问题，局部问题用 edit，整体问题用 write，轻微审美偏好留给人工调整。",
 )
+
+
+class FigureEditOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    old_text: str = Field(
+        min_length=1,
+        max_length=DRAWIO_XML_MAX_CHARS,
+        description="必须从最近一次 read 返回的 drawio_xml 中原样复制，并在当前 XML 中唯一出现。",
+    )
+    new_text: str = Field(
+        max_length=DRAWIO_XML_MAX_CHARS,
+        description="用于替换 old_text 的新 XML 片段；允许为空字符串以删除目标片段。",
+    )
 
 
 class FigureKitArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["rules", "create", "read", "update", "delete", "list", "check"] = Field(
-        description="操作类型。首次绘图先调用 rules；create/update 必须携带 rules 返回的 rules_version。"
+    action: Literal["rules", "create", "read", "write", "edit", "delete", "list", "check"] = Field(
+        description="操作类型。首次绘图先调用 rules；create/write/edit 必须携带 rules 返回的 rules_version。"
     )
-    ref: str | None = Field(default=None, description="read/update/delete 使用，格式为 figure:fig_000001。")
-    title: str | None = Field(default=None, max_length=120, description="create/update 使用，附图标题，例如 系统结构示意图。")
+    ref: str | None = Field(default=None, description="read/write/edit/delete 使用，格式为 figure:fig_000001。")
+    title: str | None = Field(default=None, max_length=120, description="create/write/edit 使用，附图标题，例如 系统结构示意图。")
     drawio_xml: str | None = Field(
         default=None,
         description=(
-            "create/update 使用，完整 draw.io XML，建议使用 <mxfile><diagram><mxGraphModel>...</mxGraphModel></diagram></mxfile>。"
+            "create/write 使用，完整 draw.io XML，建议使用 <mxfile><diagram><mxGraphModel>...</mxGraphModel></diagram></mxfile>。"
             "页面必须为 1500x900，节点和拐点不能超出页面。"
         ),
     )
-    expected_drawio_updated_at: str | None = Field(default=None, description="update 使用，必须填写最近一次 read 返回的 drawio_updated_at。")
-    rules_version: str | None = Field(default=None, description="create/update 使用，填写最近一次 rules 返回的 rules_version。")
+    edits: list[FigureEditOperation] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_FIGURE_EDITS,
+        description="edit 使用；按顺序执行的精确替换。每个 old_text 必须在当前 XML 中恰好出现一次，任一失败则全部不落盘。",
+    )
+    expected_drawio_updated_at: str | None = Field(default=None, description="write/edit 使用，必须填写最近一次 read 返回的 drawio_updated_at。")
+    rules_version: str | None = Field(default=None, description="create/write/edit 使用，填写最近一次 rules 返回的 rules_version。")
 
 
 @agent_tool(args_model=FigureKitArguments)
@@ -75,17 +86,18 @@ def figure_kit(
     """创建和维护用于解释技术方案的可编辑 draw.io 结构示意图；首次绘图先调用 rules 获取详细规则。
 
     Returns:
-        rules 返回 rules_version 和完整绘图规则；list/read 返回附图引用或 draw.io XML；create/update 返回精简元数据，并在图片可用时返回 render_image attachment；check 返回引用一致性问题。
+        rules 返回 rules_version 和完整绘图规则；list/read 返回附图引用或 draw.io XML；create/write/edit 返回精简元数据，并在图片可用时返回 render_image attachment；check 返回引用一致性问题。
 
     Rules:
-        - create/update 前必须先调用 rules，并携带其 rules_version；详细绘图规则只在 rules 结果中返回。
-        - update 前还必须 read，并携带最新 drawio_updated_at。
+        - create/write/edit 前必须先调用 rules，并携带其 rules_version；详细绘图规则只在 rules 结果中返回。
+        - write/edit 前还必须 read，并携带最新 drawio_updated_at；edit 的每个 old_text 必须唯一匹配。
         - 正文使用工具返回的 markdown_ref；figure block 只用于附录展示图本体。
 
     Examples:
         - 获取规则: {"action":"rules"}
         - 列出附图: {"action":"list"}
         - 读取附图 draw.io XML: {"action":"read","ref":"figure:fig_000001"}
+        - 局部替换: {"action":"edit","ref":"figure:fig_000001","expected_drawio_updated_at":"...","rules_version":"figure-kit-drawio-v2","edits":[{"old_text":"旧名称","new_text":"新名称"}]}
         - 检查一致性: {"action":"check"}
     """
     parsed = _validate_figure_arguments(arguments)
@@ -98,7 +110,7 @@ def figure_kit(
             "status": "success",
             "output": {
                 "rules_version": FIGURE_RULES_VERSION,
-                "required_for": ["create", "update"],
+                "required_for": ["create", "write", "edit"],
                 "rules": list(FIGURE_RULES),
             },
         }
@@ -111,6 +123,8 @@ def figure_kit(
         rules_result = _require_current_rules(arguments)
         if rules_result is not None:
             return rules_result
+        if arguments.get("edits") is not None:
+            return tool_failed("invalid_tool_arguments", "figure_kit.create 不接受 edits；新建图请提交完整 drawio_xml。")
         title = str(arguments.get("title") or "").strip()
         drawio_xml = arguments.get("drawio_xml")
         if not title:
@@ -136,20 +150,44 @@ def figure_kit(
         payload["drawio_xml"] = drawio_xml
         return {"status": "success", "output": {"figure": payload}}
 
-    if action == "update":
+    if action == "write":
         rules_result = _require_current_rules(arguments)
         if rules_result is not None:
             return rules_result
+        if arguments.get("edits") is not None:
+            return tool_failed("invalid_tool_arguments", "figure_kit.write 不接受 edits；请提交完整 drawio_xml。")
         drawio_xml = arguments.get("drawio_xml")
         if drawio_xml is None:
-            return tool_failed("drawio_xml_required", "figure_kit.update 需要非空 drawio_xml。")
+            return tool_failed("drawio_xml_required", "figure_kit.write 需要非空 drawio_xml。")
         title_value = arguments.get("title")
-        update_title = str(title_value).strip() if title_value is not None else None
-        result = store.update_figure(
+        write_title = str(title_value).strip() if title_value is not None else None
+        result = store.write_figure(
             project_id,
             figure_id,
-            title=update_title,
+            title=write_title,
             drawio_xml=drawio_xml,
+            expected_drawio_updated_at=arguments.get("expected_drawio_updated_at"),
+        )
+        if result.get("status") == "failed":
+            return result
+        return _figure_change_success(store, project_id, result["output"]["figure"])
+
+    if action == "edit":
+        rules_result = _require_current_rules(arguments)
+        if rules_result is not None:
+            return rules_result
+        if arguments.get("drawio_xml") is not None:
+            return tool_failed("invalid_tool_arguments", "figure_kit.edit 不接受 drawio_xml；请使用 edits 提交唯一精确替换。")
+        edits = arguments.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return tool_failed("figure_edits_required", "figure_kit.edit 至少需要一个替换项。")
+        title_value = arguments.get("title")
+        edit_title = str(title_value).strip() if title_value is not None else None
+        result = store.edit_figure(
+            project_id,
+            figure_id,
+            title=edit_title,
+            edits=edits,
             expected_drawio_updated_at=arguments.get("expected_drawio_updated_at"),
         )
         if result.get("status") == "failed":
@@ -187,7 +225,7 @@ def _require_current_rules(arguments: dict[str, Any]) -> dict[str, Any] | None:
         return None
     return tool_failed(
         "figure_rules_required",
-        "create/update 前必须先调用 figure_kit.rules，并把返回的 rules_version 原样传入。",
+        "create/write/edit 前必须先调用 figure_kit.rules，并把返回的 rules_version 原样传入。",
         current_rules_version=FIGURE_RULES_VERSION,
     )
 
@@ -275,7 +313,7 @@ def _figure_change_success(
     if attachment_available:
         message = (
             "已生成当前图片，并随本次工具结果附加截图供你查看。请复盘布局、文字、线条、箭头、"
-            "形状语义和整体可读性；如存在明显问题，请 read 后 update。"
+            "形状语义和整体可读性；只修复影响理解或使用的客观问题，局部修改用 edit，整体修改用 write。"
         )
         attachments = [figure_attachment(figure)]
     else:

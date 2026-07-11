@@ -29,7 +29,7 @@ from ..domain.figures import (
     drawio_updated_at,
     figure_summary,
     new_drawio_updated_at,
-    update_figure_record,
+    write_figure_record,
     validate_drawio_xml,
 )
 from ..schemas import ProjectRecord, SessionEvent, SessionEventType, SessionSummary
@@ -599,7 +599,7 @@ class WorkspaceStore:
                 },
             }
 
-    def update_figure(
+    def write_figure(
         self,
         project_id: str,
         figure_id: str,
@@ -609,56 +609,174 @@ class WorkspaceStore:
         expected_drawio_updated_at: str | None,
     ) -> dict[str, Any]:
         if not expected_drawio_updated_at:
-            return tool_failed("drawio_read_required", "修改 draw.io 图前必须先读取当前附图，并在 update 时带上 drawio_updated_at。")
+            return tool_failed("drawio_read_required", "覆盖 draw.io 图前必须先读取当前附图，并在 write 时带上 drawio_updated_at。")
         validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
         with self._figure_project_lock(project_id):
-            figure_path = self.figure_json_file(project_id, figure_id)
-            if not figure_path.exists():
-                return {"status": "failed", "output": {"code": "figure_not_found", "message": f"figure 不存在：{figure_id}"}}
-            current = self.read_json(figure_path)
-            self._cleanup_unreferenced_figure_revisions(project_id, figure_id, current)
-            current_drawio_updated_at = drawio_updated_at(current)
-            if expected_drawio_updated_at != current_drawio_updated_at:
-                return tool_failed(
-                    "drawio_conflict",
-                    "当前附图已在你读取之后被修改，请重新 read 最新 draw.io XML 后再 update。",
-                    current_drawio_updated_at=current_drawio_updated_at,
-                )
+            snapshot = self._figure_mutation_snapshot_locked(
+                project_id,
+                figure_id,
+                expected_drawio_updated_at=expected_drawio_updated_at,
+            )
+            if snapshot["status"] == "failed":
+                return snapshot
+            return self._commit_figure_revision_locked(
+                project_id,
+                figure_id,
+                figure_path=snapshot["output"]["figure_path"],
+                current=snapshot["output"]["figure"],
+                title=title,
+                drawio_xml=validate_result["output"]["drawio_xml"],
+            )
 
-            revision = self._new_figure_revision(project_id, figure_id)
-            revision_dir = revision["drawio_file"].parent
+    def edit_figure(
+        self,
+        project_id: str,
+        figure_id: str,
+        *,
+        title: str | None,
+        edits: list[dict[str, str]],
+        expected_drawio_updated_at: str | None,
+    ) -> dict[str, Any]:
+        if not expected_drawio_updated_at:
+            return tool_failed("drawio_read_required", "编辑 draw.io 图前必须先读取当前附图，并在 edit 时带上 drawio_updated_at。")
+        if not edits:
+            return tool_failed("figure_edits_required", "figure_kit.edit 至少需要一个替换项。")
+
+        with self._figure_project_lock(project_id):
+            snapshot = self._figure_mutation_snapshot_locked(
+                project_id,
+                figure_id,
+                expected_drawio_updated_at=expected_drawio_updated_at,
+            )
+            if snapshot["status"] == "failed":
+                return snapshot
+            current = snapshot["output"]["figure"]
+            drawio_file = self._figure_asset_file_from_record(
+                project_id,
+                figure_id,
+                current,
+                section="source",
+                fallback_name="diagram.drawio",
+            )
             try:
-                self.write_text_atomic(revision["drawio_file"], validate_result["output"]["drawio_xml"])
-                render_result = self._render_drawio_file(
-                    input_path=revision["drawio_file"],
-                    output_path=revision["render_file"],
-                )
-                if render_result["status"] == "failed":
-                    shutil.rmtree(revision_dir, ignore_errors=True)
-                    return render_result
-                drawio_timestamp = new_drawio_updated_at()
-                updated = update_figure_record(
-                    current,
-                    title=title,
-                    drawio_timestamp=drawio_timestamp,
-                    source_path=revision["source_path"],
-                    render_path=revision["render_path"],
-                )
-                self.write_json_atomic(figure_path, updated)
+                next_xml = drawio_file.read_text(encoding="utf-8")
             except OSError as exc:
-                shutil.rmtree(revision_dir, ignore_errors=True)
-                return tool_failed("figure_storage_failed", f"附图保存失败：{exc}")
+                return tool_failed("figure_storage_failed", f"附图源文件读取失败：{exc}")
 
-            self._remove_superseded_figure_assets(project_id, figure_id, current, updated)
-            self._cleanup_unreferenced_figure_revisions(project_id, figure_id, updated)
-            return {
-                "status": "success",
-                "output": {
-                    "figure": self._normalize_figure(project_id, updated),
-                },
-            }
+            for index, edit in enumerate(edits):
+                old_text = edit.get("old_text") if isinstance(edit, dict) else None
+                new_text = edit.get("new_text") if isinstance(edit, dict) else None
+                if not isinstance(old_text, str) or not old_text or not isinstance(new_text, str):
+                    return tool_failed(
+                        "figure_edit_invalid",
+                        f"第 {index + 1} 个替换项必须包含非空 old_text 和字符串 new_text。",
+                        edit_index=index,
+                    )
+                if old_text == new_text:
+                    return tool_failed(
+                        "figure_edit_no_change",
+                        f"第 {index + 1} 个替换项的 old_text 与 new_text 相同。",
+                        edit_index=index,
+                    )
+                match_count = next_xml.count(old_text)
+                if match_count == 0:
+                    return tool_failed(
+                        "figure_edit_target_not_found",
+                        f"第 {index + 1} 个替换项在当前 draw.io XML 中没有匹配。请重新 read 后提供准确片段。",
+                        edit_index=index,
+                    )
+                if match_count > 1:
+                    return tool_failed(
+                        "figure_edit_target_not_unique",
+                        f"第 {index + 1} 个替换项在当前 draw.io XML 中匹配 {match_count} 次；old_text 必须唯一。",
+                        edit_index=index,
+                        match_count=match_count,
+                    )
+                next_xml = next_xml.replace(old_text, new_text, 1)
+
+            validate_result = validate_drawio_xml(next_xml)
+            if validate_result["status"] == "failed":
+                return validate_result
+            return self._commit_figure_revision_locked(
+                project_id,
+                figure_id,
+                figure_path=snapshot["output"]["figure_path"],
+                current=current,
+                title=title,
+                drawio_xml=validate_result["output"]["drawio_xml"],
+            )
+
+    def _figure_mutation_snapshot_locked(
+        self,
+        project_id: str,
+        figure_id: str,
+        *,
+        expected_drawio_updated_at: str,
+    ) -> dict[str, Any]:
+        figure_path = self.figure_json_file(project_id, figure_id)
+        if not figure_path.exists():
+            return tool_failed("figure_not_found", f"figure 不存在：{figure_id}")
+        current = self.read_json(figure_path)
+        self._cleanup_unreferenced_figure_revisions(project_id, figure_id, current)
+        current_drawio_updated_at = drawio_updated_at(current)
+        if expected_drawio_updated_at != current_drawio_updated_at:
+            return tool_failed(
+                "drawio_conflict",
+                "当前附图已在你读取之后被修改，请重新 read 最新 draw.io XML 后再操作。",
+                current_drawio_updated_at=current_drawio_updated_at,
+            )
+        return {
+            "status": "success",
+            "output": {
+                "figure_path": figure_path,
+                "figure": current,
+            },
+        }
+
+    def _commit_figure_revision_locked(
+        self,
+        project_id: str,
+        figure_id: str,
+        *,
+        figure_path: Path,
+        current: dict[str, Any],
+        title: str | None,
+        drawio_xml: str,
+    ) -> dict[str, Any]:
+        revision = self._new_figure_revision(project_id, figure_id)
+        revision_dir = revision["drawio_file"].parent
+        try:
+            self.write_text_atomic(revision["drawio_file"], drawio_xml)
+            render_result = self._render_drawio_file(
+                input_path=revision["drawio_file"],
+                output_path=revision["render_file"],
+            )
+            if render_result["status"] == "failed":
+                shutil.rmtree(revision_dir, ignore_errors=True)
+                return render_result
+            drawio_timestamp = new_drawio_updated_at()
+            written = write_figure_record(
+                current,
+                title=title,
+                drawio_timestamp=drawio_timestamp,
+                source_path=revision["source_path"],
+                render_path=revision["render_path"],
+            )
+            self.write_json_atomic(figure_path, written)
+        except OSError as exc:
+            shutil.rmtree(revision_dir, ignore_errors=True)
+            return tool_failed("figure_storage_failed", f"附图保存失败：{exc}")
+
+        self._remove_superseded_figure_assets(project_id, figure_id, current, written)
+        self._cleanup_unreferenced_figure_revisions(project_id, figure_id, written)
+        return {
+            "status": "success",
+            "output": {
+                "figure": self._normalize_figure(project_id, written),
+            },
+        }
 
     def delete_figure(self, project_id: str, figure_id: str) -> bool:
         with self._figure_project_lock(project_id):

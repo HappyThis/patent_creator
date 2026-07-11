@@ -1,8 +1,8 @@
 # Benchmark 评估历史
 
-该目录用于保存已经人工确认可以入库的专利交底书技术方案评估结果快照。原始运行目录 `../runs/` 是临时调试产物，不进入版本控制。
+该目录保存人工确认后可以入库的技术方案 Benchmark 结果快照。完整运行证据位于 `../runs/<run_id>/`，不进入版本控制。
 
-发布结果使用：
+新版发布命令：
 
 ```bash
 backend/.venv/bin/python benchmarks/patent_technical_solution/evaluator/publish_result.py \
@@ -10,31 +10,9 @@ backend/.venv/bin/python benchmarks/patent_technical_solution/evaluator/publish_
   --name <result_id>
 ```
 
-发布脚本只整理结果，不执行 `git add`、`git commit` 或任何提交操作。是否提交由开发者人工检查后决定。
+新版结果快照只包含：
 
-每个结果快照包含：
+- `manifest.json`：来源 run、运行配置、模型、聚合数据、Case 状态和结论引用。
+- `conclusions/<case_id>/result.json` 或 `rNN.json`：Codex 原样输出的总分与综合评价报告。
 
-- `manifest.json`：本次发布的来源、模型备注、case 列表、运行数量和 git 状态。
-- `evaluation_summary.json`：机器可读汇总。
-- `evaluation_report.md`：人可读评估报告。
-- `case_results.jsonl`：每个 case/repeat 一行的轻量结果。
-- `artifacts/`：被评估的技术方案正文。
-- `judge_results/`：Codex-as-judge 的结构化评分结果。
-
-发布脚本不会归档：
-
-- `prepared_environment/project_snapshot/`
-- `subject/session_events.jsonl`
-- `judge/codex_judge_events.jsonl`
-- `run_case_stdout.txt`
-- `run_case_stderr.txt`
-- `subject/disclosure.json`
-- 本机绝对路径
-
-## 最新发布结果
-
-| 结果 ID | Subject 模型 | Judge | 规模 | 平均分 | 完成情况 | 备注 |
-| --- | --- | --- | --- | ---: | --- | --- |
-| `20260619-gpt55-baseline-10cases-5x-w10` | `gpt-5.5` | `codex` | 10 cases x 5 repeats，workers=10 | 93.14 | 50/50 scored，artifact_success=50/50 | min=82，max=98，stdev=3.43；来源 run 为 `20260619-gpt55-baseline-10cases-5x-w10` |
-
-上一版已发布基线为 `20260605-patent-tech-solution-10cases-5x-w10`，subject 模型为 `deepseek-v4-pro`，平均分 87.06，min=70，max=96。在同样 10 cases x 5 repeats x 10 workers 的配置下，本次结果高出 +6.08 分。
+发布脚本不会复制 `subject/`、冻结环境、Agent/Codex 日志、技术方案正文或图片，也不会执行 `git add`、`commit` 或 `push`。原有 v1 历史快照保持不变；新版脚本不迁移、不兼容旧运行目录。
