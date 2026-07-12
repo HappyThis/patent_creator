@@ -85,7 +85,12 @@ async def run_codex_judge(
 
     try:
         sdk = _load_sdk()
-        config = sdk.CodexConfig(cwd=str(case_run_dir), codex_bin=codex_bin)
+        config = _build_codex_config(
+            sdk,
+            case_run_dir=case_run_dir,
+            codex_bin=codex_bin,
+            reasoning_effort=reasoning_effort,
+        )
         async with sdk.AsyncCodex(config) as codex:
             resolved_model = model or await _default_model(codex)
             metadata = codex.metadata
@@ -140,6 +145,20 @@ async def run_codex_judge(
     except BaseException:
         stderr_path.write_text(traceback.format_exc(), encoding="utf-8")
         raise
+
+
+def _build_codex_config(
+    sdk: Any,
+    *,
+    case_run_dir: Path,
+    codex_bin: str | None,
+    reasoning_effort: str,
+) -> Any:
+    return sdk.CodexConfig(
+        cwd=str(case_run_dir),
+        codex_bin=codex_bin,
+        config_overrides=(f"model_reasoning_effort={json.dumps(reasoning_effort)}",),
+    )
 
 
 def build_judge_prompt(

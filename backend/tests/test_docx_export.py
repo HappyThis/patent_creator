@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from docx import Document
@@ -11,6 +13,8 @@ import pytest
 from app.domain.disclosure import build_initial_disclosure
 from app.domain import docx_export
 from app.domain.docx_export import DocxExportError, export_disclosure_docx
+from app.storage import workspace_store as workspace_store_module
+from app.storage.workspace_store import WorkspaceStore
 
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -174,6 +178,134 @@ def test_docx_export_uses_existing_drawio_figure_png(tmp_path: Path) -> None:
     assert len(document.inline_shapes) == 1
     assert any(paragraph.text == "图1 系统结构示意图" for paragraph in document.paragraphs)
     assert not list((tmp_path / "exports").glob("docx-assets-*"))
+
+
+def test_docx_export_rejects_missing_declared_figure_png(tmp_path: Path) -> None:
+    disclosure = build_initial_disclosure("missing figure export")
+    disclosure["sections"][-1]["blocks"] = [
+        {
+            "id": "blk_missing_figure",
+            "type": "figure",
+            "figure_id": "fig_000001",
+        }
+    ]
+    figures = [
+        {
+            "figure_id": "fig_000001",
+            "label": "图1",
+            "title": "缺失截图",
+            "render": {
+                "type": "png",
+                "path": "assets/figures/fig_000001/render.png",
+                "width": 1500,
+                "height": 900,
+            },
+        }
+    ]
+
+    with pytest.raises(DocxExportError, match="figure render file is missing: fig_000001"):
+        export_disclosure_docx(
+            disclosure=disclosure,
+            figures=figures,
+            export_path=tmp_path / "missing-figure-export.docx",
+            project_dir=tmp_path,
+        )
+
+
+def test_docx_export_keeps_placeholder_for_unknown_figure(tmp_path: Path) -> None:
+    disclosure = build_initial_disclosure("unknown figure export")
+    disclosure["sections"][-1]["blocks"] = [
+        {
+            "id": "blk_unknown_figure",
+            "type": "figure",
+            "figure_id": "fig_000001",
+        }
+    ]
+
+    output_path = export_disclosure_docx(
+        disclosure=disclosure,
+        figures=[],
+        export_path=tmp_path / "unknown-figure-export.docx",
+        project_dir=tmp_path,
+    )
+
+    document = Document(str(output_path))
+    assert len(document.inline_shapes) == 0
+    assert any(paragraph.text == "fig_000001" for paragraph in document.paragraphs)
+
+
+def test_workspace_docx_export_uses_unlocked_stable_figure_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def render(_self: WorkspaceStore, *, input_path: Path, output_path: Path) -> dict:
+        assert input_path.is_file()
+        output_path.write_bytes(PNG_BYTES)
+        return {"status": "success", "output": {"path": str(output_path)}}
+
+    monkeypatch.setattr(WorkspaceStore, "_render_drawio_file", render)
+    store = WorkspaceStore(tmp_path / "data", "Test User", "test@example.com")
+    project = store.create_project("concurrent figure export")
+    project_id = project.project_id
+    drawio_xml = (Path(__file__).parent / "fixtures" / "figure-smoke.drawio").read_text(encoding="utf-8")
+    created_result = store.create_figure(project_id, title="系统结构示意图", drawio_xml=drawio_xml)
+    assert created_result["status"] == "success"
+    created = created_result["output"]["figure"]
+
+    disclosure = store.get_disclosure(project_id)
+    disclosure["sections"][-1]["blocks"] = [
+        {
+            "id": "blk_concurrent_figure",
+            "type": "figure",
+            "figure_id": created["figure_id"],
+        }
+    ]
+    store.save_disclosure(project_id, disclosure)
+    old_render_path = store.figure_render_file(project_id, created["figure_id"])
+    assert old_render_path.is_file()
+
+    snapshot_ready = threading.Event()
+    allow_docx_generation = threading.Event()
+    captured_snapshot: dict[str, Path] = {}
+
+    def delayed_export(**kwargs: object) -> Path:
+        figures = kwargs["figures"]
+        assert isinstance(figures, list)
+        render_record = figures[0]["render"]
+        snapshot_path = (Path(kwargs["project_dir"]) / render_record["path"]).resolve()
+        captured_snapshot["path"] = snapshot_path
+        assert snapshot_path != old_render_path.resolve()
+        assert snapshot_path.is_file()
+        snapshot_ready.set()
+        assert allow_docx_generation.wait(timeout=5)
+        assert not old_render_path.exists()
+        assert snapshot_path.read_bytes() == PNG_BYTES
+        return export_disclosure_docx(**kwargs)
+
+    monkeypatch.setattr(workspace_store_module, "export_disclosure_docx", delayed_export)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        export_future = pool.submit(store.export_docx, project_id)
+        assert snapshot_ready.wait(timeout=5)
+        write_future = pool.submit(
+            store.write_figure,
+            project_id,
+            created["figure_id"],
+            title="更新后的系统结构示意图",
+            drawio_xml=drawio_xml.replace('value="Source"', 'value="Updated Source"'),
+            expected_drawio_updated_at=created["source"]["updated_at"],
+        )
+        try:
+            write_result = write_future.result(timeout=5)
+        finally:
+            allow_docx_generation.set()
+        output_path = export_future.result(timeout=5)
+
+    assert write_result["status"] == "success"
+    assert not old_render_path.exists()
+    assert not captured_snapshot["path"].exists()
+    document = Document(str(output_path))
+    assert len(document.inline_shapes) == 1
 
 
 def test_docx_export_cleans_asset_directory_when_renderer_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

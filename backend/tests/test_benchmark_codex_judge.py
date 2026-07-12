@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import json
 import os
@@ -10,15 +9,29 @@ from typing import Any
 
 EVALUATOR_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "software_patent_solution_github" / "evaluator"
 PATENT_BENCH_PATH = Path(__file__).resolve().parents[2] / "benchmarks" / "patent_technical_solution" / "bench.py"
+LEGACY_CODEX_JUDGE_MODULE = "_patent_creator_test_software_codex_judge"
 
 
 def load_codex_judge() -> Any:
     if str(EVALUATOR_DIR) not in sys.path:
         sys.path.insert(0, str(EVALUATOR_DIR))
-    return importlib.import_module("codex_judge")
+    spec = importlib.util.spec_from_file_location(LEGACY_CODEX_JUDGE_MODULE, EVALUATOR_DIR / "codex_judge.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[LEGACY_CODEX_JUDGE_MODULE] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(LEGACY_CODEX_JUDGE_MODULE, None)
+        raise
+    return module
 
 
 codex_judge: Any = load_codex_judge()
+
+
+def test_legacy_codex_judge_uses_unique_module_name() -> None:
+    assert codex_judge.__name__ == LEGACY_CODEX_JUDGE_MODULE
 
 
 def test_resolve_codex_bin_prefers_windows_cmd(monkeypatch) -> None:

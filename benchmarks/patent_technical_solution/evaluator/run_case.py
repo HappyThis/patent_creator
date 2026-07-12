@@ -16,24 +16,62 @@ BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = Path(__file__).resolve().parents[3]
 EVALUATOR_DIR = Path(__file__).resolve().parent
 RUNNER_FILE = "runner.md"
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
 
-from codex_judge import CodexJudgeTimeout, JudgeRunResult, run_codex_judge  # noqa: E402
-from prepare_env import prepare_exploration_environment  # noqa: E402
-from records import (  # noqa: E402
-    EXECUTION_SCHEMA_VERSION,
-    aggregate_case_records,
-    atomic_write_json,
-    finish_execution,
-    finish_phase,
-    finish_run_record,
-    new_execution,
-    new_run_record,
-    read_json_dict,
-    start_phase,
-)
-from run_metadata import capture_model_config, compact_dict, git_metadata  # noqa: E402
+if __package__:
+    from .codex_judge import CodexJudgeTimeout, JudgeRunResult, run_codex_judge
+    from .judge_runtime import JudgeRuntimeResolutionError, resolve_judge_runtime
+    from .prepare_env import prepare_exploration_environment
+    from .records import (
+        EXECUTION_SCHEMA_VERSION,
+        aggregate_case_records,
+        atomic_write_json,
+        finish_execution,
+        finish_judge_attempt,
+        finish_phase,
+        finish_run_record,
+        new_execution,
+        new_run_record,
+        preserve_legacy_judge_attempt,
+        read_json_dict,
+        start_judge_attempt,
+        start_phase,
+    )
+    from .run_metadata import (
+        capture_judge_requested_config,
+        capture_model_config,
+        compact_dict,
+        git_metadata,
+        normalize_judge_reasoning_effort,
+    )
+else:
+    if str(EVALUATOR_DIR) not in sys.path:
+        sys.path.insert(0, str(EVALUATOR_DIR))
+
+    from codex_judge import CodexJudgeTimeout, JudgeRunResult, run_codex_judge  # noqa: E402
+    from judge_runtime import JudgeRuntimeResolutionError, resolve_judge_runtime  # noqa: E402
+    from prepare_env import prepare_exploration_environment  # noqa: E402
+    from records import (  # noqa: E402
+        EXECUTION_SCHEMA_VERSION,
+        aggregate_case_records,
+        atomic_write_json,
+        finish_execution,
+        finish_judge_attempt,
+        finish_phase,
+        finish_run_record,
+        new_execution,
+        new_run_record,
+        preserve_legacy_judge_attempt,
+        read_json_dict,
+        start_judge_attempt,
+        start_phase,
+    )
+    from run_metadata import (  # noqa: E402
+        capture_judge_requested_config,
+        capture_model_config,
+        compact_dict,
+        git_metadata,
+        normalize_judge_reasoning_effort,
+    )
 
 
 @dataclass(slots=True)
@@ -50,6 +88,8 @@ def main() -> None:
     args = parse_args()
     result = asyncio.run(run_case(args))
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result.get("status") == "judge_preflight_failed":
+        raise SystemExit(1)
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,6 +104,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--judge-model", default=None, help="Override BENCHMARK_JUDGE_MODEL/Codex config.")
     parser.add_argument("--judge-provider", default=None, help="Override BENCHMARK_JUDGE_PROVIDER/Codex config.")
     parser.add_argument("--judge-reasoning-effort", default=None, help="Override judge reasoning effort.")
+    parser.add_argument("--judge-runtime-resolution", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--repeat", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--case-output-dir", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--batch-child", action="store_true", help=argparse.SUPPRESS)
@@ -91,18 +132,22 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
     prepared_environment = case_run_dir / "prepared_environment"
     subject_dir = case_run_dir / "subject"
     agent_logs_dir = case_run_dir / "agent_logs"
-    judge_logs_dir = case_run_dir / "judge" / "codex_logs"
+    judge_logs_root = case_run_dir / "judge" / "codex_logs"
     conclusion_path = case_run_dir / "judge" / "conclusion" / "result.json"
     conclusion_rel = conclusion_path.relative_to(case_run_dir).as_posix()
 
     models = capture_model_config()
+    judge_requested = capture_judge_requested_config()
     judge_config = dict(models["judge"])
     if args.judge_model:
+        judge_requested["model"] = args.judge_model
         judge_config["model"] = args.judge_model
     if args.judge_provider:
+        judge_requested["provider"] = args.judge_provider
         judge_config["provider"] = args.judge_provider
     if args.judge_reasoning_effort:
-        judge_config["reasoning_effort"] = args.judge_reasoning_effort
+        judge_requested["reasoning_effort"] = args.judge_reasoning_effort.strip().lower()
+        judge_config["reasoning_effort"] = normalize_judge_reasoning_effort(args.judge_reasoning_effort)
     models["judge"] = judge_config
     run_config = compact_dict(
         {
@@ -117,8 +162,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.skip_subject:
         execution = require_reusable_execution(execution_path, prepared_environment, subject_dir)
-        reset_judge_phase(execution, judge_config)
-        conclusion_path.unlink(missing_ok=True)
+        reset_judge_phase(execution, judge_config, requested=judge_requested)
     else:
         if execution_path.exists():
             raise SystemExit(f"Case 运行目录已存在：{case_run_dir}。请更换 run id。")
@@ -128,11 +172,12 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             case_id=case_id,
             repeat=args.repeat,
             agent_config=execution_agent_config(models["agent"]),
-            judge_config=execution_judge_config(judge_config),
+            judge_config=execution_judge_config(judge_config, requested=judge_requested),
         )
 
     atomic_write_json(execution_path, execution)
     run_record = None
+    run_record_path: Path | None = None
     if not args.batch_child:
         run_record_path = run_dir / "run.json"
         run_record = read_json_dict(run_record_path) if args.skip_subject else None
@@ -149,7 +194,67 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             run_record.setdefault("models", {})["judge"] = judge_config
             run_record.setdefault("config", {})["skip_judge"] = False
             run_record["config"]["judge_timeout_seconds"] = args.judge_timeout
+        diagnostics = run_record.get("diagnostics")
+        if not isinstance(diagnostics, dict):
+            diagnostics = {}
+            run_record["diagnostics"] = diagnostics
+        diagnostics["judge_requested"] = dict(judge_requested)
         atomic_write_json(run_record_path, run_record)
+
+    runtime_resolution: dict[str, Any] | None = None
+    effective_judge_config: dict[str, Any] | None = None
+    if not args.skip_judge:
+        _announce(case_id, "judge_preflight", "resolving a compatible Codex runtime")
+        try:
+            runtime_resolution = (
+                parse_runtime_resolution(args.judge_runtime_resolution)
+                if args.judge_runtime_resolution
+                else await resolve_judge_runtime(
+                    cwd=case_run_dir,
+                    model=judge_config.get("model"),
+                    provider=str(judge_config.get("provider") or "openai"),
+                    reasoning_effort=str(judge_config.get("reasoning_effort") or "high"),
+                    service_tier=judge_config.get("service_tier"),
+                )
+            )
+            effective_judge_config = resolved_judge_config(judge_config, runtime_resolution)
+        except JudgeRuntimeResolutionError as exc:
+            runtime_resolution = exc.resolution
+            return finish_judge_preflight_failure(
+                execution=execution,
+                execution_path=execution_path,
+                requested=judge_requested,
+                runtime_resolution=runtime_resolution,
+                exc=exc,
+                run_record=run_record,
+                run_record_path=run_record_path,
+                run_dir=run_dir,
+                case_run_dir=case_run_dir,
+            )
+        except BaseException as exc:
+            runtime_resolution = unexpected_runtime_resolution(exc)
+            return finish_judge_preflight_failure(
+                execution=execution,
+                execution_path=execution_path,
+                requested=judge_requested,
+                runtime_resolution=runtime_resolution,
+                exc=exc,
+                run_record=run_record,
+                run_record_path=run_record_path,
+                run_dir=run_dir,
+                case_run_dir=case_run_dir,
+            )
+
+        execution["judge"]["runtime_resolution"] = runtime_resolution
+        execution["judge"]["effective"] = effective_judge_config
+        if args.skip_subject:
+            conclusion_path.unlink(missing_ok=True)
+        append_runtime_diagnostic(run_record, runtime_resolution)
+        atomic_write_json(execution_path, execution)
+        if run_record is not None and run_record_path is not None:
+            atomic_write_json(run_record_path, run_record)
+        selected_source = runtime_resolution["selected"]["source"]
+        _announce(case_id, "judge_preflight", f"selected runtime: {selected_source}")
 
     if not args.skip_subject:
         _announce(case_id, "prepare", "preparing frozen environment")
@@ -247,7 +352,23 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             case_run_dir=case_run_dir,
         )
 
+    if runtime_resolution is None or effective_judge_config is None:
+        raise RuntimeError("Judge runtime resolution is missing after preflight.")
+    selected_runtime = runtime_resolution.get("selected")
+    if not isinstance(selected_runtime, dict):
+        raise RuntimeError("Judge runtime resolution has no selected runtime.")
+    attempt_number = len(execution["judge"].get("attempts", [])) + 1
+    judge_logs_rel = f"judge/codex_logs/attempt-{attempt_number:03d}"
+    judge_logs_dir = case_run_dir / judge_logs_rel
+
     start_phase(execution, "judge")
+    start_judge_attempt(
+        execution,
+        logs_path=judge_logs_rel,
+        requested=dict(judge_requested),
+        effective=effective_judge_config,
+        runtime_resolution=runtime_resolution,
+    )
     atomic_write_json(execution_path, execution)
     _announce(case_id, "judge", "Codex judge started")
     try:
@@ -261,12 +382,14 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             provider=str(judge_config.get("provider") or "openai"),
             reasoning_effort=str(judge_config.get("reasoning_effort") or "high"),
             service_tier=judge_config.get("service_tier"),
-            codex_bin=judge_config.get("codex_bin"),
+            codex_bin=selected_runtime.get("launch_codex_bin"),
             timeout_seconds=args.judge_timeout,
         )
     except CodexJudgeTimeout as exc:
+        error = error_record("judge", exc)
         finish_phase(execution, "judge", status="timed_out")
-        finish_execution(execution, status="judge_timed_out", error=error_record("judge", exc))
+        finish_judge_attempt(execution, status="timed_out", error=error)
+        finish_execution(execution, status="judge_timed_out", error=error)
         atomic_write_json(execution_path, execution)
         return finalize_case(
             execution=execution,
@@ -276,8 +399,10 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
             case_run_dir=case_run_dir,
         )
     except BaseException as exc:
+        error = error_record("judge", exc)
         finish_phase(execution, "judge", status="failed")
-        finish_execution(execution, status="judge_failed", error=error_record("judge", exc))
+        finish_judge_attempt(execution, status="failed", error=error)
+        finish_execution(execution, status="judge_failed", error=error)
         atomic_write_json(execution_path, execution)
         return finalize_case(
             execution=execution,
@@ -288,12 +413,26 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     atomic_write_json(conclusion_path, judge_result.conclusion)
+    effective_judge_config.update(
+        compact_dict(
+            {
+                "provider": judge_result.provider,
+                "model": judge_result.model,
+                "reasoning_effort": judge_result.reasoning_effort,
+                "sdk_version": judge_result.sdk_version,
+            }
+        )
+    )
+    runtime_config = effective_judge_config.get("runtime")
+    if isinstance(runtime_config, dict) and judge_result.runtime_version:
+        runtime_config["judge_appserver_version"] = judge_result.runtime_version
     finish_phase(
         execution,
         "judge",
         status="completed",
         fields=judge_execution_fields(judge_result),
     )
+    finish_judge_attempt(execution, status="completed")
     finish_execution(execution, status="completed", conclusion_path=conclusion_rel)
     atomic_write_json(execution_path, execution)
     _announce(case_id, "result", f"case scored: {judge_result.conclusion['total_score']}")
@@ -457,16 +596,142 @@ def execution_agent_config(config: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def execution_judge_config(config: dict[str, Any]) -> dict[str, Any]:
+def execution_judge_config(
+    config: dict[str, Any],
+    *,
+    requested: dict[str, Any] | None = None,
+    runtime_resolution: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    value = compact_dict(
+        {
+            "provider": config.get("provider"),
+            "model": config.get("model"),
+            "reasoning_effort": config.get("reasoning_effort"),
+            "service_tier": config.get("service_tier"),
+            "sdk_version": config.get("sdk_version"),
+        }
+    )
+    value["requested"] = dict(requested or value)
+    value["effective"] = None
+    value["runtime_resolution"] = runtime_resolution
+    value["attempts"] = []
+    return value
+
+
+def parse_runtime_resolution(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Batch Judge runtime resolution is not valid JSON.") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Batch Judge runtime resolution must be a JSON object.")
+    if not isinstance(value.get("policy"), list) or not isinstance(value.get("attempts"), list):
+        raise ValueError("Batch Judge runtime resolution is missing policy or attempts.")
+    selected = value.get("selected")
+    if not isinstance(selected, dict) or not isinstance(selected.get("source"), str):
+        raise ValueError("Batch Judge runtime resolution has no selected runtime.")
+    launch_codex_bin = selected.get("launch_codex_bin")
+    if launch_codex_bin is not None and not isinstance(launch_codex_bin, str):
+        raise ValueError("Selected Judge runtime has an invalid launch path.")
+    return value
+
+
+def resolved_judge_config(
+    config: dict[str, Any],
+    runtime_resolution: dict[str, Any],
+) -> dict[str, Any]:
+    selected = runtime_resolution.get("selected")
+    if not isinstance(selected, dict):
+        raise ValueError("Judge runtime resolution has no selected runtime.")
+    runtime = compact_dict(
+        {
+            "source": selected.get("source"),
+            "path": selected.get("path"),
+            "launch_mode": selected.get("launch_mode"),
+            "binary_version": selected.get("binary_version"),
+            "preflight_appserver_version": selected.get("appserver_version"),
+            "sdk_version": selected.get("sdk_version"),
+        }
+    )
     return compact_dict(
         {
             "provider": config.get("provider"),
             "model": config.get("model"),
             "reasoning_effort": config.get("reasoning_effort"),
             "service_tier": config.get("service_tier"),
-            "codex_bin": config.get("codex_bin"),
-            "sdk_version": config.get("sdk_version"),
+            "sdk_version": selected.get("sdk_version") or config.get("sdk_version"),
+            "runtime": runtime,
         }
+    )
+
+
+def append_runtime_diagnostic(
+    run_record: dict[str, Any] | None,
+    runtime_resolution: dict[str, Any],
+) -> None:
+    if run_record is None:
+        return
+    diagnostics = run_record.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+        run_record["diagnostics"] = diagnostics
+    resolutions = diagnostics.setdefault("judge_runtime_resolutions", [])
+    if not isinstance(resolutions, list):
+        resolutions = []
+        diagnostics["judge_runtime_resolutions"] = resolutions
+    resolutions.append(runtime_resolution)
+
+
+def unexpected_runtime_resolution(exc: BaseException) -> dict[str, Any]:
+    return {
+        "policy": ["codex_app", "sdk_pinned", "path_cli"],
+        "selected": None,
+        "attempts": [
+            {
+                "source": "batch_payload",
+                "status": "rejected",
+                "stage": "validation",
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+            }
+        ],
+    }
+
+
+def finish_judge_preflight_failure(
+    *,
+    execution: dict[str, Any],
+    execution_path: Path,
+    requested: dict[str, Any],
+    runtime_resolution: dict[str, Any],
+    exc: BaseException,
+    run_record: dict[str, Any] | None,
+    run_record_path: Path | None,
+    run_dir: Path,
+    case_run_dir: Path,
+) -> dict[str, Any]:
+    error = error_record("judge_preflight", exc)
+    start_phase(execution, "judge")
+    start_judge_attempt(
+        execution,
+        logs_path=None,
+        requested=dict(requested),
+        effective=None,
+        runtime_resolution=runtime_resolution,
+    )
+    finish_phase(execution, "judge", status="preflight_failed")
+    finish_judge_attempt(execution, status="preflight_failed", error=error)
+    finish_execution(execution, status="judge_preflight_failed", error=error)
+    append_runtime_diagnostic(run_record, runtime_resolution)
+    atomic_write_json(execution_path, execution)
+    if run_record is not None and run_record_path is not None:
+        atomic_write_json(run_record_path, run_record)
+    _announce(str(execution["case_id"]), "judge_preflight", "no compatible Codex runtime")
+    return finalize_case(
+        execution=execution,
+        conclusion=None,
+        run_record=run_record,
+        run_dir=run_dir,
+        case_run_dir=case_run_dir,
     )
 
 
@@ -496,14 +761,21 @@ def require_reusable_execution(execution_path: Path, prepared_environment: Path,
     return execution
 
 
-def reset_judge_phase(execution: dict[str, Any], judge_config: dict[str, Any]) -> None:
+def reset_judge_phase(
+    execution: dict[str, Any],
+    judge_config: dict[str, Any],
+    *,
+    requested: dict[str, Any],
+) -> None:
+    attempts = list(preserve_legacy_judge_attempt(execution))
     execution["status"] = "preparing"
     execution["finished_at"] = None
     execution["duration_ms"] = None
     execution["error"] = None
     execution["conclusion"] = None
     execution["judge"] = {
-        **execution_judge_config(judge_config),
+        **execution_judge_config(judge_config, requested=requested),
+        "attempts": attempts,
         "status": "pending",
         "started_at": None,
         "finished_at": None,

@@ -60,6 +60,25 @@ class DocxExportError(RuntimeError):
     """Raised when DOCX asset rendering or export fails."""
 
 
+def referenced_figure_block_ids(disclosure: dict[str, Any]) -> set[str]:
+    """Return figure ids whose images are embedded as figure blocks."""
+
+    figure_ids: set[str] = set()
+
+    def visit_sections(sections: Iterable[dict[str, Any]]) -> None:
+        for section in sections:
+            for block in section.get("blocks", []):
+                if not isinstance(block, dict) or block.get("type") != "figure":
+                    continue
+                figure_id = str(block.get("figure_id") or "")
+                if figure_id:
+                    figure_ids.add(figure_id)
+            visit_sections(section.get("sections", []))
+
+    visit_sections(disclosure.get("sections", []))
+    return figure_ids
+
+
 def export_disclosure_docx(
     *,
     disclosure: dict[str, Any],
@@ -289,11 +308,13 @@ def _existing_figure_asset(figure_id: str, figure: dict[str, Any], project_dir: 
         return None
     render_path = render.get("path")
     if not isinstance(render_path, str) or not render_path:
-        return None
+        raise DocxExportError(f"DOCX figure render path is missing: {figure_id}")
     project_root = project_dir.resolve()
     resolved_path = (project_root / render_path).resolve()
-    if not resolved_path.is_relative_to(project_root) or not resolved_path.is_file():
-        return None
+    if not resolved_path.is_relative_to(project_root):
+        raise DocxExportError(f"DOCX figure render path is outside the project: {figure_id}")
+    if not resolved_path.is_file():
+        raise DocxExportError(f"DOCX figure render file is missing: {figure_id}")
     width_px = render.get("width") if isinstance(render.get("width"), (int, float)) else FIGURE_WIDTH
     height_px = render.get("height") if isinstance(render.get("height"), (int, float)) else FIGURE_HEIGHT
     return {

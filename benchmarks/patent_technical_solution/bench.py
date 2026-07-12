@@ -10,6 +10,9 @@ from pathlib import Path
 BENCHMARK_DIR = Path(__file__).resolve().parent
 REPO_DIR = BENCHMARK_DIR.parents[1]
 DEFAULT_PYTHON = REPO_DIR / "backend" / ".venv" / "bin" / "python"
+DRAWIO_PREFLIGHT = REPO_DIR / "scripts" / "drawio_render_preflight.py"
+DEFAULT_DRAWIO_URL = "http://127.0.0.1:8081/"
+DRAWIO_PREFLIGHT_COMMANDS = frozenset({"run", "subject", "batch"})
 DEFAULT_TIMEOUT = 900
 
 
@@ -25,6 +28,8 @@ def main() -> None:
     env = os.environ.copy()
     load_dotenv(REPO_DIR / ".env", env)
     python_bin = resolve_python(args.python)
+    if command_requires_drawio_preflight(args.command):
+        run_drawio_preflight(python_bin=python_bin, env=env, dry_run=args.dry_run)
 
     if args.command == "run":
         command = run_case_command(
@@ -33,6 +38,7 @@ def main() -> None:
             run_id=args.run_id,
             round_timeout=args.round_timeout,
             judge_timeout=args.judge_timeout,
+            extra_args=judge_override_args(args),
         )
     elif args.command == "subject":
         command = run_case_command(
@@ -51,7 +57,7 @@ def main() -> None:
             run_id=run_id,
             round_timeout=args.judge_timeout,
             judge_timeout=args.judge_timeout,
-            extra_args=["--skip-subject"],
+            extra_args=["--skip-subject", *judge_override_args(args)],
         )
     elif args.command == "batch":
         command = [
@@ -70,6 +76,7 @@ def main() -> None:
             command.extend(["--run-id", args.run_id])
         if args.skip_judge:
             command.append("--skip-judge")
+        command.extend(judge_override_args(args))
         if args.cases:
             command.extend([normalize_case(case_id) for case_id in args.cases])
     else:
@@ -104,6 +111,7 @@ def parse_args() -> argparse.Namespace:
     add_case_arg(judge)
     judge.add_argument("--run-id", help="Existing run id. Defaults to latest single run containing this case.")
     judge.add_argument("--judge-timeout", type=int, default=DEFAULT_TIMEOUT)
+    add_judge_args(judge)
     judge.add_argument("--dry-run", action="store_true")
 
     batch = subparsers.add_parser("batch", help="Run multiple cases.")
@@ -114,6 +122,7 @@ def parse_args() -> argparse.Namespace:
     batch.add_argument("--round-timeout", type=int, default=DEFAULT_TIMEOUT)
     batch.add_argument("--judge-timeout", type=int, default=DEFAULT_TIMEOUT)
     batch.add_argument("--skip-judge", action="store_true")
+    add_judge_args(batch)
     batch.add_argument("--dry-run", action="store_true")
 
     return parser.parse_args()
@@ -128,7 +137,23 @@ def add_common_run_args(parser: argparse.ArgumentParser, *, judge: bool = True) 
     parser.add_argument("--round-timeout", type=int, default=DEFAULT_TIMEOUT)
     if judge:
         parser.add_argument("--judge-timeout", type=int, default=DEFAULT_TIMEOUT)
+        add_judge_args(parser)
     parser.add_argument("--dry-run", action="store_true")
+
+
+def add_judge_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--judge-model", default=None, help="Override BENCHMARK_JUDGE_MODEL/Codex config.")
+    parser.add_argument("--judge-provider", default=None, help="Override BENCHMARK_JUDGE_PROVIDER/Codex config.")
+    parser.add_argument("--judge-reasoning-effort", default=None, help="Override judge reasoning effort.")
+
+
+def judge_override_args(args: argparse.Namespace) -> list[str]:
+    values = (
+        ("--judge-model", getattr(args, "judge_model", None)),
+        ("--judge-provider", getattr(args, "judge_provider", None)),
+        ("--judge-reasoning-effort", getattr(args, "judge_reasoning_effort", None)),
+    )
+    return [item for flag, value in values if value for item in (flag, str(value))]
 
 
 def resolve_python(value: str | None) -> Path:
@@ -167,6 +192,25 @@ def run_command(command: list[str], *, env: dict[str, str], dry_run: bool) -> No
     if dry_run:
         return
     raise SystemExit(subprocess.run(command, cwd=REPO_DIR, env=env, check=False).returncode)
+
+
+def run_drawio_preflight(*, python_bin: Path, env: dict[str, str], dry_run: bool) -> None:
+    command = [
+        str(python_bin),
+        str(DRAWIO_PREFLIGHT),
+        "--drawio-url",
+        env.get("PATENT_CREATOR_DRAWIO_EMBED_URL", DEFAULT_DRAWIO_URL),
+    ]
+    print("+ " + " ".join(command))
+    if dry_run:
+        return
+    completed = subprocess.run(command, cwd=REPO_DIR, env=env, check=False)
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode or 1)
+
+
+def command_requires_drawio_preflight(command: str) -> bool:
+    return command in DRAWIO_PREFLIGHT_COMMANDS
 
 
 def normalize_case(case_id: str) -> str:

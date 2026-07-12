@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-EVALUATOR_DIR = Path(__file__).resolve().parent
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
-
-from records import (
+from .records import (
     EXECUTION_SCHEMA_VERSION,
     aggregate_case_records,
     atomic_write_json,
     finish_execution,
+    finish_judge_attempt,
     finish_phase,
     new_execution,
+    preserve_legacy_judge_attempt,
     read_json_dict,
+    start_judge_attempt,
     start_phase,
 )
 
@@ -73,4 +71,79 @@ def test_aggregate_case_records_keeps_only_total_score_statistics() -> None:
     assert aggregate["cases"][0]["case_id"] == "001"
     assert aggregate["cases"][0]["average_score"] == 80
     assert "dimension_scores" not in aggregate
+
+
+def test_judge_attempts_append_across_retries() -> None:
+    execution = new_execution(
+        run_id="run-1",
+        case_id="001",
+        repeat=None,
+        agent_config={"model": "agent"},
+        judge_config={"model": "judge", "requested": {"model": "judge"}},
+    )
+    resolution = {
+        "policy": ["codex_app", "sdk_pinned", "path_cli"],
+        "selected": {"source": "codex_app", "path": "/app/codex"},
+        "attempts": [],
+    }
+
+    start_phase(execution, "judge")
+    start_judge_attempt(
+        execution,
+        logs_path="judge/codex_logs/attempt-001",
+        requested={"model": "judge", "reasoning_effort": "ultra"},
+        effective={"model": "judge", "reasoning_effort": "xhigh"},
+        runtime_resolution=resolution,
+    )
+    finish_phase(execution, "judge", status="failed")
+    finish_judge_attempt(
+        execution,
+        status="failed",
+        error={"phase": "judge", "type": "RuntimeError", "message": "failed"},
+    )
+
+    start_phase(execution, "judge")
+    start_judge_attempt(
+        execution,
+        logs_path="judge/codex_logs/attempt-002",
+        requested={"model": "judge", "reasoning_effort": "ultra"},
+        effective={"model": "judge", "reasoning_effort": "xhigh"},
+        runtime_resolution=resolution,
+    )
+    finish_phase(execution, "judge", status="completed", fields={"thread_id": "thread-2"})
+    finish_judge_attempt(execution, status="completed")
+
+    attempts = execution["judge"]["attempts"]
+    assert [attempt["status"] for attempt in attempts] == ["failed", "completed"]
+    assert attempts[0]["error"]["message"] == "failed"
+    assert attempts[1]["thread_id"] == "thread-2"
+    assert attempts[1]["logs_path"].endswith("attempt-002")
+
+
+def test_legacy_judge_summary_becomes_first_attempt() -> None:
+    execution = new_execution(
+        run_id="run-1",
+        case_id="001",
+        repeat=None,
+        agent_config={"model": "agent"},
+        judge_config={"model": "judge"},
+    )
+    execution["judge"].pop("attempts")
+    execution["judge"].update(
+        {
+            "status": "failed",
+            "started_at": "2026-01-01T00:00:00.000Z",
+            "finished_at": "2026-01-01T00:00:01.000Z",
+            "duration_ms": 1000,
+        }
+    )
+    execution["status"] = "judge_failed"
+    execution["error"] = {"phase": "judge", "type": "RuntimeError", "message": "old failure"}
+
+    attempts = preserve_legacy_judge_attempt(execution)
+
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "failed"
+    assert attempts[0]["logs_path"] == "judge/codex_logs"
+    assert attempts[0]["error"]["message"] == "old failure"
 

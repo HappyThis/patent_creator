@@ -36,6 +36,22 @@ def new_execution(
     judge_config: dict[str, Any],
 ) -> dict[str, Any]:
     started_at = now_iso()
+    judge = {
+        **judge_config,
+        "status": "pending",
+        "started_at": None,
+        "finished_at": None,
+        "duration_ms": None,
+        "thread_id": None,
+        "turn_id": None,
+        "sdk_version": judge_config.get("sdk_version"),
+        "runtime_version": None,
+        "usage": None,
+    }
+    judge.setdefault("requested", None)
+    judge.setdefault("effective", None)
+    judge.setdefault("runtime_resolution", None)
+    judge.setdefault("attempts", [])
     return {
         "schema_version": EXECUTION_SCHEMA_VERSION,
         "run_id": run_id,
@@ -57,21 +73,117 @@ def new_execution(
             "round_id": None,
             "usage": None,
         },
-        "judge": {
-            **judge_config,
-            "status": "pending",
-            "started_at": None,
-            "finished_at": None,
-            "duration_ms": None,
-            "thread_id": None,
-            "turn_id": None,
-            "sdk_version": judge_config.get("sdk_version"),
-            "runtime_version": None,
-            "usage": None,
-        },
+        "judge": judge,
         "conclusion": None,
         "error": None,
     }
+
+
+def preserve_legacy_judge_attempt(execution: dict[str, Any]) -> list[dict[str, Any]]:
+    judge = execution.get("judge")
+    if not isinstance(judge, dict):
+        raise ValueError("execution.judge must be an object")
+    attempts = judge.setdefault("attempts", [])
+    if not isinstance(attempts, list):
+        attempts = []
+        judge["attempts"] = attempts
+    if attempts or not judge.get("started_at") or judge.get("status") in {None, "pending", "running"}:
+        return attempts
+
+    requested = judge.get("requested")
+    if not isinstance(requested, dict):
+        requested = _judge_config_snapshot(judge)
+    effective = judge.get("effective")
+    if not isinstance(effective, dict):
+        effective = _judge_config_snapshot(judge, include_runtime=True)
+    attempts.append(
+        {
+            "attempt": 1,
+            "status": judge.get("status") or "unknown",
+            "started_at": judge.get("started_at"),
+            "finished_at": judge.get("finished_at"),
+            "duration_ms": judge.get("duration_ms"),
+            "logs_path": "judge/codex_logs",
+            "requested": requested,
+            "effective": effective,
+            "runtime_resolution": judge.get("runtime_resolution"),
+            "thread_id": judge.get("thread_id"),
+            "turn_id": judge.get("turn_id"),
+            "usage": judge.get("usage"),
+            "error": execution.get("error") if execution.get("status") != "completed" else None,
+        }
+    )
+    return attempts
+
+
+def start_judge_attempt(
+    execution: dict[str, Any],
+    *,
+    logs_path: str | None,
+    requested: dict[str, Any],
+    effective: dict[str, Any] | None,
+    runtime_resolution: dict[str, Any],
+) -> dict[str, Any]:
+    judge = execution.get("judge")
+    if not isinstance(judge, dict):
+        raise ValueError("execution.judge must be an object")
+    attempts = preserve_legacy_judge_attempt(execution)
+    attempt = {
+        "attempt": len(attempts) + 1,
+        "status": "running",
+        "started_at": judge.get("started_at") or now_iso(),
+        "finished_at": None,
+        "duration_ms": None,
+        "logs_path": logs_path,
+        "requested": requested,
+        "effective": effective,
+        "runtime_resolution": runtime_resolution,
+        "thread_id": None,
+        "turn_id": None,
+        "usage": None,
+        "error": None,
+    }
+    attempts.append(attempt)
+    judge["requested"] = requested
+    judge["effective"] = effective
+    judge["runtime_resolution"] = runtime_resolution
+    return attempt
+
+
+def finish_judge_attempt(
+    execution: dict[str, Any],
+    *,
+    status: str,
+    error: dict[str, Any] | None = None,
+) -> None:
+    judge = execution.get("judge")
+    if not isinstance(judge, dict):
+        raise ValueError("execution.judge must be an object")
+    attempts = judge.get("attempts")
+    if not isinstance(attempts, list) or not attempts:
+        raise ValueError("judge attempt has not been started")
+    attempt = attempts[-1]
+    if not isinstance(attempt, dict) or attempt.get("status") != "running":
+        raise ValueError("latest judge attempt is not running")
+    attempt.update(
+        {
+            "status": status,
+            "finished_at": judge.get("finished_at") or now_iso(),
+            "duration_ms": judge.get("duration_ms"),
+            "effective": judge.get("effective"),
+            "thread_id": judge.get("thread_id"),
+            "turn_id": judge.get("turn_id"),
+            "usage": judge.get("usage"),
+            "error": error,
+        }
+    )
+
+
+def _judge_config_snapshot(value: dict[str, Any], *, include_runtime: bool = False) -> dict[str, Any]:
+    keys = {"provider", "model", "reasoning_effort", "service_tier", "sdk_version"}
+    if include_runtime:
+        keys.update({"codex_bin", "runtime_version"})
+    return {key: value[key] for key in keys if value.get(key) is not None}
 
 
 def start_phase(execution: dict[str, Any], phase: str) -> None:

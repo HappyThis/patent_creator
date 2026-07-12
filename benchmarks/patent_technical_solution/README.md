@@ -77,6 +77,22 @@ cd backend
 uv sync --group benchmark
 ```
 
+运行 Agent 的 `run`、`subject` 和 `batch` 命令前，Benchmark 会使用标准附图执行一次真实 Draw.io PNG 导出预检，但不会自行启动 Docker 或 Draw.io。使用默认本机服务时，请先运行开发启动脚本，或手工启动容器：
+
+```bash
+docker compose -f compose.drawio.yaml up -d
+```
+
+如果没有运行过开发启动脚本，还需准备前端渲染依赖：
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium
+```
+
+`judge`、`list` 和 `status` 不需要 Draw.io 服务，也不会执行该预检。
+
 常用命令：
 
 ```bash
@@ -98,9 +114,18 @@ backend/.venv/bin/python benchmarks/patent_technical_solution/bench.py batch 001
 backend/.venv/bin/python benchmarks/patent_technical_solution/bench.py status example-batch
 ```
 
-Codex Judge 使用官方 `openai-codex` Python SDK，以只读沙箱运行。可通过 `BENCHMARK_JUDGE_MODEL`、`BENCHMARK_JUDGE_PROVIDER`、`BENCHMARK_JUDGE_REASONING_EFFORT` 和 `BENCHMARK_JUDGE_SERVICE_TIER` 覆盖本机 Codex 配置。
+Codex Judge 使用官方 `openai-codex` Python SDK，以只读沙箱运行。Judge 模型默认固定为 `gpt-5.5`，不继承本机 Codex 配置中的模型；需要覆盖时，可使用 `--judge-model`、`--judge-provider` 和 `--judge-reasoning-effort`，例如：
 
-SDK 会优先使用 `BENCHMARK_CODEX_BIN` 指定的 Codex binary；未指定时，会探测 PATH、ChatGPT/Codex App 和本机 plugin runtime 中可正常启动的 binary，均不可用时才使用 SDK 自带 runtime。实际 binary、SDK 版本和 runtime 版本都会记录到运行元数据中。
+```bash
+backend/.venv/bin/python benchmarks/patent_technical_solution/bench.py run 001 \
+  --judge-model gpt-5.6-sol \
+  --judge-provider openai \
+  --judge-reasoning-effort xhigh
+```
+
+Benchmark 不接受用户指定 Codex binary，而是按固定优先级自动选择运行时：Codex App runtime → Python SDK 自带的 pinned runtime → PATH 中的本地 Codex CLI。对于指定的 model、provider 和 reasoning effort，每个 run 会在 Agent 启动前执行一次最小真实 turn，验证候选运行时确实能够完成该配置；如果全部候选都失败，本次运行会在 Agent 前终止，不生成无 Judge 能力的 Agent 结果。批量运行只在批次开始时预检一次，并让所有 Case 复用选中的运行时。
+
+运行时的候选选择、每次预检失败和最终选择都会记录在 `runs/` 的运行诊断中；正式 Judge 的历次执行则记录在 `execution.json` 的 Judge attempts 中。发布脚本仍只复制评分结论和必要溯源，不会把这些诊断、尝试记录或运行时细节写入发布结果。
 
 ## 发布结果
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -15,6 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.11+ in supported envi
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = Path(__file__).resolve().parents[3]
+DEFAULT_JUDGE_MODEL = "gpt-5.5"
 
 
 def capture_model_config() -> dict[str, Any]:
@@ -22,7 +22,7 @@ def capture_model_config() -> dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY")
     base_url = _env_str("OPENAI_BASE_URL", "https://api.openai.com/v1")
     codex_config = read_codex_config()
-    codex_bin = resolve_codex_bin()
+    judge_requested = _judge_requested_config(codex_config)
     return {
         "agent": {
             "api": "responses",
@@ -37,18 +37,8 @@ def capture_model_config() -> dict[str, Any]:
             "api_key_env_var": "OPENAI_API_KEY" if api_key else None,
         },
         "judge": {
-            "provider": _env_optional("BENCHMARK_JUDGE_PROVIDER")
-            or _toml_string(codex_config, "model_provider")
-            or "openai",
-            "model": _env_optional("BENCHMARK_JUDGE_MODEL") or _toml_string(codex_config, "model"),
-            "reasoning_effort": (
-                _env_optional("BENCHMARK_JUDGE_REASONING_EFFORT")
-                or _toml_string(codex_config, "model_reasoning_effort")
-                or "high"
-            ).strip().lower(),
-            "service_tier": _env_optional("BENCHMARK_JUDGE_SERVICE_TIER")
-            or _toml_string(codex_config, "service_tier"),
-            "codex_bin": codex_bin,
+            **judge_requested,
+            "reasoning_effort": normalize_judge_reasoning_effort(judge_requested["reasoning_effort"]),
             "sdk_version": package_version("openai-codex"),
             "source": "benchmark_env_or_codex_config",
         },
@@ -63,6 +53,34 @@ def capture_model_config() -> dict[str, Any]:
             "compression_timeout": _env_float("PATENT_CREATOR_CONTEXT_COMPRESSION_TIMEOUT", 180.0),
         },
     }
+
+
+def capture_judge_requested_config() -> dict[str, Any]:
+    load_repo_env()
+    return _judge_requested_config(read_codex_config())
+
+
+def _judge_requested_config(codex_config: dict[str, Any]) -> dict[str, Any]:
+    return compact_dict(
+        {
+            "provider": _env_optional("BENCHMARK_JUDGE_PROVIDER")
+            or _toml_string(codex_config, "model_provider")
+            or "openai",
+            "model": _env_optional("BENCHMARK_JUDGE_MODEL") or DEFAULT_JUDGE_MODEL,
+            "reasoning_effort": (
+                _env_optional("BENCHMARK_JUDGE_REASONING_EFFORT")
+                or _toml_string(codex_config, "model_reasoning_effort")
+                or "high"
+            ).strip().lower(),
+            "service_tier": _env_optional("BENCHMARK_JUDGE_SERVICE_TIER")
+            or _toml_string(codex_config, "service_tier"),
+        }
+    )
+
+
+def normalize_judge_reasoning_effort(value: str) -> str:
+    normalized = value.strip().lower()
+    return "xhigh" if normalized == "ultra" else normalized
 
 
 def load_repo_env() -> None:
@@ -100,45 +118,6 @@ def infer_provider(base_url: str) -> str:
     if hostname in {"api.openai.com", "openai.com"}:
         return "openai"
     return "openai-compatible"
-
-
-def resolve_codex_bin() -> str | None:
-    explicit = _env_optional("BENCHMARK_CODEX_BIN")
-    candidates = [
-        explicit,
-        shutil.which("codex"),
-        "/Applications/ChatGPT.app/Contents/Resources/codex",
-        str(Path.home() / ".codex" / "plugins" / ".plugin-appserver" / "codex"),
-    ]
-    seen: set[str] = set()
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = str(Path(candidate).expanduser())
-        if path in seen:
-            continue
-        seen.add(path)
-        if codex_binary_version(path) is not None:
-            return path
-    return None
-
-
-def codex_binary_version(path: str) -> str | None:
-    try:
-        completed = subprocess.run(
-            [path, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    value = completed.stdout.strip()
-    return value or None
 
 
 def package_version(name: str) -> str | None:

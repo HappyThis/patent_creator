@@ -136,6 +136,14 @@ sync_frontend() {
   fi
 }
 
+install_playwright_chromium() {
+  echo "Ensuring Playwright Chromium is installed..."
+  (
+    cd "${FRONTEND_DIR}"
+    npm exec -- playwright install chromium
+  )
+}
+
 uses_bundled_drawio() {
   case "${PATENT_CREATOR_DRAWIO_EMBED_URL}" in
     "http://127.0.0.1:8081"|"http://127.0.0.1:8081/"*|"http://127.0.0.1:8081?"*|\
@@ -228,6 +236,10 @@ start_drawio() {
 sync_backend
 start_drawio
 sync_frontend
+install_playwright_chromium
+echo "Checking Draw.io rendering with the canonical smoke fixture..."
+"${BACKEND_PYTHON}" "${REPO_ROOT}/scripts/drawio_render_preflight.py" \
+  --drawio-url "${PATENT_CREATOR_DRAWIO_EMBED_URL}"
 
 backend_pid=""
 frontend_pid=""

@@ -65,7 +65,7 @@ http://127.0.0.1:5173
 PATENT_CREATOR_DRAWIO_EMBED_URL=http://127.0.0.1:8081/
 ```
 
-启动脚本会通过 `compose.drawio.yaml` 自动拉起并等待 Draw.io；首次启动会下载镜像，后续启动会直接复用容器。脚本退出后 Draw.io 容器仍会保留，可按需停止：
+启动脚本会通过 `compose.drawio.yaml` 自动拉起并等待 Draw.io；同步前端依赖后，会自动确保 Playwright Chromium 已安装，再使用仓库内的标准附图执行一次真实导出并校验 `1500x900` PNG。首次启动可能会下载 Draw.io 镜像和 Chromium，后续启动会复用已有内容。脚本退出后 Draw.io 容器仍会保留，可按需停止：
 
 ```bash
 docker compose -f compose.drawio.yaml down
@@ -76,6 +76,8 @@ docker compose -f compose.drawio.yaml down
 ```text
 PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO=true
 ```
+
+如果 Linux 环境的渲染预检提示 Chromium 系统依赖缺失，可在 `frontend/` 下执行 `npx playwright install-deps chromium` 后重试（可能需要 `sudo`）。
 
 运行数据默认保存在：
 

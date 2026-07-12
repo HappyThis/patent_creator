@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-EVALUATOR_DIR = Path(__file__).resolve().parent
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
-
-from publish_result import RESULT_SCHEMA_VERSION, publish_run, sanitize_result_id
-from records import RUN_SCHEMA_VERSION
+from .publish_result import RESULT_SCHEMA_VERSION, publish_run, sanitize_result_id
+from .records import RUN_SCHEMA_VERSION
 
 
 def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(tmp_path: Path) -> None:
@@ -33,6 +28,22 @@ def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(tmp_path: P
             "case_id": "001",
             "repeat": 1,
             "status": "completed",
+            "judge": {
+                "runtime_resolution": {
+                    "policy": ["codex_app", "sdk_pinned", "path_cli"],
+                    "selected": {"source": "codex_app", "binary_version": "0.144.0-alpha.4"},
+                    "attempts": [
+                        {"source": "codex_app", "status": "compatible"},
+                    ],
+                },
+                "attempts": [
+                    {
+                        "attempt": 1,
+                        "status": "completed",
+                        "logs_path": "judge/codex_logs/attempt-001",
+                    }
+                ],
+            },
             "conclusion": {"path": "judge/conclusion/result.json"},
         },
     )
@@ -50,6 +61,12 @@ def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(tmp_path: P
             "config": {"repeats": 1},
             "models": {"agent": {"model": "agent"}, "judge": {"model": "judge"}},
             "aggregate": {"average_score": 91},
+            "diagnostics": {
+                "judge_runtime_resolution": {
+                    "selected": {"source": "codex_app"},
+                    "attempts": [{"source": "codex_app", "status": "compatible"}],
+                }
+            },
             "cases": [
                 {
                     "case_id": "001",
@@ -75,7 +92,24 @@ def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(tmp_path: P
     assert manifest["schema_version"] == RESULT_SCHEMA_VERSION
     assert manifest["scored_runs"] == 1
     assert manifest["cases"][0]["total_score"] == 91
-    assert read_json(result_dir / "conclusions" / "001" / "r01.json") == conclusion
+    published_conclusion = read_json(result_dir / "conclusions" / "001" / "r01.json")
+    assert published_conclusion == conclusion
+    assert set(manifest["source_run"]) == {
+        "status",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "config",
+        "models",
+        "aggregate",
+    }
+    serialized_public_result = json.dumps(
+        {"manifest": manifest, "conclusion": published_conclusion},
+        ensure_ascii=False,
+    )
+    assert "diagnostics" not in serialized_public_result
+    assert "runtime_resolution" not in serialized_public_result
+    assert "attempts" not in serialized_public_result
     assert sorted(path.name for path in result_dir.iterdir()) == ["conclusions", "manifest.json"]
     assert not (result_dir / "artifacts").exists()
     assert not (result_dir / "evaluation_summary.json").exists()

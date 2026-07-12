@@ -20,7 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from ..core import ApiError, now_iso, generate_id
 from ..drawio_config import DEFAULT_DRAWIO_EMBED_URL, normalize_drawio_embed_url
 from ..domain.disclosure import build_initial_disclosure, disclosure_to_markdown
-from ..domain.docx_export import DocxExportError, export_disclosure_docx
+from ..domain.docx_export import DocxExportError, export_disclosure_docx, referenced_figure_block_ids
 from ..domain.document_tool_results import tool_failed
 from ..domain.figures import (
     FIGURE_HEIGHT,
@@ -452,15 +452,77 @@ class WorkspaceStore:
         disclosure = self.get_disclosure(project_id)
         project_dir = self.project_dir(project_id)
         export_path = project_dir / "exports" / f"{project_id}-{uuid4().hex[:8]}.docx"
+        figure_snapshot_dir: Path | None = None
         try:
+            with self._figure_project_lock(project_id):
+                figures, figure_snapshot_dir = self._snapshot_docx_figure_assets_locked(
+                    project_id,
+                    disclosure,
+                    self.list_figures(project_id),
+                )
             return export_disclosure_docx(
                 disclosure=disclosure,
-                figures=self.list_figures(project_id),
+                figures=figures,
                 export_path=export_path,
                 project_dir=project_dir,
             )
         except DocxExportError as exc:
             raise ApiError(500, "docx_export_failed", str(exc)) from exc
+        finally:
+            if figure_snapshot_dir is not None:
+                shutil.rmtree(figure_snapshot_dir, ignore_errors=True)
+
+    def _snapshot_docx_figure_assets_locked(
+        self,
+        project_id: str,
+        disclosure: dict[str, Any],
+        figures: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], Path | None]:
+        referenced_ids = referenced_figure_block_ids(disclosure)
+        if not referenced_ids:
+            return figures, None
+
+        project_dir = self.project_dir(project_id).resolve()
+        snapshot_dir: Path | None = None
+        snapped_figures: list[dict[str, Any]] = []
+        try:
+            for figure in figures:
+                figure_id = str(figure.get("figure_id") or "")
+                render = figure.get("render")
+                if figure_id not in referenced_ids or not isinstance(render, dict) or render.get("type") != "png":
+                    snapped_figures.append(figure)
+                    continue
+
+                render_path = render.get("path")
+                if not isinstance(render_path, str) or not render_path:
+                    raise DocxExportError(f"DOCX figure render path is missing: {figure_id}")
+                source_path = (project_dir / render_path).resolve()
+                if not source_path.is_relative_to(project_dir):
+                    raise DocxExportError(f"DOCX figure render path is outside the project: {figure_id}")
+                if not source_path.is_file():
+                    raise DocxExportError(f"DOCX figure render file is missing: {figure_id}")
+
+                if snapshot_dir is None:
+                    snapshot_dir = project_dir / "exports" / f"docx-figure-snapshot-{uuid4().hex}"
+                    snapshot_dir.mkdir(parents=True, exist_ok=False)
+                snapshot_path = snapshot_dir / f"{_validated_storage_id(figure_id, 'figure_id')}.png"
+                shutil.copy2(source_path, snapshot_path)
+
+                snapped_render = dict(render)
+                snapped_render.pop("url", None)
+                snapped_render["path"] = snapshot_path.relative_to(project_dir).as_posix()
+                snapped_figure = dict(figure)
+                snapped_figure["render"] = snapped_render
+                snapped_figures.append(snapped_figure)
+        except OSError as exc:
+            if snapshot_dir is not None:
+                shutil.rmtree(snapshot_dir, ignore_errors=True)
+            raise DocxExportError(f"DOCX figure snapshot failed: {exc}") from exc
+        except DocxExportError:
+            if snapshot_dir is not None:
+                shutil.rmtree(snapshot_dir, ignore_errors=True)
+            raise
+        return snapped_figures, snapshot_dir
 
     def commit_workspace(self, project_id: str, message: str) -> tuple[bool, dict[str, str] | None]:
         workspace = self.project_dir(project_id)

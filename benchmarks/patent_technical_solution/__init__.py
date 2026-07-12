@@ -1,0 +1,1 @@
+"""Patent technical solution benchmark."""

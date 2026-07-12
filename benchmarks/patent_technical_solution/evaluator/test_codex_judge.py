@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-EVALUATOR_DIR = Path(__file__).resolve().parent
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
-
-from codex_judge import _collect_turn, build_judge_prompt, validate_conclusion
+from .codex_judge import _build_codex_config, _collect_turn, build_judge_prompt, validate_conclusion
 
 
 def test_validate_conclusion_accepts_only_the_public_three_field_contract() -> None:
@@ -61,6 +56,23 @@ def test_build_judge_prompt_points_codex_to_original_workspace(tmp_path: Path) -
     assert "assets/figures/" in prompt
     assert "evaluated_artifact" not in prompt
     assert "不要评价图片的视觉美观" in prompt
+
+
+def test_codex_config_overrides_global_reasoning_effort(tmp_path: Path) -> None:
+    sdk = SimpleNamespace(CodexConfig=lambda **kwargs: kwargs)
+
+    config = _build_codex_config(
+        sdk,
+        case_run_dir=tmp_path,
+        codex_bin="codex",
+        reasoning_effort="xhigh",
+    )
+
+    assert config == {
+        "cwd": str(tmp_path),
+        "codex_bin": "codex",
+        "config_overrides": ('model_reasoning_effort="xhigh"',),
+    }
 
 
 def test_collect_turn_persists_events_and_extracts_final_answer(tmp_path: Path) -> None:

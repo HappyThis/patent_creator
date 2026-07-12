@@ -29,6 +29,7 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
   const [iframeReady, setIframeReady] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [downloadingLocal, setDownloadingLocal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
 
@@ -273,6 +274,25 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
     }
   }, [figureId, iframeReady, postLoad, projectId]);
 
+  const handleDownloadLocalCopy = useCallback(async () => {
+    setDownloadingLocal(true);
+    try {
+      const currentXml = await requestCurrentXml();
+      const downloadUrl = URL.createObjectURL(new Blob([currentXml], { type: 'application/xml;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = localCopyFilename(title, figureId);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDownloadingLocal(false);
+    }
+  }, [figureId, requestCurrentXml, title]);
+
   return (
     <div className="figure-editor-backdrop" role="dialog" aria-modal="true" aria-label="编辑附图">
       <div className="figure-editor-modal">
@@ -290,10 +310,15 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
             />
           </div>
           <div className="figure-editor-actions">
-            <button type="button" className="figure-editor-secondary" onClick={handleClose} disabled={saving}>
+            <button type="button" className="figure-editor-secondary" onClick={handleClose} disabled={saving || downloadingLocal}>
               取消
             </button>
-            <button type="button" className="figure-editor-primary" onClick={handleSave} disabled={saving || loading || !iframeReady}>
+            <button
+              type="button"
+              className="figure-editor-primary"
+              onClick={handleSave}
+              disabled={saving || downloadingLocal || loading || !iframeReady}
+            >
               {saving ? '保存中' : '保存'}
             </button>
           </div>
@@ -302,9 +327,14 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
           <div className="figure-editor-error">
             <span>{error}</span>
             {conflict ? (
-              <button type="button" onClick={handleReloadLatest} disabled={loading || saving}>
-                加载最新版本
-              </button>
+              <div className="figure-editor-error-actions">
+                <button type="button" onClick={handleDownloadLocalCopy} disabled={loading || saving || downloadingLocal}>
+                  {downloadingLocal ? '正在导出' : '下载本地副本'}
+                </button>
+                <button type="button" onClick={handleReloadLatest} disabled={loading || saving || downloadingLocal}>
+                  加载最新版本
+                </button>
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -324,4 +354,12 @@ export function FigureDrawioEditorModal({ projectId, figureId, onClose, onSaved 
       </div>
     </div>
   );
+}
+
+function localCopyFilename(title: string, figureId: string): string {
+  const stem = (title.trim() || figureId)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 80) || figureId;
+  return `${stem}-本地冲突副本.drawio`;
 }

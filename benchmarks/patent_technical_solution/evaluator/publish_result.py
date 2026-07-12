@@ -11,11 +11,16 @@ from typing import Any
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 EVALUATOR_DIR = Path(__file__).resolve().parent
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
 
-from records import RUN_SCHEMA_VERSION, atomic_write_json, read_json_dict  # noqa: E402
-from run_metadata import compact_dict, git_metadata  # noqa: E402
+if __package__:
+    from .records import RUN_SCHEMA_VERSION, atomic_write_json, read_json_dict
+    from .run_metadata import compact_dict, git_metadata
+else:
+    if str(EVALUATOR_DIR) not in sys.path:
+        sys.path.insert(0, str(EVALUATOR_DIR))
+
+    from records import RUN_SCHEMA_VERSION, atomic_write_json, read_json_dict  # noqa: E402
+    from run_metadata import compact_dict, git_metadata  # noqa: E402
 
 
 RESULT_SCHEMA_VERSION = "patent-technical-solution-result-v2"

@@ -265,6 +265,28 @@ function Sync-Frontend {
     return $NpmCommand
 }
 
+function Install-PlaywrightChromium {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Directory,
+
+        [Parameter(Mandatory = $true)]
+        $NpmCommand
+    )
+
+    Write-Host "Ensuring Playwright Chromium is installed..."
+    Push-Location $Directory
+    try {
+        & $NpmCommand.Source exec -- playwright install chromium | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install Playwright Chromium."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Test-BundledDrawioUrl {
     param(
         [Parameter(Mandatory = $true)]
@@ -416,6 +438,12 @@ $BackendCommand = $BackendPython
 $BackendArguments = @("-m", "uvicorn", "app.api.app:app", "--reload", "--host", $BackendHost, "--port", $BackendPort)
 Start-Drawio -EmbedUrl $DrawioEmbedUrl -ComposeFile (Join-Path $RepoRoot "compose.drawio.yaml")
 $NpmCommand = Sync-Frontend -Directory $FrontendDir
+Install-PlaywrightChromium -Directory $FrontendDir -NpmCommand $NpmCommand
+Write-Host "Checking Draw.io rendering with the canonical smoke fixture..."
+& $BackendPython (Join-Path $RepoRoot "scripts\drawio_render_preflight.py") --drawio-url $DrawioEmbedUrl
+if ($LASTEXITCODE -ne 0) {
+    throw "Draw.io render preflight failed. Resolve the reported service, Node.js, Playwright, or Chromium problem and retry."
+}
 
 Assert-PortAvailable -Name "BACKEND" -HostName $BackendHost -Port ([int] $BackendPort)
 Assert-PortAvailable -Name "FRONTEND" -HostName $FrontendHost -Port ([int] $FrontendPort)

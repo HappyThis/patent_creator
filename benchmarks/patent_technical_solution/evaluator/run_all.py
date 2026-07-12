@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import subprocess
 import sys
 import threading
@@ -13,20 +15,46 @@ BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 RUN_CASE = Path(__file__).resolve().parent / "run_case.py"
 EVALUATOR_DIR = Path(__file__).resolve().parent
 PRINT_LOCK = threading.Lock()
-if str(EVALUATOR_DIR) not in sys.path:
-    sys.path.insert(0, str(EVALUATOR_DIR))
 
-from process_utils import terminate_process_group  # noqa: E402
-from records import (  # noqa: E402
-    aggregate_case_records,
-    atomic_write_json,
-    finish_execution,
-    finish_run_record,
-    new_execution,
-    new_run_record,
-    read_json_dict,
-)
-from run_metadata import capture_model_config, git_metadata  # noqa: E402
+if __package__:
+    from .judge_runtime import JudgeRuntimeResolutionError, resolve_judge_runtime
+    from .process_utils import terminate_process_group
+    from .records import (
+        aggregate_case_records,
+        atomic_write_json,
+        finish_execution,
+        finish_run_record,
+        new_execution,
+        new_run_record,
+        read_json_dict,
+    )
+    from .run_metadata import (
+        capture_judge_requested_config,
+        capture_model_config,
+        git_metadata,
+        normalize_judge_reasoning_effort,
+    )
+else:
+    if str(EVALUATOR_DIR) not in sys.path:
+        sys.path.insert(0, str(EVALUATOR_DIR))
+
+    from judge_runtime import JudgeRuntimeResolutionError, resolve_judge_runtime  # noqa: E402
+    from process_utils import terminate_process_group  # noqa: E402
+    from records import (  # noqa: E402
+        aggregate_case_records,
+        atomic_write_json,
+        finish_execution,
+        finish_run_record,
+        new_execution,
+        new_run_record,
+        read_json_dict,
+    )
+    from run_metadata import (  # noqa: E402
+        capture_judge_requested_config,
+        capture_model_config,
+        git_metadata,
+        normalize_judge_reasoning_effort,
+    )
 
 
 def main() -> None:
@@ -46,6 +74,8 @@ def main() -> None:
         for case_id in case_ids
     ]
     models = capture_model_config()
+    judge_requested = capture_judge_requested_config()
+    apply_judge_overrides(models, judge_requested, args)
     config = {
         "cases": case_ids,
         "repeats": args.repeats,
@@ -62,7 +92,39 @@ def main() -> None:
         models=models,
         benchmark_git=git_metadata(BENCHMARK_DIR),
     )
+    diagnostics = run_record.setdefault("diagnostics", {})
+    diagnostics["judge_requested"] = dict(judge_requested)
     atomic_write_json(run_path, run_record)
+    judge_runtime_resolution = None
+    if not args.skip_judge:
+        judge_config = models["judge"]
+        try:
+            judge_runtime_resolution = asyncio.run(
+                resolve_judge_runtime(
+                    cwd=run_dir,
+                    model=judge_config.get("model"),
+                    provider=str(judge_config.get("provider") or "openai"),
+                    reasoning_effort=str(judge_config.get("reasoning_effort") or "high"),
+                    service_tier=judge_config.get("service_tier"),
+                )
+            )
+        except JudgeRuntimeResolutionError as exc:
+            diagnostics["judge_runtime_resolution"] = exc.resolution
+            finish_run_record(
+                run_record,
+                status="failed",
+                cases=[],
+                aggregate=None,
+                error={
+                    "phase": "judge_preflight",
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            atomic_write_json(run_path, run_record)
+            raise SystemExit(str(exc)) from exc
+        diagnostics["judge_runtime_resolution"] = judge_runtime_resolution
+        atomic_write_json(run_path, run_record)
     try:
         records = run_jobs(
             jobs,
@@ -70,6 +132,8 @@ def main() -> None:
             runs_dir=runs_dir,
             run_id=run_id,
             models=models,
+            judge_requested=judge_requested,
+            judge_runtime_resolution=judge_runtime_resolution,
         )
     except BaseException as exc:
         finish_run_record(
@@ -109,10 +173,20 @@ def run_jobs(
     runs_dir: Path,
     run_id: str,
     models: dict[str, Any],
+    judge_requested: dict[str, Any],
+    judge_runtime_resolution: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     if args.workers <= 1:
         return [
-            run_one_job(job, args=args, runs_dir=runs_dir, run_id=run_id, models=models)
+            run_one_job(
+                job,
+                args=args,
+                runs_dir=runs_dir,
+                run_id=run_id,
+                models=models,
+                judge_requested=judge_requested,
+                judge_runtime_resolution=judge_runtime_resolution,
+            )
             for job in jobs
         ]
 
@@ -127,6 +201,8 @@ def run_jobs(
                 runs_dir=runs_dir,
                 run_id=run_id,
                 models=models,
+                judge_requested=judge_requested,
+                judge_runtime_resolution=judge_runtime_resolution,
             ): job
             for job in jobs
         }
@@ -143,6 +219,8 @@ def run_one_job(
     runs_dir: Path,
     run_id: str,
     models: dict[str, Any],
+    judge_requested: dict[str, Any],
+    judge_runtime_resolution: dict[str, Any] | None,
 ) -> dict[str, Any]:
     case_id = str(job["case_id"])
     repeat = int(job["repeat"])
@@ -168,6 +246,14 @@ def run_one_job(
     ]
     if args.skip_judge:
         command.append("--skip-judge")
+    command.extend(judge_override_args(args, judge_requested))
+    if judge_runtime_resolution is not None:
+        command.extend(
+            [
+                "--judge-runtime-resolution",
+                json.dumps(judge_runtime_resolution, ensure_ascii=False, separators=(",", ":")),
+            ]
+        )
     label = f"case={case_id} repeat={repeat}/{args.repeats}"
     with PRINT_LOCK:
         print(f"[benchmark] {label} started", flush=True)
@@ -197,7 +283,11 @@ def run_one_job(
             case_id=case_id,
             repeat=repeat,
             agent_config=_execution_config(models.get("agent", {})),
-            judge_config=_execution_config(models.get("judge", {})),
+            judge_config={
+                **_execution_config(models.get("judge", {})),
+                "requested": dict(judge_requested),
+                "runtime_resolution": judge_runtime_resolution,
+            },
         )
         error_message = "Case process timed out。" if timed_out else (stderr.strip() or "Case process failed。")
         finish_execution(
@@ -245,6 +335,40 @@ def persist_process_failure(case_run_dir: Path, *, stdout: str, stderr: str) -> 
             handle.write(stderr)
 
 
+def apply_judge_overrides(
+    models: dict[str, Any],
+    requested: dict[str, Any],
+    args: argparse.Namespace,
+) -> None:
+    judge = dict(models.get("judge", {}))
+    judge_model = getattr(args, "judge_model", None)
+    judge_provider = getattr(args, "judge_provider", None)
+    judge_reasoning_effort = getattr(args, "judge_reasoning_effort", None)
+    if judge_model:
+        requested["model"] = judge_model
+        judge["model"] = judge_model
+    if judge_provider:
+        requested["provider"] = judge_provider
+        judge["provider"] = judge_provider
+    if judge_reasoning_effort:
+        requested["reasoning_effort"] = judge_reasoning_effort.strip().lower()
+        judge["reasoning_effort"] = normalize_judge_reasoning_effort(judge_reasoning_effort)
+    models["judge"] = judge
+
+
+def judge_override_args(args: argparse.Namespace, requested: dict[str, Any]) -> list[str]:
+    values = (
+        ("--judge-model", getattr(args, "judge_model", None), requested.get("model")),
+        ("--judge-provider", getattr(args, "judge_provider", None), requested.get("provider")),
+        (
+            "--judge-reasoning-effort",
+            getattr(args, "judge_reasoning_effort", None),
+            requested.get("reasoning_effort"),
+        ),
+    )
+    return [item for flag, provided, value in values if provided for item in (flag, str(value))]
+
+
 def _execution_config(config: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -256,7 +380,6 @@ def _execution_config(config: dict[str, Any]) -> dict[str, Any]:
             "reasoning_effort",
             "base_url",
             "service_tier",
-            "codex_bin",
             "sdk_version",
         }
         and value is not None
@@ -277,6 +400,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--round-timeout", type=int, default=1800)
     parser.add_argument("--judge-timeout", type=int, default=1800)
     parser.add_argument("--skip-judge", action="store_true")
+    parser.add_argument("--judge-model", default=None)
+    parser.add_argument("--judge-provider", default=None)
+    parser.add_argument("--judge-reasoning-effort", default=None)
     return parser.parse_args()
 
 
