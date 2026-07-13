@@ -52,6 +52,6 @@
 
 ## 输出要求
 
-只输出 schema 要求的 `status`、`total_score` 和 `evaluation_report`。
+在默认 `general_solution` 评价中，只输出 schema 要求的 `status`、`total_score` 和 `evaluation_report`。若当前提示同时指定了表达专项规则和更丰富的 output schema，则以该专项 schema 为准，只返回 schema 明确要求的技术方案分与图/公式通道明细；隐藏策略和派生分由评估程序注入、计算，不要自行添加未声明字段。
 
 `evaluation_report` 使用 Markdown，必须包含整体判断、主要优点、实际扣分原因，以及公式和配图的适用性与实际质量评价。评价应引用你从需求、冻结环境和最终交底书中读到的具体机制，不要输出程序化检查结果或虚构证据。

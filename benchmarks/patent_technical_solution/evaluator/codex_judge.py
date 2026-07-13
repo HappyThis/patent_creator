@@ -23,6 +23,44 @@ JUDGE_SCHEMA: dict[str, Any] = {
     },
 }
 
+REPRESENTATION_JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "status",
+        "solution_score",
+        "representation",
+        "evaluation_report",
+    ],
+    "properties": {
+        "status": {"type": "string", "enum": ["scored"]},
+        "solution_score": {"type": "number", "minimum": 0, "maximum": 100},
+        "representation": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["figure", "formula"],
+            "properties": {
+                name: {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["used", "score", "verdict", "assessment"],
+                    "properties": {
+                        "used": {"type": "boolean"},
+                        "score": {"type": "number", "minimum": 0, "maximum": 100},
+                        "verdict": {
+                            "type": "string",
+                            "enum": ["not_used", "correct", "partially_correct", "incorrect"],
+                        },
+                        "assessment": {"type": "string", "minLength": 1},
+                    },
+                }
+                for name in ("figure", "formula")
+            },
+        },
+        "evaluation_report": {"type": "string", "minLength": 1},
+    },
+}
+
 
 class CodexJudgeTimeout(TimeoutError):
     pass
@@ -66,6 +104,11 @@ async def run_codex_judge(
     service_tier: str | None,
     codex_bin: str | None,
     timeout_seconds: int,
+    track_id: str = "general_solution",
+    judge_profile: str | None = None,
+    track_judge_path: Path | None = None,
+    track_rubric_path: Path | None = None,
+    representation_policies: dict[str, str] | None = None,
 ) -> JudgeRunResult:
     logs_dir.mkdir(parents=True, exist_ok=True)
     schema_path = logs_dir / "schema.json"
@@ -77,8 +120,14 @@ async def run_codex_judge(
         case_run_dir=case_run_dir,
         source_case_dir=source_case_dir,
         benchmark_dir=benchmark_dir,
+        track_id=track_id,
+        judge_profile=judge_profile,
+        track_judge_path=track_judge_path,
+        track_rubric_path=track_rubric_path,
+        representation_policies=representation_policies,
     )
-    schema_path.write_text(json.dumps(JUDGE_SCHEMA, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output_schema = judge_schema(track_id, judge_profile=judge_profile)
+    schema_path.write_text(json.dumps(output_schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt_path.write_text(prompt, encoding="utf-8")
     events_path.write_text("", encoding="utf-8")
     stderr_path.unlink(missing_ok=True)
@@ -109,7 +158,7 @@ async def run_codex_judge(
                 cwd=str(case_run_dir),
                 effort=sdk.ReasoningEffort(reasoning_effort),
                 model=resolved_model,
-                output_schema=JUDGE_SCHEMA,
+                output_schema=output_schema,
                 sandbox=sdk.Sandbox.read_only,
                 service_tier=service_tier,
             )
@@ -127,7 +176,12 @@ async def run_codex_judge(
                 with contextlib.suppress(Exception):
                     await stream.aclose()
 
-            conclusion = validate_conclusion(collected.final_response)
+            conclusion = validate_conclusion(
+                collected.final_response,
+                track_id=track_id,
+                judge_profile=judge_profile,
+                representation_policies=representation_policies,
+            )
             return JudgeRunResult(
                 conclusion=conclusion,
                 thread_id=thread.id,
@@ -167,7 +221,35 @@ def build_judge_prompt(
     case_run_dir: Path,
     source_case_dir: Path,
     benchmark_dir: Path,
+    track_id: str = "general_solution",
+    judge_profile: str | None = None,
+    track_judge_path: Path | None = None,
+    track_rubric_path: Path | None = None,
+    representation_policies: dict[str, str] | None = None,
 ) -> str:
+    if not _uses_representation_judge(track_id, judge_profile):
+        rules = f"- 评价规则：`{(benchmark_dir / 'judge.md').resolve()}`"
+        output_instruction = "按照评价规则给出一个 0 到 100 的总分和 Markdown 评价报告。"
+    else:
+        if track_judge_path is None or track_rubric_path is None:
+            raise ValueError("representation track requires judge and rubric paths")
+        if not representation_policies:
+            raise ValueError("representation track requires figure/formula policies")
+        rules = "\n".join(
+            [
+                f"- 通用技术方案评价规则：`{(benchmark_dir / 'judge.md').resolve()}`",
+                f"- 表达专项评价规则：`{track_judge_path.resolve()}`",
+                f"- 本 Case 表达专项标尺：`{track_rubric_path.resolve()}`",
+                "- 本 Case 隐藏表达策略："
+                f"figure=`{representation_policies['figure']}`，"
+                f"formula=`{representation_policies['formula']}`",
+            ]
+        )
+        output_instruction = (
+            "先独立评出 solution_score，再分别评价 figure 和 formula，返回 used、verdict、score 和 "
+            "assessment。不要返回隐藏 policy 或派生总分；评估程序会注入 policy，并确定性计算 "
+            "representation_score 与 total_score。"
+        )
     return f"""你是 Codex-as-judge，负责对专利交底书中的最终“技术方案”进行综合评价。
 
 当前工作目录是本次 Case 的运行目录：
@@ -175,7 +257,7 @@ def build_judge_prompt(
 
 请先读取以下规则和输入，不要依赖本提示中的摘要替代原文件：
 
-- 评价规则：`{(benchmark_dir / 'judge.md').resolve()}`
+{rules}
 - Agent 任务规则：`{(benchmark_dir / 'runner.md').resolve()}`
 - Case 需求：`{(source_case_dir / 'request.md').resolve()}`
 - Case 隐藏参考方案：`{(source_case_dir / 'reference_solution.md').resolve()}`
@@ -188,17 +270,35 @@ def build_judge_prompt(
 - 最终交底书位于 `subject/data/projects/*/disclosure.json`。
 - Agent 会话事件位于 `subject/data/projects/*/sessions/*.jsonl`，仅用于理解运行事实，不要把聊天回复或工具轨迹当成技术方案正文。
 - 配图位于 `subject/data/projects/*/assets/figures/`。只有在 disclosure 中实际引用 figure 时，才按需读取对应 `figure.json`、当前 revision 的 `diagram.drawio` 或 `render.png`。
-- 公式直接保存在 disclosure 的 formula block 中，没有额外公式文件。
+- 公式可能以 disclosure 的 formula block 保存，也可能以内联或展示 LaTeX 出现在 paragraph、list、table 等文本 block 中；两者都应检查，没有额外公式文件。
 
 请自行搜索并读取上述文件，定位 Case `{case_id}` 的最终“技术方案”章节。不要要求评估程序替你提取章节、复制图片或生成清单。
 
-按照评价规则给出一个 0 到 100 的总分和 Markdown 评价报告。报告必须说明主要优点、实际扣分原因，以及公式和配图在本方案中的适用性与实际表达质量。不要评价图片的视觉美观、排版精细度或渲染质量。
+{output_instruction}报告必须说明主要优点、实际扣分原因，以及公式和配图在本方案中的适用性与实际表达质量。不要评价图片的视觉美观、排版精细度或渲染质量。
 
 最终只返回符合 output schema 的 JSON。
 """
 
 
-def validate_conclusion(raw: str) -> dict[str, Any]:
+def judge_schema(
+    track_id: str,
+    *,
+    judge_profile: str | None = None,
+) -> dict[str, Any]:
+    return (
+        REPRESENTATION_JUDGE_SCHEMA
+        if _uses_representation_judge(track_id, judge_profile)
+        else JUDGE_SCHEMA
+    )
+
+
+def validate_conclusion(
+    raw: str,
+    *,
+    track_id: str = "general_solution",
+    judge_profile: str | None = None,
+    representation_policies: dict[str, str] | None = None,
+) -> dict[str, Any]:
     text = raw.strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -213,6 +313,8 @@ def validate_conclusion(raw: str) -> dict[str, Any]:
         raise ValueError("Codex judge 未返回合法 JSON。") from exc
     if not isinstance(value, dict):
         raise ValueError("Codex judge 返回值必须是 JSON object。")
+    if _uses_representation_judge(track_id, judge_profile):
+        return _validate_representation_conclusion(value, representation_policies)
     if set(value) != {"status", "total_score", "evaluation_report"}:
         raise ValueError("Codex judge 返回字段不符合 schema。")
     if value.get("status") != "scored":
@@ -228,6 +330,112 @@ def validate_conclusion(raw: str) -> dict[str, Any]:
         "total_score": score,
         "evaluation_report": report.strip(),
     }
+
+
+def _validate_representation_conclusion(
+    value: dict[str, Any],
+    policies: dict[str, str] | None,
+) -> dict[str, Any]:
+    expected_fields = {
+        "status",
+        "solution_score",
+        "representation",
+        "evaluation_report",
+    }
+    if set(value) != expected_fields:
+        raise ValueError("Codex judge representation 返回字段不符合 schema。")
+    if value.get("status") != "scored":
+        raise ValueError("Codex judge status 必须为 scored。")
+    if not isinstance(policies, dict) or set(policies) != {"figure", "formula"}:
+        raise ValueError("representation policies 必须包含 figure 和 formula。")
+    normalized_policies: dict[str, str] = {}
+    for name in ("figure", "formula"):
+        policy = policies.get(name)
+        if policy not in {"recommended", "optional"}:
+            raise ValueError(f"{name} policy 无效。")
+        normalized_policies[name] = policy
+
+    _validate_score(value.get("solution_score"), "solution_score")
+
+    representation = value.get("representation")
+    if not isinstance(representation, dict) or set(representation) != {"figure", "formula"}:
+        raise ValueError("representation 必须包含 figure 和 formula。")
+    cleaned_channels: dict[str, Any] = {}
+    for name in ("figure", "formula"):
+        channel = representation.get(name)
+        if not isinstance(channel, dict) or set(channel) != {
+            "used",
+            "score",
+            "verdict",
+            "assessment",
+        }:
+            raise ValueError(f"representation.{name} 字段不符合 schema。")
+        used = channel.get("used")
+        if not isinstance(used, bool):
+            raise ValueError(f"representation.{name}.used 必须为 boolean。")
+        verdict = channel.get("verdict")
+        score = channel.get("score")
+        _validate_score(score, f"representation.{name}.score")
+        if verdict not in {"not_used", "correct", "partially_correct", "incorrect"}:
+            raise ValueError(f"representation.{name}.verdict 无效。")
+        if used == (verdict == "not_used"):
+            raise ValueError(f"representation.{name}.used 与 verdict 不一致。")
+        numeric_score = float(score)
+        if verdict == "not_used":
+            numeric_score = 100.0 if normalized_policies[name] == "optional" else 40.0
+        elif verdict == "correct":
+            numeric_score = 100.0
+        elif verdict == "partially_correct":
+            numeric_score = min(79.0, max(40.0, numeric_score))
+        elif verdict == "incorrect":
+            numeric_score = min(39.0, max(0.0, numeric_score))
+        assessment = channel.get("assessment")
+        if not isinstance(assessment, str) or not assessment.strip():
+            raise ValueError(f"representation.{name}.assessment 不能为空。")
+        cleaned_channels[name] = {
+            "policy": normalized_policies[name],
+            "used": used,
+            "score": _compact_number(numeric_score),
+            "verdict": verdict,
+            "assessment": assessment.strip(),
+        }
+
+    representation_score = (
+        float(cleaned_channels["figure"]["score"]) + float(cleaned_channels["formula"]["score"])
+    ) / 2
+    representation_score = round(representation_score, 2)
+    total_score = round(
+        0.7 * float(value["solution_score"]) + 0.3 * representation_score,
+        2,
+    )
+    report = value.get("evaluation_report")
+    if not isinstance(report, str) or not report.strip():
+        raise ValueError("Codex judge evaluation_report 不能为空。")
+    return {
+        "status": "scored",
+        "total_score": _compact_number(total_score),
+        "solution_score": _compact_number(float(value["solution_score"])),
+        "representation_score": _compact_number(representation_score),
+        "representation": cleaned_channels,
+        "evaluation_report": report.strip(),
+    }
+
+
+def _validate_score(value: Any, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 100:
+        raise ValueError(f"Codex judge {name} 必须在 0 到 100 之间。")
+
+
+def _compact_number(value: float) -> int | float:
+    return int(value) if value.is_integer() else value
+
+
+def _uses_representation_judge(track_id: str, judge_profile: str | None) -> bool:
+    if judge_profile is not None:
+        if judge_profile not in {"general", "representation_semantics"}:
+            raise ValueError(f"unsupported judge profile: {judge_profile!r}")
+        return judge_profile == "representation_semantics"
+    return track_id == "representation_semantics"
 
 
 async def _collect_turn(

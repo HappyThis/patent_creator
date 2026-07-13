@@ -34,6 +34,7 @@ if __package__:
         git_metadata,
         normalize_judge_reasoning_effort,
     )
+    from .tracks import TrackConfigError, load_track, resolve_track_case
 else:
     if str(EVALUATOR_DIR) not in sys.path:
         sys.path.insert(0, str(EVALUATOR_DIR))
@@ -55,11 +56,20 @@ else:
         git_metadata,
         normalize_judge_reasoning_effort,
     )
+    from tracks import TrackConfigError, load_track, resolve_track_case  # noqa: E402
 
 
 def main() -> None:
     args = parse_args()
-    case_ids = [str(value).zfill(3) for value in (args.cases or discover_case_ids())]
+    track_id = str(getattr(args, "track", None) or "general_solution")
+    try:
+        track = load_track(track_id, benchmark_dir=BENCHMARK_DIR)
+        case_ids = [str(value).zfill(3) for value in (args.cases or track.case_ids)]
+        for case_id in case_ids:
+            resolve_track_case(track, case_id)
+    except TrackConfigError as exc:
+        raise SystemExit(str(exc)) from exc
+    validate_batch_inputs(args, case_ids)
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
     runs_dir = Path(args.runs_dir).resolve()
     run_dir = runs_dir / run_id
@@ -74,9 +84,12 @@ def main() -> None:
         for case_id in case_ids
     ]
     models = capture_model_config()
+    if track.subject_policy.web_search_enabled is not None:
+        models["agent"]["web_search_enabled"] = track.subject_policy.web_search_enabled
     judge_requested = capture_judge_requested_config()
     apply_judge_overrides(models, judge_requested, args)
     config = {
+        "track_id": track.track_id,
         "cases": case_ids,
         "repeats": args.repeats,
         "workers": args.workers,
@@ -230,6 +243,8 @@ def run_one_job(
         str(RUN_CASE),
         "--case",
         case_id,
+        "--track",
+        str(getattr(args, "track", None) or "general_solution"),
         "--run-id",
         run_id,
         "--runs-dir",
@@ -289,6 +304,7 @@ def run_one_job(
                 "runtime_resolution": judge_runtime_resolution,
             },
         )
+        execution["track_id"] = str(getattr(args, "track", None) or "general_solution")
         error_message = "Case process timed out。" if timed_out else (stderr.strip() or "Case process failed。")
         finish_execution(
             execution,
@@ -316,6 +332,14 @@ def run_one_job(
         ),
         "total_score": conclusion.get("total_score") if isinstance(conclusion, dict) else None,
     }
+    if isinstance(conclusion, dict) and "representation_score" in conclusion:
+        record.update(
+            {
+                "solution_score": conclusion.get("solution_score"),
+                "representation_score": conclusion.get("representation_score"),
+                "representation": conclusion.get("representation"),
+            }
+        )
     with PRINT_LOCK:
         print(
             f"[benchmark] {label} finished status={record['status']} score={record['total_score']}",
@@ -379,6 +403,7 @@ def _execution_config(config: dict[str, Any]) -> dict[str, Any]:
             "model",
             "reasoning_effort",
             "base_url",
+            "web_search_enabled",
             "service_tier",
             "sdk_version",
         }
@@ -390,9 +415,19 @@ def discover_case_ids() -> list[str]:
     return [path.name for path in sorted((BENCHMARK_DIR / "cases").glob("[0-9][0-9][0-9]"))]
 
 
+def validate_batch_inputs(args: argparse.Namespace, case_ids: list[str]) -> None:
+    if len(case_ids) != len(set(case_ids)):
+        raise SystemExit("case ids must not contain duplicates")
+    if args.workers < 1:
+        raise SystemExit("--workers must be a positive integer")
+    if args.repeats < 1:
+        raise SystemExit("--repeats must be a positive integer")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run patent technical solution benchmark cases.")
     parser.add_argument("cases", nargs="*", help="Case ids. Defaults to all cases.")
+    parser.add_argument("--track", default="general_solution", help="Benchmark track id.")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--runs-dir", default=str(BENCHMARK_DIR / "runs"))
     parser.add_argument("--workers", type=int, default=1)

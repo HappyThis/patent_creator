@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import Any
 
 
-def prepare_exploration_environment(case_dir: Path, destination: Path) -> Path:
+def prepare_exploration_environment(
+    case_dir: Path,
+    destination: Path,
+    *,
+    expose_snapshot_provenance: bool = True,
+    preserve_snapshot_git: bool = True,
+) -> Path:
     """Prepare the agent-visible exploration environment for one benchmark case."""
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -17,14 +23,29 @@ def prepare_exploration_environment(case_dir: Path, destination: Path) -> Path:
 
     if (case_dir / "snapshot.json").exists():
         material_type = "software_project"
-        prepare_project_checkout(case_dir, destination / "project_snapshot")
+        prepare_project_checkout(
+            case_dir,
+            destination / "project_snapshot",
+            preserve_git_metadata=preserve_snapshot_git,
+        )
     else:
         raise ValueError("software_project case requires snapshot.json.")
 
-    write_environment_readme(case_dir, destination, material_type)
+    write_environment_readme(
+        case_dir,
+        destination,
+        material_type,
+        expose_snapshot_provenance=expose_snapshot_provenance,
+    )
     return destination
 
-def write_environment_readme(case_dir: Path, destination: Path, material_type: str) -> None:
+def write_environment_readme(
+    case_dir: Path,
+    destination: Path,
+    material_type: str,
+    *,
+    expose_snapshot_provenance: bool = True,
+) -> None:
     lines = [
         "# Exploration Environment",
         "",
@@ -36,17 +57,18 @@ def write_environment_readme(case_dir: Path, destination: Path, material_type: s
         "",
     ]
     if (destination / "project_snapshot").exists():
-        snapshot = load_snapshot(case_dir)
         lines.append("- `project_snapshot/`: frozen Git project checkout. This is the primary exploration target.")
-        lines.extend(
-            [
-                "",
-                "## Project Snapshot",
-                "",
-                f"- Repository: `{snapshot_repo_url(snapshot)}`",
-                f"- Commit: `{commit_from_snapshot(snapshot)}`",
-            ]
-        )
+        if expose_snapshot_provenance:
+            snapshot = load_snapshot(case_dir)
+            lines.extend(
+                [
+                    "",
+                    "## Project Snapshot",
+                    "",
+                    f"- Repository: `{snapshot_repo_url(snapshot)}`",
+                    f"- Commit: `{commit_from_snapshot(snapshot)}`",
+                ]
+            )
     if len(lines) == 8:
         lines.append("- No additional files were provided.")
     lines.extend(
@@ -78,7 +100,12 @@ def commit_from_snapshot(snapshot: dict[str, Any]) -> str:
     return value.strip()
 
 
-def prepare_project_checkout(case_dir: Path, destination: Path) -> Path:
+def prepare_project_checkout(
+    case_dir: Path,
+    destination: Path,
+    *,
+    preserve_git_metadata: bool = True,
+) -> Path:
     snapshot = load_snapshot(case_dir)
     repo_url = snapshot_repo_url(snapshot)
     commit = commit_from_snapshot(snapshot)
@@ -87,6 +114,8 @@ def prepare_project_checkout(case_dir: Path, destination: Path) -> Path:
     if destination.exists() and (destination / ".git").exists():
         current = _run(["git", "rev-parse", "HEAD"], cwd=destination, check=False).stdout.strip()
         if current == commit:
+            if not preserve_git_metadata:
+                shutil.rmtree(destination / ".git")
             return destination
 
     if destination.exists():
@@ -103,6 +132,8 @@ def prepare_project_checkout(case_dir: Path, destination: Path) -> Path:
     if fetch.returncode != 0:
         _run(["git", "fetch", "origin", commit], cwd=destination)
     _run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=destination)
+    if not preserve_git_metadata:
+        shutil.rmtree(destination / ".git")
 
     return destination
 

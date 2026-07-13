@@ -301,7 +301,7 @@ def aggregate_case_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "status_counts": _status_counts(case_records),
             }
         )
-    return {
+    aggregate = {
         "runs": len(records),
         "scored_runs": len(scores),
         "average_score": mean(scores) if scores else None,
@@ -310,6 +310,108 @@ def aggregate_case_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         "score_stddev": pstdev(scores) if len(scores) > 1 else 0 if scores else None,
         "status_counts": _status_counts(records),
         "cases": case_rows,
+    }
+    representation = _representation_aggregate(records)
+    if representation is not None:
+        aggregate["representation"] = representation
+        by_case = {item["case_id"]: item for item in representation["cases"]}
+        for row in case_rows:
+            details = by_case.get(row["case_id"])
+            if details is not None:
+                row["representation"] = {
+                    key: value for key, value in details.items() if key != "case_id"
+                }
+    return aggregate
+
+
+def _representation_aggregate(records: list[dict[str, Any]]) -> dict[str, Any] | None:
+    represented = [
+        item
+        for item in records
+        if isinstance(item.get("representation_score"), (int, float))
+        and isinstance(item.get("representation"), dict)
+    ]
+    if not represented:
+        return None
+
+    case_ids = sorted({str(item.get("case_id")) for item in records if item.get("case_id")})
+    return {
+        "eligible_runs": len(records),
+        "scored_runs": len(represented),
+        "solution_average_score": _average_numeric(represented, "solution_score"),
+        "representation_average_score": _average_numeric(represented, "representation_score"),
+        "modalities": {
+            name: _modality_aggregate(represented, name) for name in ("figure", "formula")
+        },
+        "cases": [
+            {
+                "case_id": case_id,
+                "eligible_runs": len(eligible_case_records),
+                "scored_runs": len(case_records),
+                "solution_average_score": _average_numeric(case_records, "solution_score"),
+                "representation_average_score": _average_numeric(
+                    case_records, "representation_score"
+                ),
+                "modalities": {
+                    name: _modality_aggregate(case_records, name)
+                    for name in ("figure", "formula")
+                },
+            }
+            for case_id in case_ids
+            for eligible_case_records in [
+                [item for item in records if str(item.get("case_id")) == case_id]
+            ]
+            for case_records in [
+                [item for item in represented if str(item.get("case_id")) == case_id]
+            ]
+        ],
+    }
+
+
+def _average_numeric(records: list[dict[str, Any]], key: str) -> float | None:
+    values = [
+        float(item[key])
+        for item in records
+        if isinstance(item.get(key), (int, float)) and not isinstance(item.get(key), bool)
+    ]
+    return mean(values) if values else None
+
+
+def _modality_aggregate(records: list[dict[str, Any]], name: str) -> dict[str, Any]:
+    channels = []
+    for item in records:
+        representation = item.get("representation")
+        channel = representation.get(name) if isinstance(representation, dict) else None
+        if isinstance(channel, dict):
+            channels.append(channel)
+    scores = [
+        float(channel["score"])
+        for channel in channels
+        if isinstance(channel.get("score"), (int, float))
+        and not isinstance(channel.get("score"), bool)
+    ]
+    used = [channel for channel in channels if channel.get("used") is True]
+    used_scores = [
+        float(channel["score"])
+        for channel in used
+        if isinstance(channel.get("score"), (int, float))
+        and not isinstance(channel.get("score"), bool)
+    ]
+    recommended = [channel for channel in channels if channel.get("policy") == "recommended"]
+    return {
+        "runs": len(channels),
+        "average_score": mean(scores) if scores else None,
+        "used_runs": len(used),
+        "use_rate": len(used) / len(channels) if channels else None,
+        "used_average_score": mean(used_scores) if used_scores else None,
+        "recommended_runs": len(recommended),
+        "recommended_not_used_runs": sum(
+            channel.get("verdict") == "not_used" for channel in recommended
+        ),
+        "used_partial_runs": sum(
+            channel.get("verdict") == "partially_correct" for channel in used
+        ),
+        "used_incorrect_runs": sum(channel.get("verdict") == "incorrect" for channel in used),
     }
 
 

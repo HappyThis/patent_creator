@@ -35,6 +35,7 @@ _DEFAULT_GLOB_SCANNED_PATHS = 3_000
 _MAX_GLOB_SCANNED_PATHS = 10_000
 _DEFAULT_GLOB_SCAN_SECONDS = 1.5
 _MAX_GLOB_SCAN_SECONDS = 5.0
+_EXTERNAL_READ_ROOTS_ENV = "PATENT_CREATOR_AGENT_EXTERNAL_READ_ROOTS"
 
 
 class _StrictModel(BaseModel):
@@ -122,6 +123,7 @@ def file_glob(
     matched = 0
     scanned = 0
     stop_reason = "completed"
+    restrict_external_roots = os.getenv(_EXTERNAL_READ_ROOTS_ENV) is not None
 
     for path in _iter_glob_candidates(base, skipped_dirs):
         elapsed = time.monotonic() - started_at
@@ -137,11 +139,17 @@ def file_glob(
             continue
         if not _is_allowed_result_path(path):
             continue
+        result_path = path
+        if restrict_external_roots:
+            resolved_path = _resolve_project_path(store, project_id, str(path))
+            if isinstance(resolved_path, dict):
+                continue
+            result_path = resolved_path
 
         matched += 1
         if matched <= offset:
             continue
-        page.append(_relative_path(store, project_id, path))
+        page.append(_relative_path(store, project_id, result_path))
         if len(page) >= limit:
             stop_reason = "limit_reached"
             break
@@ -229,7 +237,13 @@ def file_search(
     skipped_dirs: set[str] = set()
     stop_reason = "completed"
     started_at = time.monotonic()
-    for file_path in _iter_search_files(target, include_glob, skipped_dirs):
+    for file_path in _iter_search_files(
+        store,
+        project_id,
+        target,
+        include_glob,
+        skipped_dirs,
+    ):
         elapsed = time.monotonic() - started_at
         if elapsed >= time_budget_seconds:
             stop_reason = "time_budget_exceeded"
@@ -382,6 +396,8 @@ def _resolve_project_path(store: WorkspaceStore, project_id: str, raw_path: str)
         return tool_failed("invalid_operation", f"path 无法解析：{raw_path}")
     if not is_external_absolute and not resolved.is_relative_to(root):
         return tool_failed("invalid_operation", f"path must stay within the project workspace: {raw_path}")
+    if is_external_absolute and not resolved.is_relative_to(root) and not _is_allowed_external_path(resolved):
+        return tool_failed("invalid_operation", f"path is outside configured external read roots: {raw_path}")
     if not resolved.exists():
         return tool_failed("invalid_operation", f"path 不存在：{raw_path}")
     return resolved
@@ -421,6 +437,12 @@ def _resolve_glob_base_and_pattern(
         return tool_failed("invalid_operation", f"path 无法解析：{raw_path}")
     if not is_external_absolute and not resolved_base.is_relative_to(root):
         return tool_failed("invalid_operation", f"path must stay within the project workspace: {raw_path}")
+    if (
+        is_external_absolute
+        and not resolved_base.is_relative_to(root)
+        and not _is_allowed_external_path(resolved_base)
+    ):
+        return tool_failed("invalid_operation", f"path is outside configured external read roots: {raw_path}")
     if not resolved_base.exists():
         return tool_failed("invalid_operation", f"path 不存在：{base}")
     return resolved_base, glob_pattern
@@ -428,6 +450,21 @@ def _resolve_glob_base_and_pattern(
 
 def _contains_glob(value: str) -> bool:
     return any(char in value for char in _GLOB_CHARS)
+
+
+def _is_allowed_external_path(path: Path) -> bool:
+    configured = os.getenv(_EXTERNAL_READ_ROOTS_ENV)
+    if configured is None:
+        return True
+    roots: list[Path] = []
+    for raw_root in configured.split(os.pathsep):
+        if not raw_root.strip():
+            continue
+        try:
+            roots.append(Path(raw_root).expanduser().resolve())
+        except OSError:
+            continue
+    return any(path == root or path.is_relative_to(root) for root in roots)
 
 
 def _relative_path(store: WorkspaceStore, project_id: str, path: Path) -> str:
@@ -474,10 +511,17 @@ def _display_skipped_dir(base: Path, path: Path) -> str:
         return str(path)
 
 
-def _iter_search_files(target: Path, include_glob: str, skipped_dirs: set[str]):
+def _iter_search_files(
+    store: WorkspaceStore,
+    project_id: str,
+    target: Path,
+    include_glob: str,
+    skipped_dirs: set[str],
+):
     if target.is_file():
-        if _is_text_candidate(target):
-            yield target
+        resolved_target = _resolve_project_path(store, project_id, str(target))
+        if not isinstance(resolved_target, dict) and _is_text_candidate(resolved_target):
+            yield resolved_target
         return
 
     for current_root, dirnames, filenames in os.walk(target, topdown=True):
@@ -492,12 +536,13 @@ def _iter_search_files(target: Path, include_glob: str, skipped_dirs: set[str]):
 
         for filename in sorted(filenames):
             path = current / filename
-            if not _is_text_candidate(path):
-                continue
             relative = path.relative_to(target).as_posix()
             if not _matches_relative_glob(relative, include_glob):
                 continue
-            yield path
+            resolved_path = _resolve_project_path(store, project_id, str(path))
+            if isinstance(resolved_path, dict) or not _is_text_candidate(resolved_path):
+                continue
+            yield resolved_path
 
 
 def _is_text_candidate(path: Path) -> bool:

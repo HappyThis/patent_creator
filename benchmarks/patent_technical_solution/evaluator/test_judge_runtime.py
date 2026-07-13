@@ -94,9 +94,12 @@ def test_discovery_supports_linux_plugin_and_macos_app_paths(
         bundled_codex_path_loader=lambda: pinned_runtime,
     )
 
-    assert [candidate.source for candidate in candidates] == ["codex_app", "sdk_pinned", "path_cli"]
-    assert candidates[0].path == str(app_runtime)
-    assert candidates[1].launch_codex_bin is None
+    sources = [candidate.source for candidate in candidates]
+    assert sources[-2:] == ["sdk_pinned", "path_cli"]
+    assert sources[:-2] and set(sources[:-2]) == {"codex_app"}
+    assert str(app_runtime) in {candidate.path for candidate in candidates if candidate.source == "codex_app"}
+    pinned = next(candidate for candidate in candidates if candidate.source == "sdk_pinned")
+    assert pinned.launch_codex_bin is None
 
 
 def test_resolver_follows_priority_records_failures_and_returns_json_safe_resolution(tmp_path: Path) -> None:

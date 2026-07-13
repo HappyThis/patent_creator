@@ -1,0 +1,17 @@
+{
+  "schema_version": "patent-technical-solution-track-v1",
+  "track_id": "general_solution",
+  "judge_profile": "general",
+  "cases": [
+    {"case_id": "001"},
+    {"case_id": "002"},
+    {"case_id": "003"},
+    {"case_id": "004"},
+    {"case_id": "005"},
+    {"case_id": "006"},
+    {"case_id": "007"},
+    {"case_id": "008"},
+    {"case_id": "009"},
+    {"case_id": "010"}
+  ]
+}

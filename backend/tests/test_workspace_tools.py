@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from app.core.command_platform import current_command_platform
+from app.tools.builtin.shell import EXEC_COMMAND_DISABLED_ENV
 
 from helpers import make_tool_executor, run_builtin_tool
 
@@ -106,6 +107,30 @@ def test_exec_command_runs_shell_commands(tmp_path: Path) -> None:
     assert extra_field["status"] == "failed"
     assert extra_field["output"]["code"] == "invalid_tool_arguments"
     assert "unused" in extra_field["output"]["message"]
+
+
+def test_exec_command_can_be_hard_disabled_by_environment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    marker = executor.store.project_dir(project_id) / "must-not-exist.txt"
+    monkeypatch.setenv(EXEC_COMMAND_DISABLED_ENV, "true")
+    script = "from pathlib import Path; Path('must-not-exist.txt').write_text('bad')"
+    command = f"{json.dumps(sys.executable)} -c {json.dumps(script)}"
+    if current_command_platform().platform == "windows":
+        command = f"& {command}"
+
+    result = run_builtin_tool(
+        executor,
+        project_id,
+        "exec_command",
+        {"command": command},
+    )
+
+    assert result["status"] == "failed"
+    assert result["output"]["code"] == "tool_disabled"
+    assert not marker.exists()
 
 
 def test_file_exploration_tools_page_results(tmp_path: Path) -> None:
@@ -219,6 +244,61 @@ def test_file_tools_reject_relative_paths_outside_project(tmp_path: Path) -> Non
     absolute_read = run_builtin_tool(executor, project_id, "file_read", {"path": str(external_file)})
     assert absolute_read["status"] == "success"
     assert "outside needle" in absolute_read["output"]["content"]
+
+
+def test_file_tools_can_restrict_external_absolute_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    executor, project_id = make_tool_executor(tmp_path)
+    workspace = executor.store.project_dir(project_id)
+    internal_file = workspace / "internal.txt"
+    internal_file.write_text("internal\n", encoding="utf-8")
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+    allowed_file = allowed_dir / "allowed.txt"
+    allowed_file.write_text("allowed\n", encoding="utf-8")
+    denied_dir = tmp_path / "denied"
+    denied_dir.mkdir()
+    denied_file = denied_dir / "hidden.txt"
+    denied_file.write_text("hidden\n", encoding="utf-8")
+    denied_symlink = allowed_dir / "hidden-link.txt"
+    denied_symlink.symlink_to(denied_file)
+    denied_dir_symlink = allowed_dir / "hidden-dir"
+    denied_dir_symlink.symlink_to(denied_dir, target_is_directory=True)
+    monkeypatch.setenv("PATENT_CREATOR_AGENT_EXTERNAL_READ_ROOTS", str(allowed_dir))
+
+    internal = run_builtin_tool(executor, project_id, "file_read", {"path": str(internal_file)})
+    allowed = run_builtin_tool(executor, project_id, "file_read", {"path": str(allowed_file)})
+    denied = run_builtin_tool(executor, project_id, "file_read", {"path": str(denied_file)})
+    denied_glob = run_builtin_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"path": str(denied_dir), "pattern": "*.txt"},
+    )
+    allowed_glob = run_builtin_tool(
+        executor,
+        project_id,
+        "file_glob",
+        {"path": str(allowed_dir), "pattern": "*"},
+    )
+    denied_symlink_search = run_builtin_tool(
+        executor,
+        project_id,
+        "file_search",
+        {"path": str(allowed_dir), "pattern": "hidden"},
+    )
+
+    assert internal["status"] == "success"
+    assert allowed["status"] == "success"
+    assert denied["status"] == "failed"
+    assert "outside configured external read roots" in denied["output"]["message"]
+    assert denied_glob["status"] == "failed"
+    assert allowed_glob["status"] == "success"
+    assert allowed_glob["output"]["matches"] == [str(allowed_file)]
+    assert denied_symlink_search["status"] == "success"
+    assert denied_symlink_search["output"]["matches"] == []
 
 
 def test_file_tools_reject_arguments_outside_schema(tmp_path: Path) -> None:

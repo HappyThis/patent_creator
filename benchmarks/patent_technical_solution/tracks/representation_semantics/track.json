@@ -1,0 +1,22 @@
+{
+  "schema_version": "patent-technical-solution-track-v1",
+  "track_id": "representation_semantics",
+  "judge_profile": "representation_semantics",
+  "subject_policy": {
+    "web_search_enabled": false,
+    "expose_snapshot_provenance": false,
+    "preserve_snapshot_git": false
+  },
+  "cases": [
+    {"case_id": "001", "figure_policy": "optional", "formula_policy": "optional"},
+    {"case_id": "004", "figure_policy": "optional", "formula_policy": "optional"},
+    {"case_id": "006", "figure_policy": "optional", "formula_policy": "optional"},
+    {"case_id": "008", "figure_policy": "recommended", "formula_policy": "optional"},
+    {"case_id": "009", "figure_policy": "recommended", "formula_policy": "optional"},
+    {"case_id": "010", "figure_policy": "recommended", "formula_policy": "optional"},
+    {"case_id": "011", "figure_policy": "optional", "formula_policy": "recommended"},
+    {"case_id": "012", "figure_policy": "optional", "formula_policy": "recommended"},
+    {"case_id": "013", "figure_policy": "recommended", "formula_policy": "recommended"},
+    {"case_id": "014", "figure_policy": "recommended", "formula_policy": "recommended"}
+  ]
+}

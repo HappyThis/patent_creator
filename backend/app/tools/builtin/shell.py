@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Any
 
@@ -10,6 +11,9 @@ from ...domain.document_tool_results import tool_failed, tool_success
 from ...storage.workspace_store import WorkspaceStore
 from ..metadata import agent_tool
 from ..output_storage import EXEC_COMMAND_INLINE_LIMIT_CHARS, EXEC_COMMAND_PREVIEW_CHARS, head_tail_preview, write_tool_output
+
+
+EXEC_COMMAND_DISABLED_ENV = "PATENT_CREATOR_AGENT_EXEC_COMMAND_DISABLED"
 
 
 class ExecCommandArguments(BaseModel):
@@ -41,6 +45,9 @@ def exec_command(
     Examples:
         - 执行诊断命令: {"command":"git status --short","timeout":30}
     """
+    if _env_flag_enabled(EXEC_COMMAND_DISABLED_ENV):
+        return tool_failed("tool_disabled", "exec_command 在当前 Agent 运行中已禁用。")
+
     parsed = _validate_exec_arguments(arguments)
     if parsed["status"] == "failed":
         return parsed
@@ -116,6 +123,10 @@ def exec_command(
             ),
         }
     )
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _validate_exec_arguments(arguments: dict[str, Any]) -> dict[str, Any]:

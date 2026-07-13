@@ -11,6 +11,28 @@ from .judge_runtime import JudgeRuntimeResolutionError
 from .run_all import apply_judge_overrides, judge_override_args
 
 
+@pytest.mark.parametrize(
+    ("workers", "repeats", "message"),
+    [(0, 1, "workers"), (1, 0, "repeats")],
+)
+def test_batch_inputs_require_positive_workers_and_repeats(
+    workers: int,
+    repeats: int,
+    message: str,
+) -> None:
+    args = SimpleNamespace(workers=workers, repeats=repeats)
+
+    with pytest.raises(SystemExit, match=message):
+        run_all.validate_batch_inputs(args, ["001"])
+
+
+def test_batch_inputs_reject_duplicate_cases() -> None:
+    args = SimpleNamespace(workers=1, repeats=1)
+
+    with pytest.raises(SystemExit, match="duplicates"):
+        run_all.validate_batch_inputs(args, ["001", "001"])
+
+
 def test_batch_judge_overrides_update_models_and_child_args() -> None:
     args = SimpleNamespace(
         judge_model="judge-model",
@@ -124,6 +146,7 @@ def test_batch_child_receives_raw_requested_config_and_resolved_runtime(
     )
 
     command = captured["command"]
+    assert command[command.index("--track") + 1] == "general_solution"
     assert command[command.index("--judge-model") + 1] == "judge-model"
     assert command[command.index("--judge-provider") + 1] == "judge-provider"
     assert command[command.index("--judge-reasoning-effort") + 1] == "ultra"
@@ -266,6 +289,59 @@ def test_skip_judge_batch_does_not_resolve_runtime(
     run_record = json.loads((Path(args.runs_dir) / args.run_id / "run.json").read_text(encoding="utf-8"))
     assert run_record["status"] == "completed"
     assert "judge_runtime_resolution" not in run_record["diagnostics"]
+
+
+def test_representation_batch_uses_manifest_cases_and_forces_web_off(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    args = batch_args(tmp_path, cases=[])
+    args.track = "representation_semantics"
+    args.skip_judge = True
+    captured: dict[str, object] = {}
+
+    def fake_run_jobs(jobs, **kwargs):
+        captured["jobs"] = jobs
+        captured["models"] = kwargs["models"]
+        return [
+            {
+                "case_id": job["case_id"],
+                "repeat": job["repeat"],
+                "status": "subject_completed",
+                "execution": f"cases/{job['case_id']}/r01/execution.json",
+                "conclusion": None,
+                "total_score": None,
+            }
+            for job in jobs
+        ]
+
+    monkeypatch.setattr(run_all, "parse_args", lambda: args)
+    monkeypatch.setattr(run_all, "capture_model_config", model_config)
+    monkeypatch.setattr(run_all, "capture_judge_requested_config", requested_config)
+    monkeypatch.setattr(run_all, "git_metadata", lambda _cwd: {"commit": "test", "dirty": False})
+    monkeypatch.setattr(run_all, "run_jobs", fake_run_jobs)
+
+    run_all.main()
+
+    jobs = captured["jobs"]
+    assert isinstance(jobs, list)
+    assert [job["case_id"] for job in jobs] == [
+        "001",
+        "004",
+        "006",
+        "008",
+        "009",
+        "010",
+        "011",
+        "012",
+        "013",
+        "014",
+    ]
+    assert captured["models"]["agent"]["web_search_enabled"] is False
+    run_record = json.loads((Path(args.runs_dir) / args.run_id / "run.json").read_text(encoding="utf-8"))
+    assert run_record["config"]["track_id"] == "representation_semantics"
+    assert run_record["config"]["workers"] == 2
+    assert run_record["config"]["repeats"] == 1
 
 
 def batch_args(tmp_path: Path, *, cases: list[str]) -> SimpleNamespace:

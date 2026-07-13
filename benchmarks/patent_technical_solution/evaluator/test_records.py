@@ -73,6 +73,102 @@ def test_aggregate_case_records_keeps_only_total_score_statistics() -> None:
     assert "dimension_scores" not in aggregate
 
 
+def test_aggregate_case_records_splits_partial_and_incorrect_usage_statistics() -> None:
+    aggregate = aggregate_case_records(
+        [
+            representation_record(
+                "003",
+                figure=("recommended", False, 40, "not_used"),
+                formula=("optional", False, 100, "not_used"),
+                solution_score=90,
+            ),
+            representation_record(
+                "011",
+                figure=("optional", True, 20, "incorrect"),
+                formula=("recommended", True, 70, "partially_correct"),
+                solution_score=80,
+            ),
+        ]
+    )
+
+    summary = aggregate["representation"]
+    assert summary["eligible_runs"] == 2
+    assert summary["scored_runs"] == 2
+    assert summary["solution_average_score"] == 85
+    assert summary["representation_average_score"] == 57.5
+    assert summary["modalities"]["figure"]["used_runs"] == 1
+    assert summary["modalities"]["figure"]["recommended_not_used_runs"] == 1
+    assert summary["modalities"]["figure"]["used_partial_runs"] == 0
+    assert summary["modalities"]["figure"]["used_incorrect_runs"] == 1
+    assert summary["modalities"]["formula"]["used_runs"] == 1
+    assert summary["modalities"]["formula"]["used_partial_runs"] == 1
+    assert summary["modalities"]["formula"]["used_incorrect_runs"] == 0
+    assert "used_with_error_runs" not in summary["modalities"]["figure"]
+    assert "used_with_error_runs" not in summary["modalities"]["formula"]
+    assert aggregate["cases"][0]["representation"]["modalities"]["figure"][
+        "recommended_not_used_runs"
+    ] == 1
+
+
+def test_representation_aggregate_exposes_unscored_eligible_runs() -> None:
+    scored = representation_record(
+        "001",
+        figure=("optional", False, 100, "not_used"),
+        formula=("optional", False, 100, "not_used"),
+        solution_score=80,
+    )
+    failed = {
+        "case_id": "004",
+        "repeat": 1,
+        "status": "judge_failed",
+        "total_score": None,
+    }
+
+    summary = aggregate_case_records([scored, failed])["representation"]
+
+    assert summary["eligible_runs"] == 2
+    assert summary["scored_runs"] == 1
+    by_case = {row["case_id"]: row for row in summary["cases"]}
+    assert by_case["001"]["eligible_runs"] == 1
+    assert by_case["001"]["scored_runs"] == 1
+    assert by_case["004"]["eligible_runs"] == 1
+    assert by_case["004"]["scored_runs"] == 0
+
+
+def representation_record(
+    case_id: str,
+    *,
+    figure: tuple[str, bool, int, str],
+    formula: tuple[str, bool, int, str],
+    solution_score: int,
+) -> dict:
+    representation_score = (figure[2] + formula[2]) / 2
+    return {
+        "case_id": case_id,
+        "repeat": 1,
+        "status": "completed",
+        "solution_score": solution_score,
+        "representation_score": representation_score,
+        "total_score": 0.7 * solution_score + 0.3 * representation_score,
+        "representation": {
+            "figure": {
+                "policy": figure[0],
+                "used": figure[1],
+                "score": figure[2],
+                "verdict": figure[3],
+                "assessment": "figure",
+            },
+            "formula": {
+                "policy": formula[0],
+                "used": formula[1],
+                "score": formula[2],
+                "verdict": formula[3],
+                "assessment": "formula",
+            },
+        },
+    }
+
+
 def test_judge_attempts_append_across_retries() -> None:
     execution = new_execution(
         run_id="run-1",
@@ -146,4 +242,3 @@ def test_legacy_judge_summary_becomes_first_attempt() -> None:
     assert attempts[0]["status"] == "failed"
     assert attempts[0]["logs_path"] == "judge/codex_logs"
     assert attempts[0]["error"]["message"] == "old failure"
-
