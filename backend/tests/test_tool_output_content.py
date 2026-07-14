@@ -89,6 +89,10 @@ def test_hydrate_tool_output_content_adds_current_round_figure_image_after_tool_
     assert review_message["tool_output_attachment"] is True
     assert review_message["content"][0]["type"] == "input_text"
     assert FIGURE_VISUAL_REVIEW_PROMPT in review_message["content"][0]["text"]
+    assert "不要重新判断技术方案本身是否成立或先进" in review_message["content"][0]["text"]
+    assert "必须检查截图是否忠实表达" in review_message["content"][0]["text"]
+    assert "与本图目的相关" in review_message["content"][0]["text"]
+    assert "在存在对应正文时保持一致" in review_message["content"][0]["text"]
     assert "影响理解或使用的客观问题" in review_message["content"][0]["text"]
     assert "轻微间距差异、细小不对称和纯审美偏好" in review_message["content"][0]["text"]
     assert "不要以自动达到视觉完美为目标" in review_message["content"][0]["text"]

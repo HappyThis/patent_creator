@@ -70,6 +70,7 @@ def make_settings(
     *,
     llm_max_retries: int = 2,
     web_search_enabled: bool = True,
+    model: str = "gpt-5.5",
 ) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
@@ -77,6 +78,7 @@ def make_settings(
         git_user_name="Test User",
         git_user_email="test@example.com",
         openai_api_key="test-key",
+        openai_model=model,
         openai_web_search_enabled=web_search_enabled,
         llm_max_retries=llm_max_retries,
         llm_retry_delay_seconds=0,
@@ -221,6 +223,24 @@ def test_generate_with_tools_stream_adds_web_search_by_default(tmp_path: Path) -
     assert call["tools"][0] == {"type": "web_search", "search_context_size": "low"}
     assert call["tools"][1]["type"] == "function"
     assert call["tools"][1]["name"] == "disclosure_outline"
+
+
+def test_generate_with_tools_stream_omits_search_context_size_for_grok(tmp_path: Path) -> None:
+    fake = FakeOpenAIClient(FakeStream(completed_event("ok")))
+    client = OpenAIResponsesClient(make_settings(tmp_path, model="grok-4.5"), client=fake)  # type: ignore[arg-type]
+
+    asyncio.run(
+        client.generate_with_tools_stream(
+            system_prompt="system",
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[function_tool()],
+        )
+    )
+
+    call = fake.responses.calls[0]
+    assert call["model"] == "grok-4.5"
+    assert call["tools"][0] == {"type": "web_search"}
+    assert call["tools"][1]["type"] == "function"
 
 
 def test_generate_with_tools_stream_can_disable_web_search(tmp_path: Path) -> None:

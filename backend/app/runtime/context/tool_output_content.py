@@ -11,7 +11,7 @@ from ...storage.workspace_store import WorkspaceStore
 logger = logging.getLogger("patent_creator.context.tool_output_content")
 
 MAX_TOOL_OUTPUT_IMAGE_ATTACHMENTS_PER_REQUEST = 8
-FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 刚渲染出的截图。请确认它是否已经具备正确、清楚且基本美观的可用质量；不要重新评价技术方案内容，也不要为了套用固定图型而重画。
+FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 刚渲染出的截图。请确认它是否已经具备正确、清楚且基本美观的可用质量。不要重新判断技术方案本身是否成立或先进，也不要为了套用固定图型而重画；但必须检查截图是否忠实表达生成前已经确定的主体以及与本图目的相关的条件、方向、分支、反馈或终止关系，并在存在对应正文时保持一致。
 
 仅在存在影响理解或使用的客观问题时继续修改，例如：
 - 文字重叠、裁切、明显过小，或关键文字无法辨认；

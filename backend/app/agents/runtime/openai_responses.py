@@ -465,7 +465,8 @@ class OpenAIResponsesClient:
         if self.settings.openai_web_search_enabled:
             web_search: dict[str, Any] = {"type": "web_search"}
             context_size = self.settings.openai_web_search_context_size
-            if context_size in {"low", "medium", "high"}:
+            is_grok_model = self.settings.openai_model.strip().lower().startswith("grok-")
+            if context_size in {"low", "medium", "high"} and not is_grok_model:
                 web_search["search_context_size"] = context_size
             response_tools.append(web_search)
         for tool in tools:
