@@ -83,6 +83,28 @@ def normalize_judge_reasoning_effort(value: str) -> str:
     return "xhigh" if normalized == "ultra" else normalized
 
 
+def apply_default_judge_config(
+    models: dict[str, Any],
+    requested: dict[str, Any],
+    default_judge: Any | None,
+) -> None:
+    """Apply a benchmark-owned Judge default before explicit CLI overrides."""
+
+    if default_judge is None:
+        return
+    values = {
+        "model": str(default_judge.model),
+        "provider": str(default_judge.provider),
+        "reasoning_effort": str(default_judge.reasoning_effort).strip().lower(),
+    }
+    requested.update(values)
+    judge = dict(models.get("judge", {}))
+    judge.update(values)
+    judge["reasoning_effort"] = normalize_judge_reasoning_effort(values["reasoning_effort"])
+    judge["source"] = "benchmark_manifest"
+    models["judge"] = judge
+
+
 def load_repo_env() -> None:
     env_path = REPO_DIR / ".env"
     if not env_path.exists():

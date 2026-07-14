@@ -296,8 +296,14 @@ def test_representation_batch_uses_manifest_cases_and_forces_web_off(
     monkeypatch,
 ) -> None:
     args = batch_args(tmp_path, cases=[])
-    args.track = "representation_semantics"
+    args.benchmark_dir = str(
+        Path(__file__).resolve().parents[2] / "patent_representation_semantics"
+    )
+    args.track = "patent_representation_semantics"
     args.skip_judge = True
+    args.judge_model = None
+    args.judge_provider = None
+    args.judge_reasoning_effort = None
     captured: dict[str, object] = {}
 
     def fake_run_jobs(jobs, **kwargs):
@@ -339,9 +345,131 @@ def test_representation_batch_uses_manifest_cases_and_forces_web_off(
     ]
     assert captured["models"]["agent"]["web_search_enabled"] is False
     run_record = json.loads((Path(args.runs_dir) / args.run_id / "run.json").read_text(encoding="utf-8"))
-    assert run_record["config"]["track_id"] == "representation_semantics"
+    assert run_record["config"]["benchmark_id"] == "patent_representation_semantics"
+    assert run_record["config"]["track_id"] == "patent_representation_semantics"
+    assert run_record["models"]["judge"]["model"] == "gpt-5.6-terra"
+    assert run_record["models"]["judge"]["reasoning_effort"] == "xhigh"
     assert run_record["config"]["workers"] == 2
     assert run_record["config"]["repeats"] == 1
+
+
+def test_batch_rejects_existing_run_id_before_starting_jobs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    args = batch_args(tmp_path, cases=["001"])
+    run_path = Path(args.runs_dir) / args.run_id / "run.json"
+    run_path.parent.mkdir(parents=True)
+    run_path.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(run_all, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        run_all,
+        "run_jobs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("jobs must not start for a duplicate run id")
+        ),
+    )
+
+    with pytest.raises(SystemExit, match="Run id already exists"):
+        run_all.main()
+
+
+def test_cancelled_batch_finishes_parent_run_record(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    args = batch_args(tmp_path, cases=["001"])
+    args.skip_judge = True
+
+    def cancel_batch(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(run_all, "parse_args", lambda: args)
+    monkeypatch.setattr(run_all, "capture_model_config", model_config)
+    monkeypatch.setattr(run_all, "capture_judge_requested_config", requested_config)
+    monkeypatch.setattr(run_all, "git_metadata", lambda _cwd: {"commit": "test", "dirty": False})
+    monkeypatch.setattr(run_all, "run_jobs", cancel_batch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_all.main()
+
+    assert exc_info.value.code == 130
+    run_record = json.loads(
+        (Path(args.runs_dir) / args.run_id / "run.json").read_text(encoding="utf-8")
+    )
+    assert run_record["status"] == "cancelled"
+    assert run_record["finished_at"] is not None
+    assert run_record["error"]["type"] == "cancelled"
+
+
+def test_mark_execution_cancelled_finishes_running_phases() -> None:
+    execution = run_all.new_execution(
+        run_id="run-1",
+        case_id="001",
+        repeat=1,
+        agent_config={"model": "agent"},
+        judge_config={"model": "judge"},
+    )
+    execution["agent"]["status"] = "running"
+    execution["judge"]["status"] = "running"
+    execution["judge"]["attempts"] = [
+        {
+            "attempt": 1,
+            "status": "running",
+            "started_at": execution["started_at"],
+            "finished_at": None,
+            "duration_ms": None,
+        }
+    ]
+
+    run_all.mark_execution_cancelled(execution)
+
+    assert execution["status"] == "cancelled"
+    assert execution["finished_at"] is not None
+    assert execution["agent"]["status"] == "cancelled"
+    assert execution["agent"]["finished_at"] is not None
+    assert execution["judge"]["status"] == "cancelled"
+    assert execution["judge"]["finished_at"] is not None
+    assert execution["judge"]["attempts"][0]["status"] == "cancelled"
+    assert execution["judge"]["attempts"][0]["finished_at"] is not None
+
+
+def test_single_worker_interrupt_terminates_case_process(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    args = batch_args(tmp_path, cases=["001"])
+    args.workers = 1
+    case_run_dir = Path(args.runs_dir) / args.run_id / "cases" / "001" / "r01"
+    terminated: list[object] = []
+
+    class FakeProcess:
+        returncode = None
+
+        def communicate(self, *, timeout: int):
+            raise KeyboardInterrupt
+
+    process = FakeProcess()
+    monkeypatch.setattr(run_all.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(run_all, "terminate_process_group", terminated.append)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_all.run_jobs(
+            [{"case_id": "001", "repeat": 1, "case_run_dir": case_run_dir}],
+            args=args,
+            runs_dir=Path(args.runs_dir),
+            run_id=args.run_id,
+            models=model_config(),
+            judge_requested=requested_config(),
+            judge_runtime_resolution=None,
+        )
+
+    assert terminated == [process]
+    assert not run_all.ACTIVE_PROCESSES
+    execution = json.loads((case_run_dir / "execution.json").read_text(encoding="utf-8"))
+    assert execution["status"] == "cancelled"
+    assert execution["finished_at"] is not None
 
 
 def batch_args(tmp_path: Path, *, cases: list[str]) -> SimpleNamespace:

@@ -311,6 +311,25 @@ def test_main_exits_nonzero_for_judge_preflight_failure(monkeypatch) -> None:
     assert exc_info.value.code == 1
 
 
+def test_single_case_rejects_existing_run_id_before_overwrite(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    benchmark_dir = tmp_path / "benchmark"
+    runs_dir = benchmark_dir / "runs"
+    run_path = runs_dir / "existing-run" / "run.json"
+    run_path.parent.mkdir(parents=True)
+    run_path.write_text("{}\n", encoding="utf-8")
+    patch_general_track(monkeypatch, benchmark_dir)
+
+    with pytest.raises(SystemExit, match="Run id already exists"):
+        asyncio.run(
+            run_case_module.run_case(case_args(runs_dir, run_id="existing-run"))
+        )
+
+    assert run_path.read_text(encoding="utf-8") == "{}\n"
+
+
 def test_runtime_preflight_failure_is_recorded_before_agent_starts(
     tmp_path: Path,
     monkeypatch,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from . import run_metadata
 
 
@@ -41,3 +43,30 @@ def test_judge_model_defaults_to_gpt55_instead_of_local_codex_model(monkeypatch)
     requested = run_metadata.capture_judge_requested_config()
 
     assert requested["model"] == "gpt-5.5"
+
+
+def test_benchmark_default_judge_overrides_global_default_before_cli() -> None:
+    models = {
+        "judge": {
+            "model": "gpt-5.5",
+            "provider": "openai",
+            "reasoning_effort": "high",
+            "source": "benchmark_env_or_codex_config",
+        }
+    }
+    requested = {"model": "gpt-5.5", "provider": "openai", "reasoning_effort": "high"}
+
+    run_metadata.apply_default_judge_config(
+        models,
+        requested,
+        SimpleNamespace(model="gpt-5.6-terra", provider="openai", reasoning_effort="xhigh"),
+    )
+
+    assert requested == {
+        "model": "gpt-5.6-terra",
+        "provider": "openai",
+        "reasoning_effort": "xhigh",
+    }
+    assert models["judge"]["model"] == "gpt-5.6-terra"
+    assert models["judge"]["reasoning_effort"] == "xhigh"
+    assert models["judge"]["source"] == "benchmark_manifest"

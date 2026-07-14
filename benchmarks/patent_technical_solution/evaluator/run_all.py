@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import subprocess
 import sys
 import threading
@@ -15,6 +16,15 @@ BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 RUN_CASE = Path(__file__).resolve().parent / "run_case.py"
 EVALUATOR_DIR = Path(__file__).resolve().parent
 PRINT_LOCK = threading.Lock()
+ACTIVE_PROCESSES_LOCK = threading.Lock()
+ACTIVE_PROCESSES: set[subprocess.Popen[str]] = set()
+BATCH_CANCEL_EVENT = threading.Event()
+
+
+class BatchTermination(KeyboardInterrupt):
+    def __init__(self, signal_number: int) -> None:
+        super().__init__(f"batch received signal {signal_number}")
+        self.signal_number = signal_number
 
 if __package__:
     from .judge_runtime import JudgeRuntimeResolutionError, resolve_judge_runtime
@@ -23,12 +33,15 @@ if __package__:
         aggregate_case_records,
         atomic_write_json,
         finish_execution,
+        finish_judge_attempt,
+        finish_phase,
         finish_run_record,
         new_execution,
         new_run_record,
         read_json_dict,
     )
     from .run_metadata import (
+        apply_default_judge_config,
         capture_judge_requested_config,
         capture_model_config,
         git_metadata,
@@ -45,12 +58,15 @@ else:
         aggregate_case_records,
         atomic_write_json,
         finish_execution,
+        finish_judge_attempt,
+        finish_phase,
         finish_run_record,
         new_execution,
         new_run_record,
         read_json_dict,
     )
     from run_metadata import (  # noqa: E402
+        apply_default_judge_config,
         capture_judge_requested_config,
         capture_model_config,
         git_metadata,
@@ -60,10 +76,25 @@ else:
 
 
 def main() -> None:
-    args = parse_args()
-    track_id = str(getattr(args, "track", None) or "general_solution")
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _raise_batch_termination)
     try:
-        track = load_track(track_id, benchmark_dir=BENCHMARK_DIR)
+        _main()
+    except BatchTermination as exc:
+        raise SystemExit(128 + exc.signal_number) from None
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+
+
+def _main() -> None:
+    args = parse_args()
+    benchmark_dir = Path(getattr(args, "benchmark_dir", None) or BENCHMARK_DIR).resolve()
+    track_id_value = getattr(args, "track", None)
+    track_id = str(track_id_value) if track_id_value else None
+    try:
+        track = load_track(track_id, benchmark_dir=benchmark_dir)
         case_ids = [str(value).zfill(3) for value in (args.cases or track.case_ids)]
         for case_id in case_ids:
             resolve_track_case(track, case_id)
@@ -71,9 +102,11 @@ def main() -> None:
         raise SystemExit(str(exc)) from exc
     validate_batch_inputs(args, case_ids)
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
-    runs_dir = Path(args.runs_dir).resolve()
+    runs_dir = Path(args.runs_dir).resolve() if args.runs_dir else track.benchmark_dir / "runs"
     run_dir = runs_dir / run_id
     run_path = run_dir / "run.json"
+    if run_dir.exists():
+        raise SystemExit(f"Run id already exists: {run_id}")
     jobs = [
         {
             "case_id": case_id,
@@ -87,8 +120,10 @@ def main() -> None:
     if track.subject_policy.web_search_enabled is not None:
         models["agent"]["web_search_enabled"] = track.subject_policy.web_search_enabled
     judge_requested = capture_judge_requested_config()
+    apply_default_judge_config(models, judge_requested, track.default_judge)
     apply_judge_overrides(models, judge_requested, args)
     config = {
+        "benchmark_id": track.track_id,
         "track_id": track.track_id,
         "cases": case_ids,
         "repeats": args.repeats,
@@ -103,7 +138,7 @@ def main() -> None:
         case_ids=case_ids,
         config=config,
         models=models,
-        benchmark_git=git_metadata(BENCHMARK_DIR),
+        benchmark_git=git_metadata(track.benchmark_dir),
     )
     diagnostics = run_record.setdefault("diagnostics", {})
     diagnostics["judge_requested"] = dict(judge_requested)
@@ -147,14 +182,22 @@ def main() -> None:
             models=models,
             judge_requested=judge_requested,
             judge_runtime_resolution=judge_runtime_resolution,
+            benchmark_id=track.track_id,
+            benchmark_dir=track.benchmark_dir,
         )
     except BaseException as exc:
+        completed_records = list(getattr(exc, "completed_records", []))
+        cancelled = isinstance(exc, KeyboardInterrupt)
         finish_run_record(
             run_record,
-            status="failed",
-            cases=[],
-            aggregate=None,
-            error={"phase": "batch", "type": type(exc).__name__, "message": str(exc)},
+            status="cancelled" if cancelled else "failed",
+            cases=completed_records,
+            aggregate=aggregate_case_records(completed_records) if completed_records else None,
+            error={
+                "phase": "batch",
+                "type": "cancelled" if cancelled else type(exc).__name__,
+                "message": str(exc) or ("Batch cancelled." if cancelled else "Batch failed."),
+            },
         )
         atomic_write_json(run_path, run_record)
         raise
@@ -188,26 +231,41 @@ def run_jobs(
     models: dict[str, Any],
     judge_requested: dict[str, Any],
     judge_runtime_resolution: dict[str, Any] | None,
+    benchmark_id: str | None = None,
+    benchmark_dir: Path = BENCHMARK_DIR,
 ) -> list[dict[str, Any]]:
+    BATCH_CANCEL_EVENT.clear()
     if args.workers <= 1:
-        return [
-            run_one_job(
-                job,
-                args=args,
-                runs_dir=runs_dir,
-                run_id=run_id,
-                models=models,
-                judge_requested=judge_requested,
-                judge_runtime_resolution=judge_runtime_resolution,
-            )
-            for job in jobs
-        ]
+        records: list[dict[str, Any]] = []
+        try:
+            for job in jobs:
+                records.append(
+                    run_one_job(
+                        job,
+                        args=args,
+                        runs_dir=runs_dir,
+                        run_id=run_id,
+                        models=models,
+                        judge_requested=judge_requested,
+                        judge_runtime_resolution=judge_runtime_resolution,
+                        benchmark_id=benchmark_id,
+                        benchmark_dir=benchmark_dir,
+                    )
+                )
+        except BaseException as exc:
+            BATCH_CANCEL_EVENT.set()
+            terminate_active_processes()
+            setattr(exc, "completed_records", records)
+            raise
+        return records
 
     records: list[dict[str, Any]] = []
     print(f"running {len(jobs)} jobs with {args.workers} workers", flush=True)
-    with ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="bench-worker") as executor:
-        future_to_job = {
-            executor.submit(
+    executor = ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="bench-worker")
+    future_to_job: dict[Any, dict[str, Any]] = {}
+    try:
+        for job in jobs:
+            future = executor.submit(
                 run_one_job,
                 job,
                 args=args,
@@ -216,11 +274,22 @@ def run_jobs(
                 models=models,
                 judge_requested=judge_requested,
                 judge_runtime_resolution=judge_runtime_resolution,
-            ): job
-            for job in jobs
-        }
+                benchmark_id=benchmark_id,
+                benchmark_dir=benchmark_dir,
+            )
+            future_to_job[future] = job
         for future in as_completed(future_to_job):
             records.append(future.result())
+    except BaseException as exc:
+        BATCH_CANCEL_EVENT.set()
+        terminate_active_processes()
+        for future in future_to_job:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        setattr(exc, "completed_records", records)
+        raise
+    else:
+        executor.shutdown(wait=True)
     records.sort(key=lambda item: (str(item["case_id"]), int(item.get("repeat") or 0)))
     return records
 
@@ -234,17 +303,22 @@ def run_one_job(
     models: dict[str, Any],
     judge_requested: dict[str, Any],
     judge_runtime_resolution: dict[str, Any] | None,
+    benchmark_id: str | None = None,
+    benchmark_dir: Path = BENCHMARK_DIR,
 ) -> dict[str, Any]:
     case_id = str(job["case_id"])
     repeat = int(job["repeat"])
     case_run_dir = Path(job["case_run_dir"])
+    execution_path = case_run_dir / "execution.json"
     command = [
         sys.executable,
         str(RUN_CASE),
         "--case",
         case_id,
+        "--benchmark-dir",
+        str(benchmark_dir),
         "--track",
-        str(getattr(args, "track", None) or "general_solution"),
+        str(benchmark_id or getattr(args, "track", None) or "general_solution"),
         "--run-id",
         run_id,
         "--runs-dir",
@@ -281,17 +355,51 @@ def run_one_job(
         errors="replace",
         start_new_session=True,
     )
+    register_active_process(process)
     process_timeout = args.round_timeout + (0 if args.skip_judge else args.judge_timeout) + 120
     timed_out = False
     try:
-        stdout, stderr = process.communicate(timeout=process_timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+        try:
+            stdout, stderr = process.communicate(timeout=process_timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            terminate_process_group(process)
+            stdout, stderr = process.communicate()
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt):
+            BATCH_CANCEL_EVENT.set()
         terminate_process_group(process)
-        stdout, stderr = process.communicate()
+        if BATCH_CANCEL_EVENT.is_set():
+            persist_cancelled_execution(
+                execution_path,
+                run_id=run_id,
+                case_id=case_id,
+                repeat=repeat,
+                models=models,
+                judge_requested=judge_requested,
+                judge_runtime_resolution=judge_runtime_resolution,
+                benchmark_id=str(
+                    benchmark_id or getattr(args, "track", None) or "general_solution"
+                ),
+            )
+        raise
+    finally:
+        unregister_active_process(process)
 
-    execution_path = case_run_dir / "execution.json"
     execution = read_json_dict(execution_path)
+    if BATCH_CANCEL_EVENT.is_set() and process.returncode != 0:
+        execution = persist_cancelled_execution(
+            execution_path,
+            run_id=run_id,
+            case_id=case_id,
+            repeat=repeat,
+            models=models,
+            judge_requested=judge_requested,
+            judge_runtime_resolution=judge_runtime_resolution,
+            benchmark_id=str(
+                benchmark_id or getattr(args, "track", None) or "general_solution"
+            ),
+        )
     if execution is None:
         execution = new_execution(
             run_id=run_id,
@@ -304,7 +412,10 @@ def run_one_job(
                 "runtime_resolution": judge_runtime_resolution,
             },
         )
-        execution["track_id"] = str(getattr(args, "track", None) or "general_solution")
+        execution["benchmark_id"] = str(
+            benchmark_id or getattr(args, "track", None) or "general_solution"
+        )
+        execution["track_id"] = execution["benchmark_id"]
         error_message = "Case process timed out。" if timed_out else (stderr.strip() or "Case process failed。")
         finish_execution(
             execution,
@@ -357,6 +468,85 @@ def persist_process_failure(case_run_dir: Path, *, stdout: str, stderr: str) -> 
         with (logs_dir / "stderr.log").open("a", encoding="utf-8") as handle:
             handle.write("\n[run_case process]\n")
             handle.write(stderr)
+
+
+def persist_cancelled_execution(
+    execution_path: Path,
+    *,
+    run_id: str,
+    case_id: str,
+    repeat: int,
+    models: dict[str, Any],
+    judge_requested: dict[str, Any],
+    judge_runtime_resolution: dict[str, Any] | None,
+    benchmark_id: str,
+) -> dict[str, Any]:
+    execution = read_json_dict(execution_path)
+    if execution is None:
+        execution = new_execution(
+            run_id=run_id,
+            case_id=case_id,
+            repeat=repeat,
+            agent_config=_execution_config(models.get("agent", {})),
+            judge_config={
+                **_execution_config(models.get("judge", {})),
+                "requested": dict(judge_requested),
+                "runtime_resolution": judge_runtime_resolution,
+            },
+        )
+    execution["benchmark_id"] = benchmark_id
+    execution["track_id"] = benchmark_id
+    mark_execution_cancelled(execution)
+    atomic_write_json(execution_path, execution)
+    return execution
+
+
+def register_active_process(process: subprocess.Popen[str]) -> None:
+    with ACTIVE_PROCESSES_LOCK:
+        ACTIVE_PROCESSES.add(process)
+
+
+def unregister_active_process(process: subprocess.Popen[str]) -> None:
+    with ACTIVE_PROCESSES_LOCK:
+        ACTIVE_PROCESSES.discard(process)
+
+
+def terminate_active_processes() -> None:
+    with ACTIVE_PROCESSES_LOCK:
+        processes = list(ACTIVE_PROCESSES)
+    if not processes:
+        return
+    with ThreadPoolExecutor(
+        max_workers=len(processes),
+        thread_name_prefix="bench-terminator",
+    ) as executor:
+        list(executor.map(terminate_process_group, processes))
+
+
+def mark_execution_cancelled(execution: dict[str, Any]) -> None:
+    error = {"phase": "batch", "type": "cancelled", "message": "Batch cancelled."}
+    for phase in ("agent", "judge"):
+        phase_record = execution.get(phase)
+        if isinstance(phase_record, dict) and phase_record.get("status") == "running":
+            finish_phase(execution, phase, status="cancelled")
+    judge = execution.get("judge")
+    attempts = judge.get("attempts") if isinstance(judge, dict) else None
+    if (
+        isinstance(attempts, list)
+        and attempts
+        and isinstance(attempts[-1], dict)
+        and attempts[-1].get("status") == "running"
+    ):
+        finish_judge_attempt(execution, status="cancelled", error=error)
+    finish_execution(
+        execution,
+        status="cancelled",
+        error=error,
+    )
+
+
+def _raise_batch_termination(signal_number: int, _frame: Any) -> None:
+    raise BatchTermination(signal_number)
 
 
 def apply_judge_overrides(
@@ -427,9 +617,10 @@ def validate_batch_inputs(args: argparse.Namespace, case_ids: list[str]) -> None
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run patent technical solution benchmark cases.")
     parser.add_argument("cases", nargs="*", help="Case ids. Defaults to all cases.")
-    parser.add_argument("--track", default="general_solution", help="Benchmark track id.")
+    parser.add_argument("--benchmark-dir", default=str(BENCHMARK_DIR))
+    parser.add_argument("--track", default=None, help="Benchmark id or legacy track id.")
     parser.add_argument("--run-id", default=None)
-    parser.add_argument("--runs-dir", default=str(BENCHMARK_DIR / "runs"))
+    parser.add_argument("--runs-dir", default=None)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--round-timeout", type=int, default=1800)

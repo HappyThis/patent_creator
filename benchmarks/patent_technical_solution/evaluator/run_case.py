@@ -47,6 +47,7 @@ if __package__:
         start_phase,
     )
     from .run_metadata import (
+        apply_default_judge_config,
         capture_judge_requested_config,
         capture_model_config,
         compact_dict,
@@ -77,6 +78,7 @@ else:
         start_phase,
     )
     from run_metadata import (  # noqa: E402
+        apply_default_judge_config,
         capture_judge_requested_config,
         capture_model_config,
         compact_dict,
@@ -107,9 +109,10 @@ def main() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one patent technical solution benchmark case.")
     parser.add_argument("--case", required=True, help="Case id, e.g. 001.")
-    parser.add_argument("--track", default="general_solution", help="Benchmark track id.")
+    parser.add_argument("--benchmark-dir", default=str(BENCHMARK_DIR))
+    parser.add_argument("--track", default=None, help="Benchmark id or legacy track id.")
     parser.add_argument("--run-id", default=None, help="Run id. Defaults to timestamp + case id.")
-    parser.add_argument("--runs-dir", default=str(BENCHMARK_DIR / "runs"), help="Directory for run artifacts.")
+    parser.add_argument("--runs-dir", default=None, help="Directory for run artifacts.")
     parser.add_argument("--skip-judge", action="store_true", help="Run the subject agent without judging it.")
     parser.add_argument("--skip-subject", action="store_true", help="Judge the existing subject workspace.")
     parser.add_argument("--round-timeout", type=int, default=1800, help="Subject-agent timeout in seconds.")
@@ -146,17 +149,22 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit("--skip-judge 与 --skip-subject 不能同时使用。")
 
     case_id = str(args.case).zfill(3)
-    track_id = str(getattr(args, "track", None) or "general_solution")
+    benchmark_dir = Path(getattr(args, "benchmark_dir", None) or BENCHMARK_DIR).resolve()
+    track_id_value = getattr(args, "track", None)
+    track_id = str(track_id_value) if track_id_value else None
     try:
-        track = load_track(track_id, benchmark_dir=BENCHMARK_DIR)
+        track = load_track(track_id, benchmark_dir=benchmark_dir)
         track_case = resolve_track_case(track, case_id)
     except TrackConfigError as exc:
         raise SystemExit(str(exc)) from exc
+    effective_benchmark_dir = getattr(track, "benchmark_dir", benchmark_dir)
     source_case_dir = track_case.source_case_dir
 
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S") + f"-{case_id}"
-    runs_dir = Path(args.runs_dir).resolve()
+    runs_dir = Path(args.runs_dir).resolve() if args.runs_dir else effective_benchmark_dir / "runs"
     run_dir = runs_dir / run_id
+    if not args.batch_child and not args.skip_subject and run_dir.exists():
+        raise SystemExit(f"Run id already exists: {run_id}")
     case_run_dir = (
         Path(args.case_output_dir).resolve()
         if args.case_output_dir
@@ -174,6 +182,7 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
     if track.subject_policy.web_search_enabled is not None:
         models["agent"]["web_search_enabled"] = track.subject_policy.web_search_enabled
     judge_requested = capture_judge_requested_config()
+    apply_default_judge_config(models, judge_requested, getattr(track, "default_judge", None))
     judge_config = dict(models["judge"])
     if args.judge_model:
         judge_requested["model"] = args.judge_model
@@ -188,6 +197,7 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
     run_config = compact_dict(
         {
             "case_id": case_id,
+            "benchmark_id": track.track_id,
             "track_id": track.track_id,
             "repeat": args.repeat,
             "skip_judge": bool(args.skip_judge),
@@ -251,6 +261,7 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
             judge_config=execution_judge_config(judge_config, requested=judge_requested),
         )
         execution["track_id"] = track.track_id
+        execution["benchmark_id"] = track.track_id
         if track.judge_profile == "representation_semantics":
             execution["agent"]["access_policy"] = {
                 "web_search_enabled": False,
@@ -277,7 +288,7 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
                 case_ids=[case_id],
                 config=run_config,
                 models=models,
-                benchmark_git=git_metadata(BENCHMARK_DIR),
+                benchmark_git=git_metadata(effective_benchmark_dir),
             )
         elif args.skip_subject:
             run_record.setdefault("models", {})["judge"] = judge_config
@@ -384,10 +395,13 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
                     round_timeout=args.round_timeout,
                     web_search_enabled=track.subject_policy.web_search_enabled,
                     restrict_external_access=track.judge_profile == "representation_semantics",
-                    runner_addendum_path=(
-                        track.track_dir / "runner.md"
-                        if (track.track_dir / "runner.md").is_file()
-                        else None
+                    runner_path=getattr(track, "runner_path", effective_benchmark_dir / RUNNER_FILE),
+                    runner_addendum_path=getattr(
+                        track,
+                        "runner_addendum_path",
+                        track.track_dir / RUNNER_FILE
+                        if (track.track_dir / RUNNER_FILE).is_file()
+                        else None,
                     ),
                 )
             finish_phase(
@@ -482,7 +496,7 @@ async def _run_case(args: argparse.Namespace) -> dict[str, Any]:
             case_id=case_id,
             case_run_dir=case_run_dir,
             source_case_dir=source_case_dir,
-            benchmark_dir=BENCHMARK_DIR,
+            benchmark_dir=effective_benchmark_dir,
             logs_dir=judge_logs_dir,
             model=judge_config.get("model"),
             provider=str(judge_config.get("provider") or "openai"),
@@ -572,6 +586,7 @@ async def run_subject_agent(
     round_timeout: int,
     web_search_enabled: bool | None = None,
     restrict_external_access: bool = False,
+    runner_path: Path | None = None,
     runner_addendum_path: Path | None = None,
 ) -> SubjectRunResult:
     backend_dir = REPO_DIR / "backend"
@@ -589,6 +604,7 @@ async def run_subject_agent(
             subject_dir=subject_dir,
             round_timeout=round_timeout,
             web_search_enabled=web_search_enabled,
+            runner_path=runner_path,
             runner_addendum_path=runner_addendum_path,
         )
 
@@ -650,6 +666,7 @@ async def _run_subject_agent_impl(
     subject_dir: Path,
     round_timeout: int,
     web_search_enabled: bool | None,
+    runner_path: Path | None,
     runner_addendum_path: Path | None,
 ) -> SubjectRunResult:
     backend_dir = REPO_DIR / "backend"
@@ -677,7 +694,7 @@ async def _run_subject_agent_impl(
     if section_id is None:
         raise RuntimeError("技术方案章节不存在。")
 
-    runner_md = (BENCHMARK_DIR / RUNNER_FILE).read_text(encoding="utf-8")
+    runner_md = (runner_path or BENCHMARK_DIR / RUNNER_FILE).read_text(encoding="utf-8")
     runner_parts = [runner_md]
     if runner_addendum_path is not None:
         runner_parts.append(runner_addendum_path.read_text(encoding="utf-8"))

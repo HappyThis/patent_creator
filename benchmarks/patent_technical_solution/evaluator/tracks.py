@@ -10,6 +10,7 @@ from typing import Any, Literal
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_TRACK_ID = "general_solution"
 TRACK_SCHEMA_VERSION = "patent-technical-solution-track-v1"
+STANDALONE_SCHEMA_VERSION = "patent-solution-benchmark-v1"
 
 JudgeProfile = Literal["general", "representation_semantics"]
 RepresentationPolicy = Literal["recommended", "optional"]
@@ -23,7 +24,9 @@ _BUILTIN_TRACKS: dict[str, tuple[JudgeProfile, tuple[str, ...]]] = {
         "general",
         tuple(f"{value:03d}" for value in range(1, 11)),
     ),
-    "representation_semantics": (
+}
+_BUILTIN_BENCHMARKS: dict[str, tuple[JudgeProfile, tuple[str, ...]]] = {
+    "patent_representation_semantics": (
         "representation_semantics",
         ("001", "004", "006", "008", "009", "010", "011", "012", "013", "014"),
     ),
@@ -49,6 +52,13 @@ class TrackCasePolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class DefaultJudge:
+    model: str
+    provider: str
+    reasoning_effort: str
+
+
+@dataclass(frozen=True, slots=True)
 class TrackConfig:
     track_id: str
     judge_profile: JudgeProfile
@@ -57,6 +67,12 @@ class TrackConfig:
     benchmark_dir: Path
     track_dir: Path
     manifest_path: Path
+    source_cases_dir: Path
+    runner_path: Path
+    runner_addendum_path: Path | None
+    base_judge_path: Path
+    default_judge: DefaultJudge | None
+    standalone: bool = False
 
     @property
     def case_ids(self) -> tuple[str, ...]:
@@ -65,7 +81,8 @@ class TrackConfig:
     @property
     def track_judge_path(self) -> Path | None:
         if self.judge_profile == "representation_semantics":
-            return self.track_dir / "judge.md"
+            filename = "representation_judge.md" if self.standalone else "judge.md"
+            return self.track_dir / filename
         return None
 
 
@@ -97,13 +114,31 @@ def load_track(
     ``track_id`` always resolves to ``general_solution``.
     """
 
+    root = (benchmark_dir or BENCHMARK_DIR).resolve()
+    standalone_manifest = root / "benchmark.json"
+    if standalone_manifest.is_file():
+        return _load_standalone_benchmark(
+            root=root,
+            manifest_path=standalone_manifest,
+            requested_id=track_id,
+        )
+
     selected_id = DEFAULT_TRACK_ID if track_id is None else track_id
     if not isinstance(selected_id, str) or not _TRACK_ID_PATTERN.fullmatch(selected_id):
         raise TrackConfigError(f"invalid track id: {selected_id!r}")
 
-    root = (benchmark_dir or BENCHMARK_DIR).resolve()
     track_dir = root / "tracks" / selected_id
     manifest_path = track_dir / "track.json"
+    standalone_replacement = root.parent / "patent_representation_semantics" / "benchmark.json"
+    if (
+        selected_id == "representation_semantics"
+        and not manifest_path.is_file()
+        and standalone_replacement.is_file()
+    ):
+        raise TrackConfigError(
+            "representation_semantics is now a standalone benchmark; use "
+            "benchmarks/patent_representation_semantics/bench.py"
+        )
     raw = _read_json_object(manifest_path)
     _require_exact_keys(
         raw,
@@ -139,10 +174,15 @@ def load_track(
         benchmark_dir=root,
         track_dir=track_dir,
         manifest_path=manifest_path,
+        source_cases_dir=root / "cases",
+        runner_path=root / "runner.md",
+        runner_addendum_path=(track_dir / "runner.md" if (track_dir / "runner.md").is_file() else None),
+        base_judge_path=root / "judge.md",
+        default_judge=None,
     )
     _validate_builtin_contract(track)
-    _require_file(root / "runner.md", "shared Agent runner rules")
-    _require_file(root / "judge.md", "shared Judge rules")
+    _require_file(track.runner_path, "shared Agent runner rules")
+    _require_file(track.base_judge_path, "shared Judge rules")
     if track.track_judge_path is not None:
         _require_file(track.track_judge_path, "track Judge rules")
     for case in track.cases:
@@ -158,7 +198,7 @@ def resolve_track_case(track: TrackConfig, case_id: str | int) -> ResolvedTrackC
     if policy is None:
         raise TrackConfigError(f"case {normalized} is not part of track {track.track_id}")
 
-    source_case_dir = track.benchmark_dir / "cases" / normalized
+    source_case_dir = track.source_cases_dir / normalized
     if not source_case_dir.is_dir():
         raise TrackConfigError(f"source case directory does not exist: {source_case_dir}")
     source_paths = {name: source_case_dir / name for name in _SOURCE_CASE_FILES}
@@ -168,7 +208,7 @@ def resolve_track_case(track: TrackConfig, case_id: str | int) -> ResolvedTrackC
     track_rubric_path: Path | None = None
     track_metadata_path: Path | None = None
     if track.judge_profile == "representation_semantics":
-        track_case_dir = track.track_dir / "cases" / normalized
+        track_case_dir = source_case_dir if track.standalone else track.track_dir / "cases" / normalized
         track_metadata_path = track_case_dir / "metadata.json"
         _require_file(track_metadata_path, f"track metadata for case {normalized}")
         metadata = _read_json_object(track_metadata_path)
@@ -185,7 +225,8 @@ def resolve_track_case(track: TrackConfig, case_id: str | int) -> ResolvedTrackC
             raise TrackConfigError(
                 f"{track_metadata_path}: policies must match {track.manifest_path}"
             )
-        track_rubric_path = track_case_dir / "rubric.md"
+        rubric_name = "representation_rubric.md" if track.standalone else "rubric.md"
+        track_rubric_path = track_case_dir / rubric_name
         _require_file(track_rubric_path, f"track rubric for case {normalized}")
 
     return ResolvedTrackCase(
@@ -201,6 +242,97 @@ def resolve_track_case(track: TrackConfig, case_id: str | int) -> ResolvedTrackC
         base_rubric_path=source_paths["rubric.md"],
         track_metadata_path=track_metadata_path,
         track_rubric_path=track_rubric_path,
+    )
+
+
+def _load_standalone_benchmark(
+    *,
+    root: Path,
+    manifest_path: Path,
+    requested_id: str | None,
+) -> TrackConfig:
+    raw = _read_json_object(manifest_path)
+    _require_exact_keys(
+        raw,
+        required={
+            "schema_version",
+            "benchmark_id",
+            "judge_profile",
+            "subject_policy",
+            "default_judge",
+            "cases",
+        },
+        optional=set(),
+        context=str(manifest_path),
+    )
+    if raw["schema_version"] != STANDALONE_SCHEMA_VERSION:
+        raise TrackConfigError(
+            f"{manifest_path}: schema_version must be {STANDALONE_SCHEMA_VERSION!r}"
+        )
+    benchmark_id = raw["benchmark_id"]
+    if not isinstance(benchmark_id, str) or not _TRACK_ID_PATTERN.fullmatch(benchmark_id):
+        raise TrackConfigError(f"{manifest_path}: invalid benchmark_id {benchmark_id!r}")
+    if requested_id is not None and requested_id != benchmark_id:
+        raise TrackConfigError(
+            f"{manifest_path}: benchmark_id is {benchmark_id!r}, not {requested_id!r}"
+        )
+    judge_profile = raw["judge_profile"]
+    if judge_profile not in {"general", "representation_semantics"}:
+        raise TrackConfigError(f"{manifest_path}: unsupported judge_profile {judge_profile!r}")
+
+    cases = _parse_cases(raw["cases"], judge_profile=judge_profile, manifest_path=manifest_path)
+    track = TrackConfig(
+        track_id=benchmark_id,
+        judge_profile=judge_profile,
+        cases=cases,
+        subject_policy=_parse_subject_policy(
+            raw["subject_policy"],
+            judge_profile=judge_profile,
+            manifest_path=manifest_path,
+        ),
+        benchmark_dir=root,
+        track_dir=root,
+        manifest_path=manifest_path,
+        source_cases_dir=root / "cases",
+        runner_path=root / "runner.md",
+        runner_addendum_path=(
+            root / "representation_runner.md"
+            if judge_profile == "representation_semantics"
+            else None
+        ),
+        base_judge_path=root / "judge.md",
+        default_judge=_parse_default_judge(raw["default_judge"], manifest_path=manifest_path),
+        standalone=True,
+    )
+    _validate_builtin_contract(track)
+    _require_file(track.runner_path, "Agent runner rules")
+    _require_file(track.base_judge_path, "Judge rules")
+    if track.runner_addendum_path is not None:
+        _require_file(track.runner_addendum_path, "representation Agent runner rules")
+    if track.track_judge_path is not None:
+        _require_file(track.track_judge_path, "representation Judge rules")
+    for case in track.cases:
+        resolve_track_case(track, case.case_id)
+    return track
+
+
+def _parse_default_judge(value: Any, *, manifest_path: Path) -> DefaultJudge:
+    if not isinstance(value, dict):
+        raise TrackConfigError(f"{manifest_path}: default_judge must be an object")
+    _require_exact_keys(
+        value,
+        required={"model", "provider", "reasoning_effort"},
+        optional=set(),
+        context=f"{manifest_path}: default_judge",
+    )
+    for key in ("model", "provider", "reasoning_effort"):
+        item = value[key]
+        if not isinstance(item, str) or not item.strip():
+            raise TrackConfigError(f"{manifest_path}: default_judge.{key} must be non-empty")
+    return DefaultJudge(
+        model=value["model"].strip(),
+        provider=value["provider"].strip(),
+        reasoning_effort=value["reasoning_effort"].strip().lower(),
     )
 
 
@@ -305,7 +437,11 @@ def _parse_subject_policy(
 
 
 def _validate_builtin_contract(track: TrackConfig) -> None:
-    expected = _BUILTIN_TRACKS.get(track.track_id)
+    expected = (
+        _BUILTIN_BENCHMARKS.get(track.track_id)
+        if track.standalone
+        else _BUILTIN_TRACKS.get(track.track_id)
+    )
     if expected is None:
         return
     expected_profile, expected_case_ids = expected

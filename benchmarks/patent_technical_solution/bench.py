@@ -3,18 +3,26 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
-BENCHMARK_DIR = Path(__file__).resolve().parent
+SHARED_BENCHMARK_DIR = Path(__file__).resolve().parent
+BENCHMARK_DIR = Path(
+    os.environ.get("PATENT_SOLUTION_BENCHMARK_DIR", SHARED_BENCHMARK_DIR)
+).resolve()
+DEFAULT_BENCHMARK_ID = os.environ.get(
+    "PATENT_SOLUTION_BENCHMARK_ID", "general_solution"
+)
 # Direct script execution already puts this directory on ``sys.path``.  Tests
 # and other callers that load this file with ``spec_from_file_location`` do
 # not, so bootstrap the sibling evaluator package explicitly.
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
-from evaluator.tracks import TrackConfigError, load_track  # noqa: E402
+from evaluator.process_utils import terminate_process_group  # noqa: E402
+from evaluator.tracks import TrackConfigError, load_track, resolve_track_case  # noqa: E402
 
 REPO_DIR = BENCHMARK_DIR.parents[1]
 DEFAULT_PYTHON = REPO_DIR / "backend" / ".venv" / "bin" / "python"
@@ -22,6 +30,12 @@ DRAWIO_PREFLIGHT = REPO_DIR / "scripts" / "drawio_render_preflight.py"
 DEFAULT_DRAWIO_URL = "http://127.0.0.1:8081/"
 DRAWIO_PREFLIGHT_COMMANDS = frozenset({"run", "subject", "batch"})
 DEFAULT_TIMEOUT = 900
+
+
+class CommandTermination(KeyboardInterrupt):
+    def __init__(self, signal_number: int) -> None:
+        super().__init__(f"benchmark command received signal {signal_number}")
+        self.signal_number = signal_number
 
 
 def main() -> None:
@@ -47,6 +61,8 @@ def main() -> None:
             round_timeout=args.round_timeout,
             judge_timeout=args.judge_timeout,
             track_id=args.track,
+            benchmark_dir=BENCHMARK_DIR,
+            runs_dir=BENCHMARK_DIR / "runs",
             extra_args=judge_override_args(args),
         )
     elif args.command == "subject":
@@ -57,6 +73,8 @@ def main() -> None:
             round_timeout=args.round_timeout,
             judge_timeout=args.round_timeout,
             track_id=args.track,
+            benchmark_dir=BENCHMARK_DIR,
+            runs_dir=BENCHMARK_DIR / "runs",
             extra_args=["--skip-judge"],
         )
     elif args.command == "judge":
@@ -73,6 +91,8 @@ def main() -> None:
             run_id=run_id,
             judge_timeout=args.judge_timeout,
             track_id=args.track,
+            benchmark_dir=BENCHMARK_DIR,
+            runs_dir=BENCHMARK_DIR / "runs",
             repeat=args.repeat,
             extra_args=judge_override_args(args),
             dry_run=args.dry_run,
@@ -80,7 +100,11 @@ def main() -> None:
     elif args.command == "batch":
         command = [
             str(python_bin),
-            str(BENCHMARK_DIR / "evaluator" / "run_all.py"),
+            str(SHARED_BENCHMARK_DIR / "evaluator" / "run_all.py"),
+            "--benchmark-dir",
+            str(BENCHMARK_DIR),
+            "--runs-dir",
+            str(BENCHMARK_DIR / "runs"),
             "--workers",
             str(args.workers),
             "--track",
@@ -162,7 +186,7 @@ def add_case_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def add_track_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--track", default="general_solution", help="Benchmark track id.")
+    parser.add_argument("--track", default=DEFAULT_BENCHMARK_ID, help="Benchmark id or legacy track id.")
 
 
 def add_common_run_args(parser: argparse.ArgumentParser, *, judge: bool = True) -> None:
@@ -203,13 +227,20 @@ def run_case_command(
     round_timeout: int,
     judge_timeout: int,
     track_id: str = "general_solution",
+    benchmark_dir: Path | None = None,
+    runs_dir: Path | None = None,
     extra_args: list[str] | None = None,
 ) -> list[str]:
+    resolved_benchmark_dir = benchmark_dir or BENCHMARK_DIR
     command = [
         str(python_bin),
-        str(BENCHMARK_DIR / "evaluator" / "run_case.py"),
+        str(SHARED_BENCHMARK_DIR / "evaluator" / "run_case.py"),
         "--case",
         normalize_case(case_id),
+        "--benchmark-dir",
+        str(resolved_benchmark_dir),
+        "--runs-dir",
+        str(runs_dir or resolved_benchmark_dir / "runs"),
         "--track",
         track_id,
         "--round-timeout",
@@ -231,17 +262,20 @@ def judge_case_command(
     run_id: str,
     judge_timeout: int,
     track_id: str = "general_solution",
+    benchmark_dir: Path | None = None,
+    runs_dir: Path | None = None,
     repeat: int | None = None,
     extra_args: list[str] | None = None,
     dry_run: bool = False,
 ) -> list[str]:
+    resolved_benchmark_dir = benchmark_dir or BENCHMARK_DIR
+    resolved_runs_dir = runs_dir or resolved_benchmark_dir / "runs"
     if dry_run:
         if repeat is not None and repeat < 1:
             raise SystemExit("--repeat must be a positive integer.")
         resolved_repeat = repeat
         case_output_dir = (
-            BENCHMARK_DIR
-            / "runs"
+            resolved_runs_dir
             / run_id
             / "cases"
             / normalize_case(case_id)
@@ -254,6 +288,7 @@ def judge_case_command(
             run_id=run_id,
             case_id=case_id,
             repeat=repeat,
+            runs_dir=resolved_runs_dir,
         )
     child_args = ["--skip-subject"]
     if case_output_dir is not None:
@@ -275,6 +310,8 @@ def judge_case_command(
         round_timeout=judge_timeout,
         judge_timeout=judge_timeout,
         track_id=track_id,
+        benchmark_dir=resolved_benchmark_dir,
+        runs_dir=resolved_runs_dir,
         extra_args=child_args,
     )
 
@@ -284,12 +321,14 @@ def resolve_rejudge_target(
     run_id: str,
     case_id: str,
     repeat: int | None,
+    runs_dir: Path | None = None,
 ) -> tuple[Path | None, int | None]:
     if repeat is not None and repeat < 1:
         raise SystemExit("--repeat must be a positive integer.")
 
     normalized_case = normalize_case(case_id)
-    case_root = BENCHMARK_DIR / "runs" / run_id / "cases" / normalized_case
+    root = runs_dir or BENCHMARK_DIR / "runs"
+    case_root = root / run_id / "cases" / normalized_case
     single_execution = case_root / "execution.json"
     if single_execution.is_file():
         if repeat is not None:
@@ -343,7 +382,24 @@ def run_command(command: list[str], *, env: dict[str, str], dry_run: bool) -> No
     print("+ " + " ".join(command))
     if dry_run:
         return
-    raise SystemExit(subprocess.run(command, cwd=REPO_DIR, env=env, check=False).returncode)
+    process = subprocess.Popen(command, cwd=REPO_DIR, env=env, start_new_session=True)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _raise_command_termination)
+    try:
+        returncode = process.wait()
+    except CommandTermination as exc:
+        terminate_process_group(process)
+        raise SystemExit(128 + exc.signal_number) from None
+    except KeyboardInterrupt:
+        terminate_process_group(process)
+        raise SystemExit(130) from None
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+    raise SystemExit(returncode)
+
+
+def _raise_command_termination(signal_number: int, _frame: object) -> None:
+    raise CommandTermination(signal_number)
 
 
 def run_drawio_preflight(*, python_bin: Path, env: dict[str, str], dry_run: bool) -> None:
@@ -379,7 +435,7 @@ def case_dirs(track_id: str = "general_solution") -> list[Path]:
         track = load_track(track_id, benchmark_dir=BENCHMARK_DIR)
     except TrackConfigError as exc:
         raise SystemExit(str(exc)) from exc
-    return [BENCHMARK_DIR / "cases" / case_id for case_id in track.case_ids]
+    return [resolve_track_case(track, case_id).source_case_dir for case_id in track.case_ids]
 
 
 def case_title(case_dir: Path) -> str:

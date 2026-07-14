@@ -40,6 +40,24 @@ assert module.load_track is not None
     assert completed.returncode == 0, completed.stderr
 
 
+def test_run_command_terminates_child_group_on_interrupt(monkeypatch) -> None:
+    terminated: list[object] = []
+
+    class FakeProcess:
+        def wait(self) -> int:
+            raise KeyboardInterrupt
+
+    process = FakeProcess()
+    monkeypatch.setattr(bench.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(bench, "terminate_process_group", terminated.append)
+
+    with pytest.raises(SystemExit) as exc_info:
+        bench.run_command(["python", "job.py"], env={}, dry_run=False)
+
+    assert exc_info.value.code == 130
+    assert terminated == [process]
+
+
 def test_judge_dry_run_does_not_require_existing_execution(tmp_path: Path, monkeypatch) -> None:
     benchmark_dir = tmp_path / "benchmark"
     monkeypatch.setattr(bench, "BENCHMARK_DIR", benchmark_dir)

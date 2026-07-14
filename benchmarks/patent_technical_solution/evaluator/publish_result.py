@@ -42,6 +42,7 @@ def main() -> None:
         source_run_id=args.run_id,
         runs_dir=Path(args.runs_dir),
         results_dir=Path(args.results_dir),
+        benchmark_dir=Path(args.benchmark_dir),
         result_id=args.name,
         metadata={
             "subject_model": args.subject_model,
@@ -61,6 +62,7 @@ def publish_run(
     source_run_id: str,
     runs_dir: Path,
     results_dir: Path,
+    benchmark_dir: Path = BENCHMARK_DIR,
     result_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     overwrite: bool = False,
@@ -96,6 +98,7 @@ def publish_run(
         run_record=run_record,
         published_cases=published_cases,
         metadata=metadata or {},
+        benchmark_dir=benchmark_dir,
     )
     atomic_write_json(result_dir / "manifest.json", manifest)
     upsert_index(results_dir / "index.jsonl", manifest)
@@ -179,6 +182,7 @@ def build_manifest(
     run_record: dict[str, Any],
     published_cases: list[dict[str, Any]],
     metadata: dict[str, Any],
+    benchmark_dir: Path = BENCHMARK_DIR,
 ) -> dict[str, Any]:
     scored = [item for item in published_cases if item.get("total_score") is not None]
     included_files = ["manifest.json"]
@@ -193,7 +197,7 @@ def build_manifest(
         "source_run_id": source_run_id,
         "source_run_dir": relative_posix(source_run_dir, runs_dir.parent),
         "published_at": _now_iso(),
-        "benchmark_git": git_metadata(BENCHMARK_DIR),
+        "benchmark_git": git_metadata(benchmark_dir.resolve()),
         "metadata": compact_dict(metadata),
         "source_run": {
             "status": run_record.get("status"),
@@ -294,6 +298,7 @@ def _now_iso() -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Publish a v2 benchmark result snapshot.")
     parser.add_argument("--run-id", required=True, help="Source run id under runs/.")
+    parser.add_argument("--benchmark-dir", default=str(BENCHMARK_DIR))
     parser.add_argument("--runs-dir", default=str(BENCHMARK_DIR / "runs"))
     parser.add_argument("--results-dir", default=str(BENCHMARK_DIR / "results"))
     parser.add_argument("--name", default=None, help="Result snapshot id. Defaults to --run-id.")

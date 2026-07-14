@@ -100,6 +100,12 @@ PATENT_CREATOR_ALLOW_NONLOCAL_DRAWIO=true
 
 Benchmark 用来衡量 Agent 是否能从代码、资料或描述中形成稳定、准确、有专利价值的技术方案。评估重点不只是生成字数，而是是否识别真实技术问题、抓住关键创新机制、形成可实施且可保护的技术方案。
 
+当前仓库包含三套相互独立的 Benchmark：
+
+- `benchmarks/software_patent_solution_github/`：早期 GitHub 软件专利方案基准。
+- `benchmarks/patent_technical_solution/`：通用技术方案质量基准。
+- `benchmarks/patent_representation_semantics/`：图与公式选择、覆盖和语义正确性专项基准。
+
 | Benchmark | 结果 ID | 规模 | 平均分 | 通过情况 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | 专利技术方案 benchmark | `20260619-gpt55-baseline-10cases-5x-w10` | 10 cases x 5 repeats | 93.14 / 100 | 50/50 scored，artifact_success=50/50 | subject=`gpt-5.5`，judge=`codex`，workers=10 |

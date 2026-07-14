@@ -1,7 +1,12 @@
 {
-  "schema_version": "patent-technical-solution-track-v1",
-  "track_id": "representation_semantics",
+  "schema_version": "patent-solution-benchmark-v1",
+  "benchmark_id": "patent_representation_semantics",
   "judge_profile": "representation_semantics",
+  "default_judge": {
+    "model": "gpt-5.6-terra",
+    "provider": "openai",
+    "reasoning_effort": "xhigh"
+  },
   "subject_policy": {
     "web_search_enabled": false,
     "expose_snapshot_provenance": false,

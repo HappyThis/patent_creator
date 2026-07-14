@@ -1,5 +1,9 @@
 # Patent Technical Solution Benchmark
 
+> 图/公式选择与表达专项已经拆分为独立的
+> `benchmarks/patent_representation_semantics/`。旧的
+> `--track representation_semantics` 命令不再使用；历史 run 保留在原目录，不自动迁移。
+
 该 Benchmark 只评价专利交底书中最终“技术方案”的综合质量，包括技术内容本身，以及实际使用的公式、配图是否适用且表达正确。
 
 它不再提供 figure mode 或 combined mode，也不评价图片的视觉美观、排版精细度和渲染质量。公式和配图不是强制交付物：没有使用时不会自动扣分；使用时，Codex 会评价其必要性、语义正确性、与正文的一致性及对方案理解的帮助。
@@ -124,6 +128,10 @@ backend/.venv/bin/python benchmarks/patent_technical_solution/bench.py run 001 \
 ```
 
 Benchmark 不接受用户指定 Codex binary，而是按固定优先级自动选择运行时：Codex App runtime → Python SDK 自带的 pinned runtime → PATH 中的本地 Codex CLI。对于指定的 model、provider 和 reasoning effort，每个 run 会在 Agent 启动前执行一次最小真实 turn，验证候选运行时确实能够完成该配置；如果全部候选都失败，本次运行会在 Agent 前终止，不生成无 Judge 能力的 Agent 结果。批量运行只在批次开始时预检一次，并让所有 Case 复用选中的运行时。
+
+每个 `run_id` 只能创建一次，避免误覆盖已有证据。批量命令收到 `Ctrl-C` 或
+`SIGTERM` 时会终止仍在运行的 Case 进程组，并把父 run 以及已经启动但被终止的
+Case 写成 `cancelled`，不再长期遗留假 `running` 状态。
 
 运行时的候选选择、每次预检失败和最终选择都会记录在 `runs/` 的运行诊断中；正式 Judge 的历次执行则记录在 `execution.json` 的 Judge attempts 中。发布脚本仍只复制评分结论和必要溯源，不会把这些诊断、尝试记录或运行时细节写入发布结果。
 

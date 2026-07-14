@@ -5,13 +5,24 @@ from pathlib import Path
 
 import pytest
 
+from . import publish_result as publish_result_module
 from .publish_result import RESULT_SCHEMA_VERSION, publish_run, sanitize_result_id
 from .records import RUN_SCHEMA_VERSION
 
 
-def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(tmp_path: Path) -> None:
+def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     runs_dir = tmp_path / "runs"
     results_dir = tmp_path / "results"
+    benchmark_dir = tmp_path / "benchmark"
+    benchmark_dir.mkdir()
+    monkeypatch.setattr(
+        publish_result_module,
+        "git_metadata",
+        lambda cwd: {"root": str(cwd)},
+    )
     run_dir = runs_dir / "run-1"
     case_dir = run_dir / "cases" / "001" / "r01"
     conclusion = {
@@ -84,12 +95,14 @@ def test_publish_v2_run_keeps_only_manifest_and_original_conclusions(tmp_path: P
         source_run_id="run-1",
         runs_dir=runs_dir,
         results_dir=results_dir,
+        benchmark_dir=benchmark_dir,
         result_id="published run",
         metadata={"notes": "v2"},
     )
 
     assert result_dir == results_dir / "published-run"
     assert manifest["schema_version"] == RESULT_SCHEMA_VERSION
+    assert manifest["benchmark_git"] == {"root": str(benchmark_dir.resolve())}
     assert manifest["scored_runs"] == 1
     assert manifest["cases"][0]["total_score"] == 91
     published_conclusion = read_json(result_dir / "conclusions" / "001" / "r01.json")

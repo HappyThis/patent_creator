@@ -32,13 +32,12 @@ REPRESENTATION_POLICIES = {
 
 def test_checked_in_manifests_keep_the_canonical_case_sets_and_policies() -> None:
     benchmark_dir = Path(__file__).resolve().parents[1]
+    representation_dir = benchmark_dir.parent / "patent_representation_semantics"
     general = json.loads(
         (benchmark_dir / "tracks" / "general_solution" / "track.json").read_text(encoding="utf-8")
     )
     representation = json.loads(
-        (benchmark_dir / "tracks" / "representation_semantics" / "track.json").read_text(
-            encoding="utf-8"
-        )
+        (representation_dir / "benchmark.json").read_text(encoding="utf-8")
     )
 
     assert tuple(item["case_id"] for item in general["cases"]) == GENERAL_CASE_IDS
@@ -50,9 +49,7 @@ def test_checked_in_manifests_keep_the_canonical_case_sets_and_policies() -> Non
     for case_id, expected in REPRESENTATION_POLICIES.items():
         metadata = json.loads(
             (
-                benchmark_dir
-                / "tracks"
-                / "representation_semantics"
+                representation_dir
                 / "cases"
                 / case_id
                 / "metadata.json"
@@ -63,14 +60,44 @@ def test_checked_in_manifests_keep_the_canonical_case_sets_and_policies() -> Non
 
 def test_checked_in_representation_rules_distinguish_coverage_from_optional_errors() -> None:
     benchmark_dir = Path(__file__).resolve().parents[1]
-    rules = (
-        benchmark_dir / "tracks" / "representation_semantics" / "judge.md"
-    ).read_text(encoding="utf-8")
+    rules = (benchmark_dir.parent / "patent_representation_semantics" / "representation_judge.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "对 `recommended` 通道" in rules
     assert "没有覆盖逐 Case rubric 指定的核心关系，可以判为“部分正确”" in rules
     assert "对 `optional` 通道，只有实际写出或画出的内容存在具体错误" in rules
     assert "偏装饰性本身不得扣分" in rules
+
+
+def test_checked_in_representation_benchmark_is_standalone() -> None:
+    benchmark_dir = Path(__file__).resolve().parents[2] / "patent_representation_semantics"
+
+    benchmark = load_track(benchmark_dir=benchmark_dir)
+
+    assert benchmark.standalone is True
+    assert benchmark.track_id == "patent_representation_semantics"
+    assert benchmark.case_ids == REPRESENTATION_CASE_IDS
+    assert benchmark.default_judge is not None
+    assert benchmark.default_judge.model == "gpt-5.6-terra"
+    assert benchmark.default_judge.provider == "openai"
+    assert benchmark.default_judge.reasoning_effort == "xhigh"
+    assert benchmark.runner_path == benchmark_dir / "runner.md"
+    assert benchmark.runner_addendum_path == benchmark_dir / "representation_runner.md"
+    assert benchmark.track_judge_path == benchmark_dir / "representation_judge.md"
+    resolved = resolve_track_case(benchmark, "013")
+    assert resolved.source_case_dir == benchmark_dir / "cases" / "013"
+    assert resolved.track_rubric_path == benchmark_dir / "cases" / "013" / "representation_rubric.md"
+
+
+def test_legacy_representation_track_points_to_standalone_command() -> None:
+    benchmark_dir = Path(__file__).resolve().parents[1]
+
+    with pytest.raises(
+        TrackConfigError,
+        match="standalone benchmark.*patent_representation_semantics",
+    ):
+        load_track("representation_semantics", benchmark_dir=benchmark_dir)
 
 
 def test_default_track_is_fixed_general_solution(tmp_path: Path) -> None:
