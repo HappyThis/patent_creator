@@ -384,7 +384,10 @@ def _validate_representation_conclusion(
         if verdict == "not_used":
             numeric_score = 100.0 if normalized_policies[name] == "optional" else 40.0
         elif verdict == "correct":
-            numeric_score = 100.0
+            if name == "figure" and normalized_policies[name] == "recommended":
+                numeric_score = min(100.0, max(80.0, numeric_score))
+            else:
+                numeric_score = 100.0
         elif verdict == "partially_correct":
             numeric_score = min(79.0, max(40.0, numeric_score))
         elif verdict == "incorrect":

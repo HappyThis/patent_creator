@@ -148,59 +148,33 @@ async def test_technical_solution_summarizer_uses_enhancement_timeout(tmp_path: 
     assert client.prompts[0]["timeout"] == TECHNICAL_SOLUTION_ENHANCEMENT_TIMEOUT_SECONDS
 
 
-def test_technical_solution_advisor_prompt_contains_schema_and_concrete_entities() -> None:
+def test_technical_solution_advisor_prompt_is_cross_domain_and_compact() -> None:
     prompt = _improvement_advisor_system_prompt() + "\n\n" + _improvement_advisor_user_prompt("## 技术方案\n\n系统根据策略处理任务。")
 
     assert "JSON Schema" in prompt
     assert '"additionalProperties": false' in prompt
     for term in [
+        "先识别技术领域",
+        "结构或装置",
+        "材料或配方",
+        "工艺",
+        "软件、数据或控制",
         "技术问题",
-        "输入输出",
-        "数据流转",
-        "状态变化",
-        "处理规则",
-        "边界条件",
-        "泛泛谈论",
-        "技术实现原理",
-        "细致解决方法",
-        "机制闭合度",
-        "关键过程",
-        "状态变化",
-        "多步骤协同",
-        "外部输入",
-        "异常场景",
-        "结果竞争",
-        "前置条件",
-        "冲突处理",
-        "优先级",
-        "判定依据",
-        "边界处置",
-        "术语一致性",
-        "不要判断是否通过",
-        "不要把有价值的改进点写成“可选优化”",
-        "技术人员式技术抽象",
-        "不得用变量名、字段名、接口名、状态枚举、公式或伪代码清单诱导 main-agent 生成工程 RFC",
-        "不得诱导 main-agent 写成权利要求或正式专利说明书口吻",
-        "技术问题",
-        "解决思路",
-        "系统组织方式",
-        "关键取舍",
-        "运行逻辑",
-        "坏反馈",
-        "好反馈",
-        "不对应任何具体 benchmark case",
-        "说明系统如何保持同一处理对象的稳定身份",
-        "重复请求、执行中断或迟到结果",
-        "不同实现载体如何通过统一适配方式接入",
+        "状态或数据变化",
+        "机制闭合性",
+        "已有内容充分时不要为了产生建议而扩写",
+        "不要默认要求字段表、状态枚举、接口、函数、schema、公式或伪代码",
         "## 技术方案评审意见",
         "### 总体评价",
-        "### 技术深度修订点",
-        "### 关键机制闭合性修订点",
-        "### 技术人员式表达修订点",
+        "### 技术机制修订点",
+        "### 结构与表达修订点",
         "### 给 main-agent 的修订指令",
+        "无需继续修改",
     ]:
         assert term in prompt
     assert "专利式抽象表达" not in prompt
+    assert "坏反馈" not in prompt
+    assert len(prompt) < 1_500
 
 
 @pytest.mark.anyio

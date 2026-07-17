@@ -27,7 +27,7 @@ Figure and formula policies are independent for every case:
 - `recommended`: omission is penalized; correct use receives full credit; partial or incorrect use is penalized.
 - `optional`: omission and correct use both receive full credit; only technically wrong or misleading use is penalized.
 
-Optional content is not penalized merely for being simple, decorative, or unnecessary. Visual aesthetics and rendering quality are outside the scoring scope.
+Optional content is not penalized merely for being simple, decorative, unnecessary, or visually ordinary. For recommended figures that are actually used, the figure score also considers explanatory value, legibility, and restrained black-and-white engineering style; technical semantics remain the dominant factor.
 
 ## Case distribution
 
@@ -60,7 +60,7 @@ backend/.venv/bin/python benchmarks/patent_representation_semantics/bench.py bat
   --repeats 1
 ```
 
-The default Codex Judge is `gpt-5.6-terra` with `xhigh` reasoning. CLI flags can still override the model, provider, or reasoning effort for an explicit comparison run.
+The default Codex Judge is `gpt-5.6-sol` with `xhigh` reasoning. CLI flags can still override the model, provider, or reasoning effort for an explicit comparison run.
 
 Run artifacts are written to this benchmark's own `runs/` directory. Existing representation-track runs under `patent_technical_solution/runs/` remain historical artifacts and are not moved automatically.
 

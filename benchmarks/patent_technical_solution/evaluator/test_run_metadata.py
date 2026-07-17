@@ -6,6 +6,7 @@ from . import run_metadata
 
 
 def test_capture_model_config_records_runtime_without_secrets(monkeypatch) -> None:
+    monkeypatch.setattr(run_metadata, "load_repo_env", lambda: None)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://proxy.example/v1")
     monkeypatch.setenv("OPENAI_MODEL", "subject-model")

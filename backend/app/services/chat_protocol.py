@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..core import now_iso
@@ -12,6 +12,8 @@ class RoundState:
     session_id: str
     message_id: str
     round_id: str
+    figure_review_states: dict[str, dict[str, int]] = field(default_factory=dict)
+    figure_drawio_versions: dict[str, str] = field(default_factory=dict)
 
 
 DEFAULT_CHANGED_PAYLOAD: dict[str, Any] = {

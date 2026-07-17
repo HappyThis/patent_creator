@@ -189,6 +189,37 @@ def test_optional_used_correct_is_always_full_credit() -> None:
     assert value["representation_score"] == 100
 
 
+def test_recommended_correct_figure_keeps_quality_score_between_80_and_100() -> None:
+    payload = {
+        "status": "scored",
+        "solution_score": 80,
+        "representation": {
+            "figure": {
+                "used": True,
+                "score": 86,
+                "verdict": "correct",
+                "assessment": "技术关系完整，但局部连线和留白仍可改善。",
+            },
+            "formula": {
+                "used": True,
+                "score": 73,
+                "verdict": "correct",
+                "assessment": "公式关系正确。",
+            },
+        },
+        "evaluation_report": "report",
+    }
+
+    value = validate_conclusion(
+        json.dumps(payload),
+        track_id="representation_semantics",
+        representation_policies={"figure": "recommended", "formula": "recommended"},
+    )
+
+    assert value["representation"]["figure"]["score"] == 86
+    assert value["representation"]["formula"]["score"] == 100
+
+
 def test_judge_profile_controls_schema_for_custom_track_ids() -> None:
     assert judge_schema("custom_general", judge_profile="general") is JUDGE_SCHEMA
     assert (

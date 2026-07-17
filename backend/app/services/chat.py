@@ -598,7 +598,7 @@ class ChatService:
                     if (
                         tool_call.tool == "figure_kit"
                         and result.get("status") == "success"
-                        and tool_call.arguments.get("action") in {"create", "write", "edit", "delete"}
+                        and tool_call.arguments.get("action") in {"write", "update", "delete"}
                     ):
                         changed_payload = {
                             **changed_payload,
@@ -781,6 +781,8 @@ class ChatService:
                     tools=MAIN_AGENT_TOOLS,
                     llm_client=self.llm_client,
                     settings=self.settings,
+                    figure_review_states=state.figure_review_states,
+                    figure_drawio_versions=state.figure_drawio_versions,
                 ),
             )
         except Exception as exc:

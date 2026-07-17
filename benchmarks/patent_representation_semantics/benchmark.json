@@ -3,7 +3,7 @@
   "benchmark_id": "patent_representation_semantics",
   "judge_profile": "representation_semantics",
   "default_judge": {
-    "model": "gpt-5.6-terra",
+    "model": "gpt-5.6-sol",
     "provider": "openai",
     "reasoning_effort": "xhigh"
   },

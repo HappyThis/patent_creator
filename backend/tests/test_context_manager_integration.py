@@ -55,7 +55,7 @@ async def test_context_manager_compresses_old_session_history(tmp_path: Path) ->
     assert compression_payload["_timeout"] == 123
     assert "你是本系统的主 agent" in compression_payload["system_prompt"]
     assert "上下文滚动压缩 agent" not in compression_payload["system_prompt"]
-    assert "请只执行上下文滚动压缩" in compression_payload["user_prompt"]
+    assert "只执行压缩，不继续用户任务，不调用工具" in compression_payload["user_prompt"]
     assert "target_estimated_tokens" not in compression_payload
     assert "compressible_messages" not in compression_payload
     assert "messages_to_merge" not in compression_payload

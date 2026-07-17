@@ -79,7 +79,7 @@ def test_checked_in_representation_benchmark_is_standalone() -> None:
     assert benchmark.track_id == "patent_representation_semantics"
     assert benchmark.case_ids == REPRESENTATION_CASE_IDS
     assert benchmark.default_judge is not None
-    assert benchmark.default_judge.model == "gpt-5.6-terra"
+    assert benchmark.default_judge.model == "gpt-5.6-sol"
     assert benchmark.default_judge.provider == "openai"
     assert benchmark.default_judge.reasoning_effort == "xhigh"
     assert benchmark.runner_path == benchmark_dir / "runner.md"

@@ -20,6 +20,8 @@ class ToolRuntimeContext:
     tools: list[dict[str, Any]] | None = None
     llm_client: Any | None = None
     settings: Any | None = None
+    figure_review_states: dict[str, dict[str, int]] | None = None
+    figure_drawio_versions: dict[str, str] | None = None
 
 
 class ExecutorEngine:

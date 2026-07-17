@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 import copy
 from dataclasses import dataclass
-import json
 from typing import Any
 
 from .builtin.document import (
@@ -49,10 +48,6 @@ class ToolDeclaration:
     def usage_rules(self) -> tuple[str, ...]:
         return self.metadata.usage_rules
 
-    @property
-    def examples(self) -> tuple[tuple[str, dict[str, Any]], ...]:
-        return self.metadata.examples
-
     def openai_tool(self) -> dict[str, Any]:
         return {
             "type": "function",
@@ -87,27 +82,6 @@ def get_tool_declaration(tool_name: str) -> ToolDeclaration:
         raise KeyError(f"unknown tool declaration: {tool_name}") from exc
 
 
-def _render_schema_summary(schema: dict[str, Any]) -> str:
-    properties = schema.get("properties")
-    if not isinstance(properties, dict) or not properties:
-        return "无参数。"
-    required = schema.get("required")
-    required_names = set(required) if isinstance(required, list) else set()
-    parts: list[str] = []
-    for name, spec in properties.items():
-        if not isinstance(spec, dict):
-            parts.append(name)
-            continue
-        type_name = _schema_type_name(spec)
-        marker = "必填" if name in required_names else "可选"
-        enum = spec.get("enum")
-        enum_text = f"，可选值：{', '.join(map(str, enum))}" if isinstance(enum, list) else ""
-        description = spec.get("description")
-        description_text = f"，{description}" if isinstance(description, str) and description else ""
-        parts.append(f"{name}({type_name}，{marker}{enum_text}{description_text})")
-    return "；".join(parts) + "。"
-
-
 def _render_tool_description(metadata: ToolFunctionMetadata) -> str:
     lines = [
         f"用途：{metadata.description}",
@@ -117,18 +91,6 @@ def _render_tool_description(metadata: ToolFunctionMetadata) -> str:
         lines.append("规则：")
         lines.extend(f"- {rule}" for rule in metadata.usage_rules)
     return "\n".join(lines)
-
-
-def _schema_type_name(spec: dict[str, Any]) -> str:
-    type_name = spec.get("type")
-    if isinstance(type_name, str):
-        return type_name
-    any_of = spec.get("anyOf")
-    if isinstance(any_of, list):
-        names = [item.get("type") for item in any_of if isinstance(item, dict) and item.get("type") != "null"]
-        if names:
-            return "|".join(str(name) for name in names)
-    return "any"
 
 
 def _inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
@@ -151,11 +113,6 @@ def _inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
         return {key: visit(item) for key, item in value.items() if key != "$defs"}
 
     return visit(schema)
-
-
-def _compact_json(value: dict[str, Any]) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
 
 def _disclosure_read_started(arguments: dict[str, Any]) -> str:
     section_id = arguments.get("section_id") or ""
@@ -209,26 +166,22 @@ def _file_read_finished(arguments: dict[str, Any], result: dict[str, Any]) -> st
 
 def _figure_started(arguments: dict[str, Any]) -> str:
     action = arguments.get("action")
-    if action == "rules":
-        return "开始读取附图规则"
     if action == "check":
         return "开始检查附图"
     if action == "list":
         return "开始读取附图列表"
-    if action in {"create", "write", "edit"}:
+    if action in {"write", "update"}:
         return "开始生成附图"
     return "开始处理附图"
 
 
 def _figure_finished(arguments: dict[str, Any], result: dict[str, Any]) -> str:
     action = arguments.get("action")
-    if action == "rules":
-        return "附图规则已读取"
     if action == "check":
         return "附图检查已完成"
     if action == "list":
         return "附图列表已读取"
-    if action in {"create", "write", "edit"}:
+    if action in {"write", "update"}:
         return "附图已更新"
     return "附图处理已完成"
 

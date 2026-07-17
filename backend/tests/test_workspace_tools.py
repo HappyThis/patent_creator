@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import app.tools.builtin.filesystem as filesystem_tools
 from app.core.command_platform import current_command_platform
 from app.tools.builtin.shell import EXEC_COMMAND_DISABLED_ENV
 
@@ -319,7 +320,8 @@ def test_file_tools_reject_arguments_outside_schema(tmp_path: Path) -> None:
     assert "unused" in extra_field["output"]["message"]
 
 
-def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:
+def test_file_glob_stops_at_internal_scan_budget(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(filesystem_tools, "_DEFAULT_GLOB_SCANNED_PATHS", 3)
     executor, project_id = make_tool_executor(tmp_path)
     workspace = executor.store.project_dir(project_id)
     many_dir = workspace / "many"
@@ -331,7 +333,7 @@ def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:
         executor,
         project_id,
         "file_glob",
-        {"path": "many", "pattern": "*", "limit": 100, "max_scanned_paths": 3},
+        {"path": "many", "pattern": "*", "limit": 100},
     )
 
     assert glob_result["status"] == "success"
@@ -340,9 +342,11 @@ def test_file_glob_stops_at_scan_budget(tmp_path: Path) -> None:
     assert glob_result["output"]["scanned"] == 3
     assert glob_result["output"]["scan_budget"] == 3
     assert glob_result["output"]["total_is_lower_bound"] is True
+    assert glob_result["output"]["next_offset"] is None
 
 
-def test_file_search_stops_at_scan_budget(tmp_path: Path) -> None:
+def test_file_search_stops_at_internal_scan_budget(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(filesystem_tools, "_DEFAULT_GLOB_SCANNED_PATHS", 3)
     executor, project_id = make_tool_executor(tmp_path)
     workspace = executor.store.project_dir(project_id)
     many_dir = workspace / "many"
@@ -354,7 +358,7 @@ def test_file_search_stops_at_scan_budget(tmp_path: Path) -> None:
         executor,
         project_id,
         "file_search",
-        {"path": "many", "pattern": "needle", "limit": 100, "max_scanned_paths": 3},
+        {"path": "many", "pattern": "needle", "limit": 100},
     )
 
     assert search_result["status"] == "success"
@@ -364,6 +368,7 @@ def test_file_search_stops_at_scan_budget(tmp_path: Path) -> None:
     assert search_result["output"]["scan_budget"] == 3
     assert search_result["output"]["returned"] == 3
     assert search_result["output"]["total_is_lower_bound"] is True
+    assert search_result["output"]["next_offset"] is None
 
 
 def test_file_search_files_mode_stops_after_page_is_filled(tmp_path: Path) -> None:
@@ -378,7 +383,7 @@ def test_file_search_files_mode_stops_after_page_is_filled(tmp_path: Path) -> No
         executor,
         project_id,
         "file_search",
-        {"path": "many", "pattern": "needle", "mode": "files", "limit": 3, "max_scanned_paths": 100},
+        {"path": "many", "pattern": "needle", "mode": "files", "limit": 3},
     )
 
     assert search_result["status"] == "success"
@@ -387,6 +392,7 @@ def test_file_search_files_mode_stops_after_page_is_filled(tmp_path: Path) -> No
     assert search_result["output"]["scanned"] == 3
     assert search_result["output"]["returned"] == 3
     assert search_result["output"]["total_is_lower_bound"] is True
+    assert search_result["output"]["next_offset"] == 3
 
 
 def test_file_search_lines_mode_does_not_collect_past_limit(tmp_path: Path) -> None:

@@ -11,19 +11,17 @@ from ...storage.workspace_store import WorkspaceStore
 logger = logging.getLogger("patent_creator.context.tool_output_content")
 
 MAX_TOOL_OUTPUT_IMAGE_ATTACHMENTS_PER_REQUEST = 8
-FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 刚渲染出的截图。请确认它是否已经具备正确、清楚且基本美观的可用质量。不要重新判断技术方案本身是否成立或先进，也不要为了套用固定图型而重画；但必须检查截图是否忠实表达生成前已经确定的主体以及与本图目的相关的条件、方向、分支、反馈或终止关系，并在存在对应正文时保持一致。
+FIGURE_VISUAL_REVIEW_PROMPT = """下面是 figure_kit 返回的当前截图；read 复用已有截图，不占 write/update 尝试次数。请把它当作准备交给专利代理人员的正式技术附图复盘，而不是只确认 XML 能否渲染。不要重新评价技术方案是否先进，也不要追求像素级完美或固定图型。一张图在本次用户请求内最多尝试 8 次 write/update，预检或渲染失败也计数。
 
-仅在存在影响理解或使用的客观问题时继续修改，例如：
-- 文字重叠、裁切、明显过小，或关键文字无法辨认；
-- 关键节点被遗漏、错误断开，或主关系和阅读方向无法判断；
-- 箭头方向、起点、终点明显错误，导致关系含义发生变化；
-- 连线穿过关键文字或节点，导致连接对象无法辨认；
-- 关键内容超出画布、截图显示不全，或布局严重拥挤；
-- 形状、线型或边界在同一张图中表达互相冲突的含义。
+依次检查：
+- 缩略图构图：先暂时不读小字，判断视觉中心、主阅读方向、语义分区和层级能否一眼识别；主体是否居中且疏密均衡，是否一侧拥挤、另一侧大面积无意义空白，或被无必要大外框削弱；
+- 对齐与节奏：同类节点的尺寸、基线、间距、圆角和内部留白是否一致；分区标题是否稳定，主次对象是否通过位置、留白和有限灰度自然区分；
+- 连线质量：首尾是否接触正确节点，箭头方向是否正确，主干和分支是否清楚；是否穿过无关节点或文字、交叉、贴边、长距离绕行，或存在悬空、微小折返、共线覆盖、错误共享路径和汇聚错位；多对多关系是否应收束为总线、汇聚点、中间层或集合；
+- 文字与层级：标题、分区标题、节点、边标签是否形成有限且清楚的字号层级；是否重叠、裁切、过密、过小，节点是否塞入正文式长句，边标签是否遮线；
+- 视觉系统：同一 visualRole 的节点是否保持统一无衬线字体、黑白灰度、边框和主线线宽、箭头、标签白底及形状；黑白是否仍有层级，而不是退化成默认细线与相同矩形；
+- 图解逻辑与技术表达：图型或分区是否适合架构、过程、状态、时间窗口、队列/集合或映射关系；应呈现的对象、方向、条件、分支、反馈、汇聚和终止是否完整，并与当前正文一致。
 
-轻微间距差异、细小不对称和纯审美偏好不构成继续修改的理由，可留给用户在 Draw.io 中人工调整。不要以自动达到视觉完美为目标，也不要反复进行没有明确收益的微调。
-
-需要局部修正时，先 read 当前 drawio_xml，再调用 figure_kit.edit，并让每个 old_text 在当前 XML 中唯一匹配；需要整体重排或大范围修改时，先 read 后调用 figure_kit.write。两者都必须携带读取时的 drawio_updated_at 和当前 rules_version。修改后仍会返回新截图供你判断。"""
+不要因为“已经能看懂”就忽略明显的构图、线条或排版问题；首次成功渲染若仍不像可直接使用的正式工程图，可做一次合并的视觉整理。只修改能明确提升构图、可读性或严肃工程气质的问题，轻微不对称和纯个人偏好留给用户，不做无变化编辑。若正文在最后一次看图后实质改变，应按最终正文重新复核。"""
 
 
 def hydrate_tool_output_content(
@@ -44,10 +42,18 @@ def hydrate_tool_output_content(
     if not round_id:
         return messages
 
+    prepared_reviews = _prepare_figure_reviews(
+        store,
+        project_id,
+        messages,
+        round_id=round_id,
+        max_image_attachments=max_image_attachments,
+    )
+    if not prepared_reviews:
+        return messages
+
     hydrated: list[dict[str, Any]] = []
     pending_reviews: list[dict[str, Any]] = []
-    changed = False
-    attached_images = 0
     for index, message in enumerate(messages):
         if message.get("role") != "tool":
             _flush_pending_reviews(hydrated, pending_reviews)
@@ -58,30 +64,60 @@ def hydrate_tool_output_content(
             if not _next_message_is_tool(messages, index):
                 _flush_pending_reviews(hydrated, pending_reviews)
             continue
-        if attached_images >= max_image_attachments:
-            if _has_visual_review_attachment(message):
-                pending_reviews.append(
-                    _figure_review_unavailable_message(
-                        message,
-                        "本轮待复盘图片超过附件数量上限，当前图片没有附加；不要声称已经查看该图。",
-                    )
-                )
-                changed = True
-            if not _next_message_is_tool(messages, index):
-                _flush_pending_reviews(hydrated, pending_reviews)
-            continue
-        figure_review = _figure_review_message_from_tool_message(store, project_id, message)
-        if figure_review is None:
-            if not _next_message_is_tool(messages, index):
-                _flush_pending_reviews(hydrated, pending_reviews)
-            continue
-        pending_reviews.append(figure_review)
-        attached_images += 1
-        changed = True
+        figure_review = prepared_reviews.get(index)
+        if figure_review is not None:
+            pending_reviews.append(figure_review)
         if not _next_message_is_tool(messages, index):
             _flush_pending_reviews(hydrated, pending_reviews)
     _flush_pending_reviews(hydrated, pending_reviews)
-    return hydrated if changed else messages
+    return hydrated
+
+
+def _prepare_figure_reviews(
+    store: WorkspaceStore,
+    project_id: str,
+    messages: list[dict[str, Any]],
+    *,
+    round_id: str,
+    max_image_attachments: int,
+) -> dict[int, dict[str, Any]]:
+    """Keep the newest distinct, usable screenshots while preserving message order."""
+
+    prepared: dict[int, dict[str, Any]] = {}
+    selected_images = 0
+    seen_revisions: set[tuple[str, str]] = set()
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") != "tool" or message.get("round_id") != round_id:
+            continue
+        output = _figure_output_from_tool_message(message)
+        if output is None:
+            continue
+        figure_id = _figure_id_from_output(output)
+        if not figure_id:
+            continue
+        revision = _figure_attachment_updated_at(output, figure_id)
+        revision_key = (figure_id, revision)
+        if revision_key in seen_revisions:
+            continue
+        seen_revisions.add(revision_key)
+
+        review = _figure_review_message_from_tool_message(store, project_id, message)
+        if review is None:
+            continue
+        has_image = any(part.get("type") == "input_image" for part in review.get("content", []))
+        if not has_image:
+            prepared[index] = review
+            continue
+        if selected_images >= max(0, max_image_attachments):
+            prepared[index] = _figure_review_unavailable_message(
+                message,
+                "当前截图早于最近图片窗口，未附加给模型；最近的有效截图会优先保留。",
+            )
+            continue
+        prepared[index] = review
+        selected_images += 1
+    return prepared
 
 
 def _figure_review_message_from_tool_message(
@@ -91,11 +127,8 @@ def _figure_review_message_from_tool_message(
 ) -> dict[str, Any] | None:
     if message.get("tool_name") != "figure_kit":
         return None
-    parsed = _parse_tool_content(message.get("content"))
-    if not isinstance(parsed, dict) or parsed.get("status") != "success":
-        return None
-    output = parsed.get("output")
-    if not isinstance(output, dict):
+    output = _figure_output_from_tool_message(message)
+    if output is None:
         return None
     figure_id = _figure_id_from_output(output)
     if not isinstance(figure_id, str) or not figure_id:
@@ -117,6 +150,23 @@ def _figure_review_message_from_tool_message(
     figure = output.get("figure")
     title = str(figure.get("title") or "").strip() if isinstance(figure, dict) else ""
     review_text = FIGURE_VISUAL_REVIEW_PROMPT
+    review = output.get("review")
+    if isinstance(review, dict):
+        attempt = review.get("attempt")
+        limit = review.get("limit")
+        successful_renders = review.get("successful_renders")
+        remaining = review.get("remaining")
+        if all(isinstance(value, int) for value in (attempt, limit, successful_renders, remaining)):
+            review_text += (
+                f"\n\n当前进度：已尝试 {attempt}/{limit} 次，成功渲染 {successful_renders} 次，"
+                f"剩余 {remaining} 次。"
+            )
+    warnings = output.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        warning_lines = [str(item.get("message") or "").strip() for item in warnings if isinstance(item, dict)]
+        warning_lines = [line for line in warning_lines if line]
+        if warning_lines:
+            review_text += "\n\n自动检查的非阻断 warnings：\n- " + "\n- ".join(warning_lines)
     if title:
         review_text += f"\n\n当前图片：{figure_id}（{title}）"
     else:
@@ -157,9 +207,18 @@ def _figure_attachment_updated_at(output: dict[str, Any], figure_id: str) -> str
 
 
 def _has_visual_review_attachment(message: dict[str, Any]) -> bool:
-    parsed = _parse_tool_content(message.get("content"))
-    output = parsed.get("output") if isinstance(parsed, dict) else None
+    output = _figure_output_from_tool_message(message)
     return isinstance(output, dict) and _figure_id_from_output(output) is not None
+
+
+def _figure_output_from_tool_message(message: dict[str, Any]) -> dict[str, Any] | None:
+    if message.get("tool_name") != "figure_kit":
+        return None
+    parsed = _parse_tool_content(message.get("content"))
+    if not isinstance(parsed, dict) or parsed.get("status") != "success":
+        return None
+    output = parsed.get("output")
+    return output if isinstance(output, dict) else None
 
 
 def _figure_review_unavailable_message(message: dict[str, Any], text: str) -> dict[str, Any]:

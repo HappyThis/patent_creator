@@ -7,6 +7,7 @@ import pytest
 
 from app.agents.prompts.main_agent import build_main_agent_system_prompt
 from app.agents.workers.main_agent import MAIN_AGENT_TOOLS
+from app.domain.figures import validate_drawio_xml
 from app.tools import DOCUMENT_WRITE_TOOL_NAMES, MAIN_AGENT_TOOL_NAMES, get_tool_declaration
 
 
@@ -24,6 +25,16 @@ def test_main_agent_registers_disclosure_read_tools() -> None:
     search_properties = search["function"]["parameters"]["properties"]
     assert set(search_properties) == {"query", "regex", "limit", "offset"}
     assert "case_sensitive" not in search_properties
+
+
+def test_file_scan_budgets_are_internal_not_agent_parameters() -> None:
+    for name in ("file_glob", "file_search"):
+        properties = _tool(name)["function"]["parameters"]["properties"]
+        assert "max_scanned_paths" not in properties
+        assert "max_elapsed_ms" not in properties
+        description = _tool(name)["function"]["description"]
+        assert "stop_reason" in description
+        assert "缩小" in description
 
 
 def test_exec_command_metadata_comes_from_tool_docstring() -> None:
@@ -69,25 +80,83 @@ def test_main_agent_registers_figure_kit() -> None:
     properties = figure["function"]["parameters"]["properties"]
     assert "markdown_ref" in description
     assert "figure block 只用于附录展示图本体" in description
-    assert "drawio_updated_at" in description
-    assert "render_image attachment" in description
-    assert "首次绘图先调用 rules" in description
-    assert "write/edit 前还必须 read" in description
-    assert "expected_drawio_updated_at" in properties
-    assert "rules_version" in properties
+    assert "版本信息由系统管理" in description
+    assert "新建用 write 且省略 ref" in description
+    assert "局部修正用 update" in description
+    assert "已通过 read 或本轮成功的 write/update 取得当前版本" in description
+    assert "最多尝试 8 次 write/update" in description
+    assert "预检和渲染失败也计数" in description
+    assert "工具不自动排版或套用模板" in description
+    assert "唯一结构" in description
+    assert '<mxfile host="app.diagrams.net">' in description
+    assert 'pageWidth="1500" pageHeight="900"' in description
+    assert "edgeRole=auxiliary" in description
+    assert "带箭头的 edge 即使标记 edgeRole=auxiliary 也必须连接节点" in description
+    assert "小于 4px 的显式线段" in description
+    assert "离开真实形状边界的锚点" in description
+    assert "4–12px 短线" in description
+    assert "一次返回全部错误" in description
+    assert "read 复用已有截图，不重新渲染" in description
+    assert "失败不覆盖最近成功版本" in description
+    assert "check 通过不代表附图完整覆盖最终正文的技术关系" in description
+    assert "不要把正文逐框翻译成通用流程图" in description
+    assert "多个机制可分区组合" in description
+    assert "多对多关系使用总线、汇聚点、中间层或集合" in description
+    assert "带标签外绕线靠近页面边界" in description
+    assert "安全的字体、线宽、灰度、padding 和正交走线默认值会自动补齐" in description
+    assert "reason" in properties
+    assert "expected_drawio_updated_at" not in properties
+    assert "rules_version" not in properties
     assert "edits" in properties
-    assert "draw.io XML" in description
+    assert "完整 XML" in description
     assert "不要用大外框包住整张主画面" not in description
     assert "虚线应少用" not in description
-    assert len(description) < 1000
-    assert "完整 draw.io XML" in properties["drawio_xml"]["description"]
-    assert "mxGraphModel" in properties["drawio_xml"]["description"]
-    assert "1500x900" in properties["drawio_xml"]["description"]
-    assert "最近一次 read 返回的 drawio_updated_at" in properties["expected_drawio_updated_at"]["description"]
-    assert properties["action"]["enum"] == ["rules", "create", "read", "write", "edit", "delete", "list", "check"]
-    assert "update" not in properties["action"]["enum"]
+    assert "fontFamily=Helvetica" in description
+    assert "strokeWidth=1.4" in description
+    assert "labelBackgroundColor=#ffffff" in description
+    assert "visualRole 像 CSS 语义类" in description
+    assert "panel、primary、normal、decision、state、data、note" in description
+    assert "显式 style 始终优先" in description
+    assert "visualRole=primary" in description
+    assert "1500x900 画布四周通常保留 60px 安全边距" in description
+    assert "标题 18px、分区标题 15–16px、节点 13–14px、边标签 11–12px" in description
+    assert "普通连线优先直线或不超过两个转折的正交线" in description
+    assert "不得穿越无关节点或文字" in description
+    assert len(description) < 4_500
+    assert "mxfile > 单个 diagram > 未压缩 mxGraphModel" in properties["drawio_xml"]["description"]
+    assert "安全的缺失属性会自动补齐" in properties["drawio_xml"]["description"]
+    reason_schema = properties["reason"]
+    reason_description = reason_schema["description"]
+    assert "不设最低字数" in reason_description
+    assert "图的目的、图型或分区、主阅读方向、关键关系和期望结果" in reason_description
+    assert "具体问题、影响、修改方式和预期效果" in reason_description
+    assert "不能只写‘优化布局’等泛化原因" in reason_description
+    assert all("minLength" not in variant for variant in reason_schema["anyOf"])
+    assert properties["action"]["enum"] == ["write", "update", "read", "list", "check", "delete"]
+    assert "create" not in properties["action"]["enum"]
+    assert "edit" not in properties["action"]["enum"]
+    assert "rules" not in properties["action"]["enum"]
     assert "恰好出现一次" in properties["edits"]["description"]
-    assert set(properties) == {"action", "ref", "title", "drawio_xml", "edits", "expected_drawio_updated_at", "rules_version"}
+    assert "read 读取 XML 和已有截图" in properties["action"]["description"]
+    assert "delete 删除未被使用的附图" in properties["action"]["description"]
+    assert "write/update 可选；write 新建时必填" in properties["title"]["description"]
+    assert set(properties) == {"action", "ref", "title", "reason", "drawio_xml", "edits"}
+
+
+def test_figure_tool_visual_example_is_valid_canonical_drawio_xml() -> None:
+    description = _tool("figure_kit")["function"]["description"]
+    start = description.index("<mxfile")
+    end = description.index("</mxfile>", start) + len("</mxfile>")
+
+    result = validate_drawio_xml(description[start:end])
+
+    assert result["status"] == "success"
+    normalized_xml = result["output"]["drawio_xml"]
+    assert 'fontFamily=Helvetica' in normalized_xml
+    assert 'strokeWidth=1.4' in normalized_xml
+    assert 'labelBackgroundColor=#ffffff' in normalized_xml
+    assert 'visualRole=primary' in normalized_xml
+    assert "drawio_font_size_excessive" not in {item["code"] for item in result["output"]["warnings"]}
 
 
 def test_tool_schemas_inline_local_definitions_for_responses_api() -> None:
@@ -113,46 +182,43 @@ def test_main_agent_prompt_requires_small_document_edits() -> None:
     block_schema = next(item for item in properties["block"]["anyOf"] if isinstance(item, dict) and item.get("type") == "object")
 
     assert "自动生成工具声明" not in prompt
-    assert "disclosure_edit 小步落盘" in prompt
+    assert "disclosure_edit 小步写入" in prompt
     assert "document_edit" not in MAIN_AGENT_TOOL_NAMES
     assert DOCUMENT_WRITE_TOOL_NAMES == ("disclosure_edit",)
     assert "operations" not in edit_description
     assert "单次新增/替换文本总量不得超过 1500 字。" in edit_description
-    assert "没有整章重写；重写章节必须拆成删除、插入 section、逐个 insert/replace block。" in edit_description
+    assert "工具没有整章重写；大范围修改需拆成 section 和 block 操作。" in edit_description
     assert "创新内核" not in edit_description
     assert "innovation_kernel_required" not in edit_description
     assert "innovation_kernel_read_required" not in edit_description
-    assert "只能写最终态正文" in edit_description
+    assert "只写最终态正文" in edit_description
     assert "section 负责结构，block 承接内容" in edit_description
     assert "不要跨 section 操作" in edit_description
-    assert "两个以上独立机制、流程阶段、模块、实施例、规则组或异常分支" in edit_description
     assert "insert_section 只创建子章节标题" in edit_description
     assert "$...$ 行内 LaTeX" in edit_description
-    assert "不要裸写 D_i、Active_i" in edit_description
-    assert "独立公式使用 type=formula 的块级 LaTeX" in edit_description
-    assert "[式(1)](formula:<formula_block_id>)" in edit_description
+    assert "独立公式使用 formula block" in edit_description
+    assert "[式(1)](formula:<block_id>)" in edit_description
     assert "$...$ 行内 LaTeX" in block_schema["properties"]["text"]["description"]
     assert "[式(1)](formula:blk_000001)" in block_schema["properties"]["type"]["description"]
     assert "自动编号为式(1)、式(2)" in block_schema["properties"]["latex"]["description"]
     assert "单元格支持 $...$ 行内 LaTeX" in block_schema["properties"]["rows"]["description"]
 
 
-def test_tool_descriptions_carry_lookup_workflow_guidance_without_kernel_tool() -> None:
+def test_main_prompt_carries_lookup_workflow_while_tools_keep_local_contracts() -> None:
     outline_description = _tool("disclosure_outline")["function"]["description"]
     search_description = _tool("disclosure_search")["function"]["description"]
     read_description = _tool("disclosure_read_section")["function"]["description"]
     prompt = build_main_agent_system_prompt()
     tool_names = {tool["function"]["name"] for tool in MAIN_AGENT_TOOLS}
 
-    assert "当需要了解交底书结构、寻找可编辑位置或判断章节层级时，先用本工具定位。" in outline_description
-    assert "当不知道概念、术语或目标文本在哪个章节时，先用本工具定位。" in search_description
-    assert "当写作、评价或修改依赖当前正文时，应先精读相关 section 或目标 block。" in read_description
+    assert "不要基于 preview 直接改写关键正文" in outline_description
+    assert "不要基于搜索摘要直接改写关键正文" in search_description
     assert "writing_guide_markdown" in read_description
     assert "空章节写作要领，不是交底书正文" in read_description
     assert "innovation_kernel_kit" not in tool_names
 
-    assert "先用 disclosure_outline 或 disclosure_search 定位" in prompt
-    assert "再用 disclosure_read_section 精读目标 section 或 block" in prompt
+    assert "disclosure_outline 或 disclosure_search 定位" in prompt
+    assert "disclosure_read_section 精读目标 section 或 block" in prompt
     assert "innovation_kernel_kit" not in prompt
 
 

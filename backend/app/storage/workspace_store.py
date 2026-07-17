@@ -624,6 +624,7 @@ class WorkspaceStore:
         validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
+        validation = _figure_validation_summary(validate_result)
         with self._figure_project_lock(project_id):
             figure_id = self.next_figure_id(project_id)
             index = int(figure_id.removeprefix("fig_"))
@@ -641,7 +642,7 @@ class WorkspaceStore:
                 )
                 if render_result["status"] == "failed":
                     shutil.rmtree(figure_dir, ignore_errors=True)
-                    return render_result
+                    return _attach_figure_validation(render_result, validation)
                 figure = build_figure_record(
                     figure_id=figure_id,
                     index=index,
@@ -658,6 +659,7 @@ class WorkspaceStore:
                 "status": "success",
                 "output": {
                     "figure": self._normalize_figure(project_id, figure),
+                    "validation": validation,
                 },
             }
 
@@ -675,6 +677,7 @@ class WorkspaceStore:
         validate_result = validate_drawio_xml(drawio_xml)
         if validate_result["status"] == "failed":
             return validate_result
+        validation = _figure_validation_summary(validate_result)
         with self._figure_project_lock(project_id):
             snapshot = self._figure_mutation_snapshot_locked(
                 project_id,
@@ -690,9 +693,10 @@ class WorkspaceStore:
                 current=snapshot["output"]["figure"],
                 title=title,
                 drawio_xml=validate_result["output"]["drawio_xml"],
+                validation=validation,
             )
 
-    def edit_figure(
+    def update_figure(
         self,
         project_id: str,
         figure_id: str,
@@ -702,9 +706,9 @@ class WorkspaceStore:
         expected_drawio_updated_at: str | None,
     ) -> dict[str, Any]:
         if not expected_drawio_updated_at:
-            return tool_failed("drawio_read_required", "编辑 draw.io 图前必须先读取当前附图，并在 edit 时带上 drawio_updated_at。")
+            return tool_failed("drawio_read_required", "更新 draw.io 图前必须先读取当前附图。")
         if not edits:
-            return tool_failed("figure_edits_required", "figure_kit.edit 至少需要一个替换项。")
+            return tool_failed("figure_updates_required", "figure_kit.update 至少需要一个替换项。")
 
         with self._figure_project_lock(project_id):
             snapshot = self._figure_mutation_snapshot_locked(
@@ -723,7 +727,8 @@ class WorkspaceStore:
                 fallback_name="diagram.drawio",
             )
             try:
-                next_xml = drawio_file.read_text(encoding="utf-8")
+                current_xml = drawio_file.read_text(encoding="utf-8")
+                next_xml = current_xml
             except OSError as exc:
                 return tool_failed("figure_storage_failed", f"附图源文件读取失败：{exc}")
 
@@ -732,28 +737,28 @@ class WorkspaceStore:
                 new_text = edit.get("new_text") if isinstance(edit, dict) else None
                 if not isinstance(old_text, str) or not old_text or not isinstance(new_text, str):
                     return tool_failed(
-                        "figure_edit_invalid",
+                        "figure_update_invalid",
                         f"第 {index + 1} 个替换项必须包含非空 old_text 和字符串 new_text。",
-                        edit_index=index,
+                        update_index=index,
                     )
                 if old_text == new_text:
                     return tool_failed(
-                        "figure_edit_no_change",
+                        "figure_update_no_change",
                         f"第 {index + 1} 个替换项的 old_text 与 new_text 相同。",
-                        edit_index=index,
+                        update_index=index,
                     )
                 match_count = next_xml.count(old_text)
                 if match_count == 0:
                     return tool_failed(
-                        "figure_edit_target_not_found",
+                        "figure_update_target_not_found",
                         f"第 {index + 1} 个替换项在当前 draw.io XML 中没有匹配。请重新 read 后提供准确片段。",
-                        edit_index=index,
+                        update_index=index,
                     )
                 if match_count > 1:
                     return tool_failed(
-                        "figure_edit_target_not_unique",
+                        "figure_update_target_not_unique",
                         f"第 {index + 1} 个替换项在当前 draw.io XML 中匹配 {match_count} 次；old_text 必须唯一。",
-                        edit_index=index,
+                        update_index=index,
                         match_count=match_count,
                     )
                 next_xml = next_xml.replace(old_text, new_text, 1)
@@ -761,6 +766,7 @@ class WorkspaceStore:
             validate_result = validate_drawio_xml(next_xml)
             if validate_result["status"] == "failed":
                 return validate_result
+            validation = _figure_validation_summary(validate_result)
             return self._commit_figure_revision_locked(
                 project_id,
                 figure_id,
@@ -768,6 +774,7 @@ class WorkspaceStore:
                 current=current,
                 title=title,
                 drawio_xml=validate_result["output"]["drawio_xml"],
+                validation=validation,
             )
 
     def _figure_mutation_snapshot_locked(
@@ -806,6 +813,7 @@ class WorkspaceStore:
         current: dict[str, Any],
         title: str | None,
         drawio_xml: str,
+        validation: dict[str, Any],
     ) -> dict[str, Any]:
         revision = self._new_figure_revision(project_id, figure_id)
         revision_dir = revision["drawio_file"].parent
@@ -817,7 +825,7 @@ class WorkspaceStore:
             )
             if render_result["status"] == "failed":
                 shutil.rmtree(revision_dir, ignore_errors=True)
-                return render_result
+                return _attach_figure_validation(render_result, validation)
             drawio_timestamp = new_drawio_updated_at()
             written = write_figure_record(
                 current,
@@ -837,6 +845,7 @@ class WorkspaceStore:
             "status": "success",
             "output": {
                 "figure": self._normalize_figure(project_id, written),
+                "validation": validation,
             },
         }
 
@@ -1078,9 +1087,15 @@ class WorkspaceStore:
         if dimensions != (FIGURE_WIDTH, FIGURE_HEIGHT):
             output_path.unlink(missing_ok=True)
             actual = f"{dimensions[0]}x{dimensions[1]}" if dimensions else "invalid PNG"
+            page_hint = ""
+            if dimensions and dimensions[0] == FIGURE_WIDTH and dimensions[1] < FIGURE_HEIGHT:
+                page_hint = (
+                    " 这通常表示节点、外绕连线或边标签跨入了右侧相邻页面，Draw.io 在保持宽度时缩小了整体高度；"
+                    "请将靠近页面边界的走线和标签向画布内移动。"
+                )
             return tool_failed(
                 "figure_render_failed",
-                f"draw.io 附图尺寸必须为 {FIGURE_WIDTH}x{FIGURE_HEIGHT}，实际为 {actual}。",
+                f"draw.io 附图尺寸必须为 {FIGURE_WIDTH}x{FIGURE_HEIGHT}，实际为 {actual}。{page_hint}",
             )
         return {
             "status": "success",
@@ -1167,6 +1182,23 @@ def _png_dimensions(path: Path) -> tuple[int, int] | None:
             return dimensions
     except (OSError, SyntaxError, UnidentifiedImageError):
         return None
+
+
+def _figure_validation_summary(validate_result: dict[str, Any]) -> dict[str, Any]:
+    output = validate_result.get("output") if isinstance(validate_result, dict) else None
+    if not isinstance(output, dict):
+        return {"normalized": False, "normalized_fields": [], "warnings": []}
+    return {
+        "normalized": bool(output.get("normalized")),
+        "normalized_fields": list(output.get("normalized_fields") or []),
+        "warnings": list(output.get("warnings") or []),
+    }
+
+
+def _attach_figure_validation(result: dict[str, Any], validation: dict[str, Any]) -> dict[str, Any]:
+    output = dict(result.get("output") or {})
+    output["validation"] = validation
+    return {**result, "output": output}
 
 
 def _make_writable_and_retry(function: Any, path: str, _exc_info: Any) -> None:

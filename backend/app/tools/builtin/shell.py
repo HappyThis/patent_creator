@@ -42,8 +42,6 @@ def exec_command(
         - stdout/stderr 不保证完整；当 *_truncated 为 true 时，需要用 file_read 读取 *_path。
         - 命令超时时返回 command_timeout。
 
-    Examples:
-        - 执行诊断命令: {"command":"git status --short","timeout":30}
     """
     if _env_flag_enabled(EXEC_COMMAND_DISABLED_ENV):
         return tool_failed("tool_disabled", "exec_command 在当前 Agent 运行中已禁用。")

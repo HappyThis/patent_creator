@@ -347,7 +347,7 @@ def test_representation_batch_uses_manifest_cases_and_forces_web_off(
     run_record = json.loads((Path(args.runs_dir) / args.run_id / "run.json").read_text(encoding="utf-8"))
     assert run_record["config"]["benchmark_id"] == "patent_representation_semantics"
     assert run_record["config"]["track_id"] == "patent_representation_semantics"
-    assert run_record["models"]["judge"]["model"] == "gpt-5.6-terra"
+    assert run_record["models"]["judge"]["model"] == "gpt-5.6-sol"
     assert run_record["models"]["judge"]["reasoning_effort"] == "xhigh"
     assert run_record["config"]["workers"] == 2
     assert run_record["config"]["repeats"] == 1

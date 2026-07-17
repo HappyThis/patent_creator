@@ -48,9 +48,6 @@ class FileGlobArguments(_StrictModel):
     limit: int = Field(default=100, ge=1, le=500, description="最多返回多少条结果，默认 100，最大 500。")
     offset: int = Field(default=0, ge=0, description="分页偏移，从 0 开始。")
 
-    max_scanned_paths: int = Field(default=_DEFAULT_GLOB_SCANNED_PATHS, ge=1, le=_MAX_GLOB_SCANNED_PATHS)
-    max_elapsed_ms: int = Field(default=int(_DEFAULT_GLOB_SCAN_SECONDS * 1000), ge=100, le=int(_MAX_GLOB_SCAN_SECONDS * 1000))
-
 
 class FileSearchArguments(_StrictModel):
     path: str = Field(default=".", description="搜索起点文件或目录；可使用相对当前项目工作区的路径，或用户提供的绝对源码路径。")
@@ -65,8 +62,6 @@ class FileSearchArguments(_StrictModel):
     context_lines: int = Field(default=0, ge=0, le=5, description="lines 模式下每条命中附带的上下文行数，最大 5。")
     limit: int = Field(default=100, ge=1, le=500, description="最多返回多少条结果，默认 100，最大 500。")
     offset: int = Field(default=0, ge=0, description="分页偏移，从 0 开始。")
-    max_scanned_paths: int = Field(default=_DEFAULT_GLOB_SCANNED_PATHS, ge=1, le=_MAX_GLOB_SCANNED_PATHS)
-    max_elapsed_ms: int = Field(default=int(_DEFAULT_GLOB_SCAN_SECONDS * 1000), ge=100, le=int(_MAX_GLOB_SCAN_SECONDS * 1000))
 
 
 class FileReadArguments(_StrictModel):
@@ -81,17 +76,14 @@ def file_glob(
     project_id: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """按 glob 模式查找项目工作区内的文件或目录。
+    """按 glob 模式查找项目工作区或允许的外部绝对路径中的文件和目录。
 
     Returns:
-        返回 matches、returned、offset、next_offset 和 truncated；项目内路径返回相对路径，外部绝对路径保持绝对路径。
+        返回 matches、returned、offset、next_offset、truncated 和 stop_reason；项目内路径为相对路径。仅因页大小截断时可用 next_offset 续页；扫描预算耗尽时应缩小 path 或 pattern。
 
     Rules:
         - 查找文件时优先使用本工具，不要用 exec_command 执行 find 或大量 ls。
-        - 结果分页返回；truncated 为 true 时用 next_offset 继续查询。
-
-    Examples:
-        - 查找 Python 文件：{"pattern":"**/*.py","limit":100}
+        - next_offset 非空时可以继续分页；为空且 truncated=true 时，应缩小搜索范围。
     """
     parsed = _validate_file_arguments(FileGlobArguments, arguments)
     if parsed["status"] == "failed":
@@ -109,14 +101,8 @@ def file_glob(
 
     limit = payload["limit"]
     offset = payload["offset"]
-    scan_budget = min(
-        payload["max_scanned_paths"],
-        _MAX_GLOB_SCANNED_PATHS,
-    )
-    time_budget_seconds = min(
-        payload["max_elapsed_ms"] / 1000,
-        _MAX_GLOB_SCAN_SECONDS,
-    )
+    scan_budget = min(_DEFAULT_GLOB_SCANNED_PATHS, _MAX_GLOB_SCANNED_PATHS)
+    time_budget_seconds = min(_DEFAULT_GLOB_SCAN_SECONDS, _MAX_GLOB_SCAN_SECONDS)
     started_at = time.monotonic()
     skipped_dirs: set[str] = set()
     page: list[str] = []
@@ -155,7 +141,7 @@ def file_glob(
             break
 
     truncated = stop_reason != "completed"
-    next_offset = offset + len(page) if truncated and page else None
+    next_offset = offset + len(page) if stop_reason == "limit_reached" and page else None
     return tool_success(
         {
             "matches": page,
@@ -186,15 +172,12 @@ def file_search(
     """搜索文本内容，可搜索项目工作区或用户提供的绝对源码路径。
 
     Returns:
-        根据 mode 返回匹配行、命中文件或计数；结果带 offset、next_offset 和 truncated，便于分页继续搜索。
+        根据 mode 返回匹配行、命中文件或计数，并返回 offset、next_offset、truncated 和 stop_reason。仅因页大小截断时可用 next_offset 续页；扫描预算耗尽时应缩小 path 或 include_glob。
 
     Rules:
         - 搜索代码或文本时优先使用本工具，不要用 exec_command 执行 grep、rg 或 Select-String。
-        - 结果分页返回；truncated 为 true 时用 next_offset 继续查询。
+        - next_offset 非空时可以继续分页；为空且 truncated=true 时，应缩小搜索范围。
         - 搜索会跳过常见依赖、构建和版本控制目录。
-
-    Examples:
-        - 搜索调用点：{"pattern":"exec_command","mode":"lines","limit":100}
     """
     parsed = _validate_file_arguments(FileSearchArguments, arguments)
     if parsed["status"] == "failed":
@@ -217,14 +200,8 @@ def file_search(
     context_lines = payload["context_lines"]
     limit = payload["limit"]
     offset = payload["offset"]
-    scan_budget = min(
-        payload["max_scanned_paths"],
-        _MAX_GLOB_SCANNED_PATHS,
-    )
-    time_budget_seconds = min(
-        payload["max_elapsed_ms"] / 1000,
-        _MAX_GLOB_SCAN_SECONDS,
-    )
+    scan_budget = min(_DEFAULT_GLOB_SCANNED_PATHS, _MAX_GLOB_SCANNED_PATHS)
+    time_budget_seconds = min(_DEFAULT_GLOB_SCAN_SECONDS, _MAX_GLOB_SCAN_SECONDS)
 
     try:
         matcher = _build_matcher(pattern, regex=regex, case_sensitive=case_sensitive)
@@ -280,7 +257,7 @@ def file_search(
 
     page = results[offset : offset + limit]
     truncated = stop_reason != "completed" or offset + len(page) < len(results)
-    next_offset = offset + len(page) if truncated and page else None
+    next_offset = offset + len(page) if stop_reason == "limit_reached" and page else None
     return tool_success(
         {
             "mode": mode,
@@ -317,8 +294,6 @@ def file_read(
         - 读取源码、文档或工具落盘输出时优先使用本工具，不要用 exec_command 执行 cat、head 或 tail。
         - 大文件必须分段读取；truncated 为 true 时用 next_start_line 继续读取。
 
-    Examples:
-        - 读取文件片段：{"path":"backend/app/tools/builtin/shell.py","start_line":1,"limit":120}
     """
     parsed = _validate_file_arguments(FileReadArguments, arguments)
     if parsed["status"] == "failed":

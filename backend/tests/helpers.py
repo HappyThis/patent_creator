@@ -8,6 +8,7 @@ from typing import Any, Callable
 from app.core.config import Settings
 from app.runtime import ExecutorEngine
 from app.runtime.context.compression import COMPRESSED_MEMORY_PREFIX
+from app.runtime.executor import ToolRuntimeContext
 from app.services import AppServices
 from app.storage.workspace_store import WorkspaceStore
 
@@ -120,7 +121,7 @@ class ScriptedLLMClient:
             payload = self._assessment_json[self._assessment_cursor]
             self._assessment_cursor += 1
             return payload
-        if "技术方案”章节的改进建议器" in system_prompt:
+        if "改进建议器" in system_prompt:
             self.advice_prompts.append(prompt_record)
             if self._advice_cursor >= len(self._advice_json):
                 return {"title": "低算力实时保护"}
@@ -147,7 +148,7 @@ class ScriptedLLMClient:
         trace_context: dict[str, Any] | None = None,
         on_retry_event: Any = None,
     ) -> str:
-        if "上下文滚动压缩" in user_prompt:
+        if "只执行压缩" in user_prompt:
             prompt_messages = list(messages or [])
             context = {
                 "system_prompt": system_prompt,
@@ -176,37 +177,23 @@ class ScriptedLLMClient:
                 "",
             )
             return (
-                "<analysis>\n"
-                f"需要把上一轮摘要和 {message_count} 条新增消息合并成专利写作状态。\n"
-                "</analysis>\n"
-                "<summary>\n"
-                "## 当前任务\n\n"
-                "- 继续沿用压缩前的用户要求。\n\n"
-                "## 用户最近意图\n\n"
-                f"- 最新用户输入：{last_user or '暂无'}。\n\n"
+                "## 当前任务与用户意图\n\n"
+                f"- 继续沿用压缩前的用户要求；最新用户输入：{last_user or '暂无'}。\n\n"
                 "## 执行进度\n\n"
                 f"- 已滚动压缩 {message_count} 条新增消息。\n\n"
-                "## 已完成事项\n\n"
-                "- 当前任务继续沿用压缩前的上下文。\n\n"
                 "## 关键事实与证据\n\n"
                 f"- 上一轮摘要长度：{len(previous)}。\n\n"
                 "## 待办与下一步\n\n"
                 "- 后续如信息不足，应重新读取必要上下文。\n"
                 "\n## 风险与约束\n\n"
-                "- 不做工具结果轻量化/投影。\n"
-                "</summary>"
+                "- 不做工具结果轻量化/投影。"
             )
         return (
-            "<analysis>暂无。</analysis>\n"
-            "<summary>\n"
-            "## 当前任务\n\n- 暂无。\n\n"
-            "## 用户最近意图\n\n- 暂无。\n\n"
+            "## 当前任务与用户意图\n\n- 暂无。\n\n"
             "## 执行进度\n\n- 暂无。\n\n"
-            "## 已完成事项\n\n- 暂无。\n\n"
             "## 关键事实与证据\n\n- 压缩后的历史。\n\n"
             "## 待办与下一步\n\n- 暂无。\n\n"
-            "## 风险与约束\n\n- 暂无。\n"
-            "</summary>"
+            "## 风险与约束\n\n- 暂无。"
         )
 
 
@@ -259,5 +246,15 @@ def run_builtin_tool(
     project_id: str,
     tool_name: str,
     arguments: dict[str, Any],
+    *,
+    runtime_context: ToolRuntimeContext | None = None,
 ) -> dict[str, Any]:
-    return asyncio.run(executor.execute_tool(project_id, tool_name, arguments))
+    return asyncio.run(executor.execute_tool(project_id, tool_name, arguments, runtime_context=runtime_context))
+
+
+def make_tool_runtime_context(round_id: str = "round_test") -> ToolRuntimeContext:
+    return ToolRuntimeContext(
+        round_id=round_id,
+        figure_review_states={},
+        figure_drawio_versions={},
+    )
